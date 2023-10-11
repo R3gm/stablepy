@@ -41,6 +41,7 @@ from .adetailer import ad_model_process
 import os
 from compel import Compel
 from compel import EmbeddingsProvider, ReturnedEmbeddingsType
+import ipywidgets as widgets, mediapy
 
 # =====================================
 # Utils preprocessor
