@@ -1,0 +1,16 @@
+omegaconf==2.3.0
+torch
+git+https://github.com/huggingface/diffusers.git
+git+https://github.com/damian0815/compel.git
+invisible_watermark
+transformers
+accelerate
+scipy
+safetensors==0.3.3
+xformers
+mediapy
+ipywidgets==7.7.1
+controlnet_aux==0.0.6
+mediapipe==0.10.1
+pytorch-lightning
+git+https://github.com/R3gm/asdff.git
