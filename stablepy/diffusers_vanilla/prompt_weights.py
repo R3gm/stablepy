@@ -1,4 +1,3 @@
-
 # =====================================
 # Prompt weights
 # =====================================
@@ -6,6 +5,7 @@ from compel import Compel
 from diffusers import StableDiffusionPipeline, DDIMScheduler
 import re
 from compel import EmbeddingsProvider, ReturnedEmbeddingsType
+import torch
 
 def concat_tensor(t):
     t_list = torch.split(t, 1, dim=0)
