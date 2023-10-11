@@ -39,7 +39,8 @@ from .lora_loader import lora_mix_load
 from .inpainting_canvas import draw, make_inpaint_condition
 from .adetailer import ad_model_process
 import os
-
+from compel import Compel
+from compel import EmbeddingsProvider, ReturnedEmbeddingsType
 
 # =====================================
 # Utils preprocessor
@@ -930,16 +931,16 @@ class Model_Diffusers:
     def __call__(
         self,
         prompt = None,
-        negative_prompt = None,
+        negative_prompt = "",
         # prompt_embeds = None,
         # negative_prompt_embeds = None,
-        img_height = None,
-        img_width = None,
-        num_images = None,
-        num_steps = None,
-        guidance_scale = None,
+        img_height = 512,
+        img_width = 512,
+        num_images = 1,
+        num_steps = 30,
+        guidance_scale = 7.5,
         clip_skip = True,
-        seed = None,
+        seed = -1,
         image = None, # path, np.array, or PIL image
         preprocessor_name = None,
         preprocess_resolution = None,
@@ -964,13 +965,13 @@ class Model_Diffusers:
         active_textual_inversion = False,
         textual_inversion = [], # List of tuples [(activation_token, path_embedding),...]
         convert_weights_prompt = False,
-        sampler = None,
+        sampler = "DPM++ 2M",
         xformers_memory_efficient_attention = True,
         gui_active = False,
         loop_generation = 1,
         controlnet_conditioning_scale = 1.0,
         control_guidance_start = 0.0,
-        control_guidance_end  = 0.0,
+        control_guidance_end  = 1.0,
         generator_in_cpu = False, # Initial noise not in CPU
         FreeU = False,
         adetailer_active = False,
