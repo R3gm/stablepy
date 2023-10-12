@@ -80,6 +80,7 @@ import numpy as np
 from shutil import copyfile
 import shutil
 import matplotlib.pyplot as plt
+from IPython.display import display
 
 # def draw(imgm, filename='drawing.png', w=400, h=200, line_width=1):
 #   display(HTML(canvas_html % (w, h, w,h, filename.split('.')[-1], imgm, line_width)))
