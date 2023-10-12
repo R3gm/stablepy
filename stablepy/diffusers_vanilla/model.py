@@ -42,6 +42,7 @@ import os
 from compel import Compel
 from compel import EmbeddingsProvider, ReturnedEmbeddingsType
 import ipywidgets as widgets, mediapy
+from IPython.display import display
 
 # =====================================
 # Utils preprocessor
