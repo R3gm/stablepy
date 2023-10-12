@@ -73,7 +73,6 @@ var data = new Promise(resolve=>{
 """
 
 import base64, os
-# from google.colab.output import eval_js
 from base64 import b64decode
 import matplotlib.pyplot as plt
 import numpy as np
@@ -82,45 +81,20 @@ import shutil
 import matplotlib.pyplot as plt
 from IPython.display import display
 
-# def draw(imgm, filename='drawing.png', w=400, h=200, line_width=1):
-#   display(HTML(canvas_html % (w, h, w,h, filename.split('.')[-1], imgm, line_width)))
-#   data = eval_js("data")
-#   binary = b64decode(data.split(',')[1])
-#   with open(filename, 'wb') as f:
-#     f.write(binary)
+class NotValid(Exception):
+    pass
 
-
-### second option ###
-import base64
-import os
-from IPython.display import display, HTML
-import ipywidgets as widgets
-from PIL import Image
-import io
 def draw(imgm, filename='drawing.png', w=400, h=200, line_width=1):
-    # Create an HTML canvas widget
-    canvas = widgets.HTML(f'<canvas width="{w}" height="{h}" id="canvas"></canvas>')
-    
-    # Create a button to trigger the save action
-    save_button = widgets.Button(description="Save Image")
-    output = widgets.Output()
-    
-    def on_button_click(b):
-        # Capture the canvas content as an image
-        with output:
-            canvas_data = canvas.get_state()['model_data']
-            binary_data = base64.b64decode(canvas_data.split(',')[1])
-            with open(filename, 'wb') as f:
-                f.write(binary_data)
-    
-    save_button.on_click(on_button_click)
-    
-    display(canvas)
-    display(save_button)
-    display(output)
-    display(HTML(canvas_html))
-
-
+  try:
+      from google.colab.output import eval_js
+      display(HTML(canvas_html % (w, h, w,h, filename.split('.')[-1], imgm, line_width)))
+      data = eval_js("data")
+      binary = b64decode(data.split(',')[1])
+      with open(filename, 'wb') as f:
+        f.write(binary)
+      print(f"created mask: {filename}")
+  except:
+    raise NotValid("This option is only compatible in Colab.")
 
 
 # the control image of init_image and mask_image
@@ -133,4 +107,3 @@ def make_inpaint_condition(image, image_mask):
     image = np.expand_dims(image, 0).transpose(0, 3, 1, 2)
     image = torch.from_numpy(image)
     return image
-
