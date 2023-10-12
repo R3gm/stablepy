@@ -4434,6 +4434,28 @@ files = [
 notebook = ">=4.4.1"
 
 [[package]]
+name = "xformers"
+version = "0.0.22"
+description = "XFormers: A collection of composable Transformer building blocks."
+optional = false
+python-versions = ">=3.7"
+files = [
+    {file = "xformers-0.0.22-cp310-cp310-manylinux2014_x86_64.whl", hash = "sha256:57ccc686287ea80a786a7fe7bf456c963820bccb33701b76f29ff69538e3ddbb"},
+    {file = "xformers-0.0.22-cp310-cp310-win_amd64.whl", hash = "sha256:1d3af4e8f6a36f2c7faa69caa02517e3ba9aff2360d6484bb54bd19d274f8110"},
+    {file = "xformers-0.0.22-cp311-cp311-manylinux2014_x86_64.whl", hash = "sha256:bab75fdcf36250fdcc6b5aeee455e857cd86030b3b476799b938d7018f746571"},
+    {file = "xformers-0.0.22-cp311-cp311-win_amd64.whl", hash = "sha256:d6f8cf506ea91b49a1f18e414e7945fe1cb312bcd8026cb8a72e494259f64a46"},
+    {file = "xformers-0.0.22-cp38-cp38-manylinux2014_x86_64.whl", hash = "sha256:3d36bd8d0115b2eda2b401212655d98ec82b76c05c05114bec15273e3d73f1a0"},
+    {file = "xformers-0.0.22-cp38-cp38-win_amd64.whl", hash = "sha256:7598c68bcde1e4ad0d9a2d0c17fd56556fbc4569ba64ca261d3eafbb7cd9c73f"},
+    {file = "xformers-0.0.22-cp39-cp39-manylinux2014_x86_64.whl", hash = "sha256:d7e2109260e02abf68a7918b88568eeb92d2627c5943e4aeaed463e404182b45"},
+    {file = "xformers-0.0.22-cp39-cp39-win_amd64.whl", hash = "sha256:9a5d97783e5b0e1e7a2ee0d88ff410bdcb4779a5ccd969f9960b41c86be72158"},
+    {file = "xformers-0.0.22.tar.gz", hash = "sha256:2644f264c9870c308a0ee2c59652384d7a527ea932eafe12054817acd2faeb72"},
+]
+
+[package.dependencies]
+numpy = "*"
+torch = "2.0.1"
+
+[[package]]
 name = "yarl"
 version = "1.9.2"
 description = "Yet another URL library"
@@ -4538,4 +4560,4 @@ testing = ["big-O", "jaraco.functools", "jaraco.itertools", "more-itertools", "p
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.10"
-content-hash = "a19032a103115dea87fc437ec5c9fbcf18bcb7e3fc6ebf15a8f38691b9ddd37a"
+content-hash = "ccde1be8e8248d8dc1fcd6849c0d4e1acbc84b123ab2b4aa08ea4b21aedcd832"

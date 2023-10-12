@@ -1,7 +1,7 @@
 [tool.poetry]
 name = "stablepy"
 version = "0.1.0"
-description = ""
+description = "A tool for easy use of stable diffusion"
 authors = ["Roger Condori <114810545+R3gm@users.noreply.github.com>"]
 readme = "README.md"
 
@@ -23,6 +23,7 @@ controlnet-aux = "0.0.6"
 mediapipe = "0.10.1"
 pytorch-lightning = "^2.0.9.post0"
 asdff = {git = "https://github.com/R3gm/asdff.git"}
+xformers = "0.0.22"
 
 
 [[tool.poetry.source]]
