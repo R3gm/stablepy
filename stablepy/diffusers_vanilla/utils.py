@@ -1,4 +1,3 @@
-
 # =====================================
 # IMAGE: METADATA AND SAVE
 # =====================================
@@ -19,14 +18,16 @@ def save_pil_image_with_metadata(image, folder_path, metadata_list):
     try:
         # metadata
         metadata = PngInfo()
-        metadata.add_text("Prompt", str(metadata_list[0]))
-        metadata.add_text("Negative prompt", str(metadata_list[1]))
-        metadata.add_text("Model", str(metadata_list[2]))
-        metadata.add_text("VAE", str(metadata_list[3]))
-        metadata.add_text("Steps", str(metadata_list[4]))
-        metadata.add_text("CFG", str(metadata_list[5]))
-        metadata.add_text("Scheduler", str(metadata_list[6]))
-        metadata.add_text("Seed", str(metadata_list[7]))
+        string_parameters = f"{str(metadata_list[0])}, Negative prompt: {str(metadata_list[1])} Steps: {str(metadata_list[4])}, Sampler: {str(metadata_list[6])}, CFG scale: {str(metadata_list[5])}, Seed: {str(metadata_list[7])}, Size: {str(metadata_list[8])}x{str(metadata_list[9])}, Model: {os.path.splitext(str(metadata_list[2]).split('/')[-1])[0]}, Clip skip: {2 if metadata_list[10] else 1},"
+        metadata.add_text("parameters", string_parameters)
+        # metadata.add_text("Prompt", str(metadata_list[0]))
+        # metadata.add_text("Negative prompt", str(metadata_list[1]))
+        # metadata.add_text("Model", str(metadata_list[2]))
+        # metadata.add_text("VAE", str(metadata_list[3]))
+        # metadata.add_text("Steps", str(metadata_list[4]))
+        # metadata.add_text("CFG", str(metadata_list[5]))
+        # metadata.add_text("Scheduler", str(metadata_list[6]))
+        # metadata.add_text("Seed", str(metadata_list[7]))
 
         image.save(image_path, pnginfo=metadata)
     except:

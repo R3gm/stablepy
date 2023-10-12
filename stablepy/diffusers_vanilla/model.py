@@ -43,6 +43,8 @@ from compel import Compel
 from compel import EmbeddingsProvider, ReturnedEmbeddingsType
 import ipywidgets as widgets, mediapy
 from IPython.display import display
+from PIL import Image
+from asdff.sd import AdCnPreloadPipe
 
 # =====================================
 # Utils preprocessor
@@ -302,6 +304,7 @@ class Model_Diffusers:
         self.lora_memory = [None, None, None, None, None] # no need __init__
         self.lora_scale_memory = [1.0, 1.0, 1.0, 1.0, 1.0]
         self.FreeU = False
+        self.embed_loaded = []
         return pipe
 
     def set_base_model(self, base_model_id: str) -> str:
@@ -1051,18 +1054,36 @@ class Model_Diffusers:
 
         # Prompt Optimizations for 1.5
         if os.path.exists(self.base_model_id):
-            if  active_textual_inversion:
+          
+            if active_textual_inversion and self.embed_loaded != textual_inversion:
               # Textual Inversion
               for name, directory_name in textual_inversion:
                   try:
+                      if directory_name.endswith('.pt'):
+                          model = torch.load(directory_name, map_location=self.device)
+                          model_tensors = model.get('string_to_param').get('*')
+                          s_model = {
+                                'emb_params': model_tensors
+                                  }
+                          # if directory_name.endswith('.pt'):
+                          #     new_file_path = directory_name[:-3] + '.safetensors'
+                          # else:
+                          #     new_file_path = directory_name + '.safetensors'
+                          #save_file(s_model, new_file_path)
+                          self.pipe.load_textual_inversion(s_model, token=name)
+                          
+                      else:
                           #self.pipe.text_encoder.resize_token_embeddings(len(self.pipe.tokenizer),pad_to_multiple_of=128)
                           #self.pipe.load_textual_inversion("./bad_prompt.pt", token="baddd")
                           self.pipe.load_textual_inversion(directory_name, token=name)
+                      if not gui_active:
+                          print(f"Applied : {name}")
+                      self.embed_loaded = textual_inversion
                   except ValueError:
-                      # previous loaded ti
+                      print(f"Previous loaded embed {name}")
                       pass
                   except:
-                      print(f"Can't apply {name}")
+                      print(f"Can't apply embed {name}")
 
             #Clip skip
             if clip_skip:
@@ -1104,17 +1125,7 @@ class Model_Diffusers:
         # Prompt Optimizations for SDXL
         else:
             if  active_textual_inversion:
-              # Textual Inversion
-              # for name, directory_name in textual_inversion:
-              #     try:
-              #             #self.pipe.text_encoder.resize_token_embeddings(len(self.pipe.tokenizer),pad_to_multiple_of=128)
-              #             #self.pipe.load_textual_inversion("./bad_prompt.pt", token="baddd")
-              #             self.pipe.load_textual_inversion(directory_name, token=name)
-              #     except ValueError:
-              #         # previous loaded ti
-              #         pass
-              #     except:
-              #         print(f"Can't apply {name}")
+              # implement
               print("SDXL textual inversion not available")
 
             #Clip skip
@@ -1448,7 +1459,10 @@ class Model_Diffusers:
                     num_steps,
                     guidance_scale,
                     sampler,
-                    calculate_seed
+                    calculate_seed,
+                    img_width,
+                    img_height,
+                    clip_skip,
             ]
 
             for image_ in images:

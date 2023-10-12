@@ -1,4 +1,3 @@
-
 # =====================================
 # Adetailer
 # =====================================
@@ -7,6 +6,8 @@ from diffusers import DPMSolverMultistepScheduler, DPMSolverSinglestepScheduler
 from asdff import yolo_detector
 from huggingface_hub import hf_hub_download
 from asdff.sd import AdCnPreloadPipe
+import torch
+import gc
 
 def ad_model_process(
     adetailer,
