@@ -998,7 +998,7 @@ class Model_Diffusers:
         self.image_previews = image_previews
 
         if self.pipe == None:
-            self.load_pipe(self.base_model_id, task_name = self.task_name, vae_model = self.vae_model, reload==True)
+            self.load_pipe(self.base_model_id, task_name = self.task_name, vae_model = self.vae_model, reload=True)
 
         self.pipe.set_progress_bar_config(leave=leave_progress_bar)
         self.pipe.set_progress_bar_config(disable=disable_progress_bar)
