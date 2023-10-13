@@ -76,7 +76,7 @@ from base64 import b64decode
 import numpy as np
 import matplotlib.pyplot as plt
 from IPython.display import display, HTML
-
+import torch
 
 class NotValid(Exception):
     pass
