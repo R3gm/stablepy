@@ -238,7 +238,7 @@ class Model_Diffusers:
                     print("Working with full precision")
                 pipe = StableDiffusionPipeline.from_single_file(
                   base_model_id,
-                  vae = None if vae_model == 'None' else AutoencoderKL.from_single_file(vae_model), # , torch_dtype=self.type_model_precision
+                  vae = None if vae_model == None else AutoencoderKL.from_single_file(vae_model), # , torch_dtype=self.type_model_precision
                   torch_dtype=self.type_model_precision,
                 )
                 pipe.safety_checker = None
@@ -261,7 +261,7 @@ class Model_Diffusers:
             if os.path.exists(base_model_id):
                 pipe = StableDiffusionControlNetInpaintPipeline.from_single_file(
                     base_model_id,
-                    vae = None if vae_model == 'None' else AutoencoderKL.from_single_file(vae_model),
+                    vae = None if vae_model == None else AutoencoderKL.from_single_file(vae_model),
                     safety_checker=None,
                     controlnet=controlnet,
                     torch_dtype=self.type_model_precision)
@@ -274,7 +274,7 @@ class Model_Diffusers:
             if os.path.exists(base_model_id):
                 pipe = StableDiffusionControlNetPipeline.from_single_file(
                     base_model_id,
-                    vae = None if vae_model == 'None' else AutoencoderKL.from_single_file(vae_model),
+                    vae = None if vae_model == None else AutoencoderKL.from_single_file(vae_model),
                     safety_checker=None,
                     controlnet=controlnet,
                     torch_dtype=self.type_model_precision)
@@ -282,7 +282,7 @@ class Model_Diffusers:
                 raise ZeroDivisionError("Not implemented")
             #     pipe = StableDiffusionControlNetPipeline.from_pretrained(
             #         base_model_id,
-            #         vae = AutoencoderKL.from_pretrained(base_model_id, subfolder='vae') if vae_model == 'None' else AutoencoderKL.from_single_file(vae_model),
+            #         vae = AutoencoderKL.from_pretrained(base_model_id, subfolder='vae') if vae_model == None else AutoencoderKL.from_single_file(vae_model),
             #         safety_checker=None,
             #         controlnet=controlnet,
             #         torch_dtype=torch.float16)
