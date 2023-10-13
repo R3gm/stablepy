@@ -1,9 +1,7 @@
-
-# Experimental upscaler
 # =====================================
 # BASE UPSCALER
 # =====================================
-devicee = 'cuda' # run in CPU is very slow
+device_upscaler = 'cuda' # run in CPU is very slow
 
 from abc import abstractmethod
 import PIL
@@ -30,7 +28,7 @@ class Upscaler:
         self.mod_pad_h = None
         self.tile_size = 100
         self.tile_pad = 10
-        self.device = devicee # ⭐
+        self.device = device_upscaler
         self.img = None
         self.output = None
         self.scale = 4.0
@@ -266,7 +264,7 @@ def infer_params(state_dict):
 
 
 class UpscalerESRGAN(Upscaler):
-    def __init__(self, dirname):
+    def __init__(self, dirname=""):
         self.name = "ESRGAN"
         self.model_url = "https://github.com/cszn/KAIR/releases/download/v1.0/ESRGAN.pth"
         self.model_name = "ESRGAN_4x"
@@ -293,7 +291,7 @@ class UpscalerESRGAN(Upscaler):
         except Exception as e:
             print(f"Unable to load ESRGAN model {selected_model}: {e}", file=sys.stderr)
             return img
-        model.to(devicee) # ⭐
+        model.to(device_upscaler)
         img = esrgan_upscale(model, img)
         return img
 
@@ -342,7 +340,7 @@ def upscale_without_tiling(model, img):
     img = img[:, :, ::-1]
     img = np.ascontiguousarray(np.transpose(img, (2, 0, 1))) / 255
     img = torch.from_numpy(img).float()
-    img = img.unsqueeze(0).to(devicee) # ⭐
+    img = img.unsqueeze(0).to(device_upscaler)
     with torch.no_grad():
         output = model(img)
     output = output.squeeze().float().cpu().clamp_(0, 1).numpy()
