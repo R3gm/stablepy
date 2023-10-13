@@ -1040,20 +1040,19 @@ class Model_Diffusers:
         self.lora_memory = [lora_A, lora_B, lora_C, lora_D, lora_E]
         self.lora_scale_memory = [lora_scale_A, lora_scale_B, lora_scale_C, lora_scale_D, lora_scale_E]
 
-        # FreeU for txt2img
-        if self.task_name == 'txt2img':
-            if FreeU:
-                print("FreeU active")
-                if os.path.exists(self.base_model_id):
-                    #sd
-                    self.pipe.enable_freeu(s1=0.9, s2=0.2, b1=1.2, b2=1.4)
-                else:
-                    #sdxl
-                    self.pipe.enable_freeu(s1=0.6, s2=0.4, b1=1.1, b2=1.2)
-                self.FreeU = True
-            elif self.FreeU:
-                self.pipe.disable_freeu()
-                self.FreeU = False
+        # FreeU
+        if FreeU:
+            print("FreeU active")
+            if os.path.exists(self.base_model_id):
+                #sd
+                self.pipe.enable_freeu(s1=0.9, s2=0.2, b1=1.2, b2=1.4)
+            else:
+                #sdxl
+                self.pipe.enable_freeu(s1=0.6, s2=0.4, b1=1.1, b2=1.2)
+            self.FreeU = True
+        elif self.FreeU:
+            self.pipe.disable_freeu()
+            self.FreeU = False
 
         # Prompt Optimizations for 1.5
         if os.path.exists(self.base_model_id):
