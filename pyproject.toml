@@ -2,7 +2,7 @@
 name = "stablepy"
 version = "0.1.0"
 description = "A tool for easy use of stable diffusion"
-authors = ["Roger Condori <114810545+R3gm@users.noreply.github.com>"]
+authors = ["Roger Condori(R3gm) <rocondoriflores@gmail.com>"]
 readme = "README.md"
 
 [tool.poetry.dependencies]

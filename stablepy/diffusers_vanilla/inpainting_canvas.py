@@ -71,27 +71,31 @@ var data = new Promise(resolve=>{
 </script>
 """
 
-import base64, os, shutil
+import base64, os
 from base64 import b64decode
 import numpy as np
-from shutil import copyfile
 import matplotlib.pyplot as plt
 from IPython.display import display, HTML
+
 
 class NotValid(Exception):
     pass
 
-def draw(imgm, filename='drawing.png', w=400, h=200, line_width=1):
-  try:
-      from google.colab.output import eval_js
-      display(HTML(canvas_html % (w, h, w,h, filename.split('.')[-1], imgm, line_width)))
-      data = eval_js("data")
-      binary = b64decode(data.split(',')[1])
-      with open(filename, 'wb') as f:
-        f.write(binary)
-      print(f"created mask: {filename}")
-  except:
-    raise NotValid("This option is only compatible in Colab.")
+
+def draw(imgm, filename="drawing.png", w=400, h=200, line_width=1):
+    try:
+        from google.colab.output import eval_js
+
+        display(
+            HTML(canvas_html % (w, h, w, h, filename.split(".")[-1], imgm, line_width))
+        )
+        data = eval_js("data")
+        binary = b64decode(data.split(",")[1])
+        with open(filename, "wb") as f:
+            f.write(binary)
+        print(f"created mask: {filename}")
+    except:
+        raise NotValid("This option is only compatible in Colab.")
 
 
 # the control image of init_image and mask_image
@@ -99,7 +103,9 @@ def make_inpaint_condition(image, image_mask):
     image = np.array(image.convert("RGB")).astype(np.float32) / 255.0
     image_mask = np.array(image_mask.convert("L")).astype(np.float32) / 255.0
 
-    assert image.shape[0:1] == image_mask.shape[0:1], "image and image_mask must have the same image size"
+    assert (
+        image.shape[0:1] == image_mask.shape[0:1]
+    ), "image and image_mask must have the same image size"
     image[image_mask > 0.5] = -1.0  # set as masked pixel
     image = np.expand_dims(image, 0).transpose(0, 3, 1, 2)
     image = torch.from_numpy(image)

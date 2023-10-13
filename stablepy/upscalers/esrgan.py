@@ -1,15 +1,14 @@
 # =====================================
 # BASE UPSCALER
 # =====================================
-device_upscaler = 'cuda' # run in CPU is very slow
+device_upscaler = "cuda"  # run in CPU is very slow
 
 from abc import abstractmethod
 import PIL
 from PIL import Image
 
-LANCZOS = (Image.Resampling.LANCZOS if hasattr(Image, 'Resampling') else Image.LANCZOS)
-NEAREST = (Image.Resampling.NEAREST if hasattr(Image, 'Resampling') else Image.NEAREST)
-
+LANCZOS = Image.Resampling.LANCZOS if hasattr(Image, "Resampling") else Image.LANCZOS
+NEAREST = Image.Resampling.NEAREST if hasattr(Image, "Resampling") else Image.NEAREST
 
 
 class Upscaler:
@@ -38,12 +37,15 @@ class Upscaler:
         self.model_download_path = None
 
         if self.model_path is None and self.name:
-            self.model_path = os.path.join('/content/Real-ESRGAN/weights/RealESRGAN_x2plus.pth', self.name)
+            self.model_path = os.path.join(
+                "/content/Real-ESRGAN/weights/RealESRGAN_x2plus.pth", self.name
+            )
         if self.model_path and create_dirs:
             os.makedirs(self.model_path, exist_ok=True)
 
         try:
             import cv2  # noqa: F401
+
             self.can_tile = True
         except Exception:
             pass
@@ -78,7 +80,12 @@ class Upscaler:
         pass
 
     def find_models(self, ext_filter=None) -> list:
-        return load_models(model_path=self.model_path, model_url=self.model_url, command_path=self.user_path, ext_filter=ext_filter)
+        return load_models(
+            model_path=self.model_path,
+            model_url=self.model_url,
+            command_path=self.user_path,
+            ext_filter=ext_filter,
+        )
 
     def update_status(self, prompt):
         print(f"\nextras: {prompt}", file=shared.progress_print_out)
@@ -91,7 +98,14 @@ class UpscalerData:
     scaler: Upscaler = None
     model: None
 
-    def __init__(self, name: str, path: str, upscaler: Upscaler = None, scale: int = 4, model=None):
+    def __init__(
+        self,
+        name: str,
+        path: str,
+        upscaler: Upscaler = None,
+        scale: int = 4,
+        model=None,
+    ):
         self.name = name
         self.data_path = path
         self.local_data_path = path
@@ -119,7 +133,10 @@ class UpscalerLanczos(Upscaler):
     scalers = []
 
     def do_upscale(self, img, selected_model=None):
-        return img.resize((int(img.width * self.scale), int(img.height * self.scale)), resample=LANCZOS)
+        return img.resize(
+            (int(img.width * self.scale), int(img.height * self.scale)),
+            resample=LANCZOS,
+        )
 
     def load_model(self, _):
         pass
@@ -134,7 +151,10 @@ class UpscalerNearest(Upscaler):
     scalers = []
 
     def do_upscale(self, img, selected_model=None):
-        return img.resize((int(img.width * self.scale), int(img.height * self.scale)), resample=NEAREST)
+        return img.resize(
+            (int(img.width * self.scale), int(img.height * self.scale)),
+            resample=NEAREST,
+        )
 
     def load_model(self, _):
         pass
@@ -143,7 +163,6 @@ class UpscalerNearest(Upscaler):
         super().__init__(False)
         self.name = "Nearest"
         self.scalers = [UpscalerData("Nearest", None, self)]
-
 
 
 # =====================================
@@ -155,35 +174,36 @@ import numpy as np
 import torch
 from PIL import Image
 
+
 def mod2normal(state_dict):
     # this code is copied from https://github.com/victorca25/iNNfer
-    if 'conv_first.weight' in state_dict:
+    if "conv_first.weight" in state_dict:
         crt_net = {}
         items = list(state_dict)
 
-        crt_net['model.0.weight'] = state_dict['conv_first.weight']
-        crt_net['model.0.bias'] = state_dict['conv_first.bias']
+        crt_net["model.0.weight"] = state_dict["conv_first.weight"]
+        crt_net["model.0.bias"] = state_dict["conv_first.bias"]
 
         for k in items.copy():
-            if 'RDB' in k:
-                ori_k = k.replace('RRDB_trunk.', 'model.1.sub.')
-                if '.weight' in k:
-                    ori_k = ori_k.replace('.weight', '.0.weight')
-                elif '.bias' in k:
-                    ori_k = ori_k.replace('.bias', '.0.bias')
+            if "RDB" in k:
+                ori_k = k.replace("RRDB_trunk.", "model.1.sub.")
+                if ".weight" in k:
+                    ori_k = ori_k.replace(".weight", ".0.weight")
+                elif ".bias" in k:
+                    ori_k = ori_k.replace(".bias", ".0.bias")
                 crt_net[ori_k] = state_dict[k]
                 items.remove(k)
 
-        crt_net['model.1.sub.23.weight'] = state_dict['trunk_conv.weight']
-        crt_net['model.1.sub.23.bias'] = state_dict['trunk_conv.bias']
-        crt_net['model.3.weight'] = state_dict['upconv1.weight']
-        crt_net['model.3.bias'] = state_dict['upconv1.bias']
-        crt_net['model.6.weight'] = state_dict['upconv2.weight']
-        crt_net['model.6.bias'] = state_dict['upconv2.bias']
-        crt_net['model.8.weight'] = state_dict['HRconv.weight']
-        crt_net['model.8.bias'] = state_dict['HRconv.bias']
-        crt_net['model.10.weight'] = state_dict['conv_last.weight']
-        crt_net['model.10.bias'] = state_dict['conv_last.bias']
+        crt_net["model.1.sub.23.weight"] = state_dict["trunk_conv.weight"]
+        crt_net["model.1.sub.23.bias"] = state_dict["trunk_conv.bias"]
+        crt_net["model.3.weight"] = state_dict["upconv1.weight"]
+        crt_net["model.3.bias"] = state_dict["upconv1.bias"]
+        crt_net["model.6.weight"] = state_dict["upconv2.weight"]
+        crt_net["model.6.bias"] = state_dict["upconv2.bias"]
+        crt_net["model.8.weight"] = state_dict["HRconv.weight"]
+        crt_net["model.8.bias"] = state_dict["HRconv.bias"]
+        crt_net["model.10.weight"] = state_dict["conv_last.weight"]
+        crt_net["model.10.bias"] = state_dict["conv_last.bias"]
         state_dict = crt_net
     return state_dict
 
@@ -195,37 +215,37 @@ def resrgan2normal(state_dict, nb=23):
         crt_net = {}
         items = list(state_dict)
 
-        crt_net['model.0.weight'] = state_dict['conv_first.weight']
-        crt_net['model.0.bias'] = state_dict['conv_first.bias']
+        crt_net["model.0.weight"] = state_dict["conv_first.weight"]
+        crt_net["model.0.bias"] = state_dict["conv_first.bias"]
 
         for k in items.copy():
             if "rdb" in k:
-                ori_k = k.replace('body.', 'model.1.sub.')
-                ori_k = ori_k.replace('.rdb', '.RDB')
-                if '.weight' in k:
-                    ori_k = ori_k.replace('.weight', '.0.weight')
-                elif '.bias' in k:
-                    ori_k = ori_k.replace('.bias', '.0.bias')
+                ori_k = k.replace("body.", "model.1.sub.")
+                ori_k = ori_k.replace(".rdb", ".RDB")
+                if ".weight" in k:
+                    ori_k = ori_k.replace(".weight", ".0.weight")
+                elif ".bias" in k:
+                    ori_k = ori_k.replace(".bias", ".0.bias")
                 crt_net[ori_k] = state_dict[k]
                 items.remove(k)
 
-        crt_net[f'model.1.sub.{nb}.weight'] = state_dict['conv_body.weight']
-        crt_net[f'model.1.sub.{nb}.bias'] = state_dict['conv_body.bias']
-        crt_net['model.3.weight'] = state_dict['conv_up1.weight']
-        crt_net['model.3.bias'] = state_dict['conv_up1.bias']
-        crt_net['model.6.weight'] = state_dict['conv_up2.weight']
-        crt_net['model.6.bias'] = state_dict['conv_up2.bias']
+        crt_net[f"model.1.sub.{nb}.weight"] = state_dict["conv_body.weight"]
+        crt_net[f"model.1.sub.{nb}.bias"] = state_dict["conv_body.bias"]
+        crt_net["model.3.weight"] = state_dict["conv_up1.weight"]
+        crt_net["model.3.bias"] = state_dict["conv_up1.bias"]
+        crt_net["model.6.weight"] = state_dict["conv_up2.weight"]
+        crt_net["model.6.bias"] = state_dict["conv_up2.bias"]
 
-        if 'conv_up3.weight' in state_dict:
+        if "conv_up3.weight" in state_dict:
             # modification supporting: https://github.com/ai-forever/Real-ESRGAN/blob/main/RealESRGAN/rrdbnet_arch.py
             re8x = 3
-            crt_net['model.9.weight'] = state_dict['conv_up3.weight']
-            crt_net['model.9.bias'] = state_dict['conv_up3.bias']
+            crt_net["model.9.weight"] = state_dict["conv_up3.weight"]
+            crt_net["model.9.bias"] = state_dict["conv_up3.bias"]
 
-        crt_net[f'model.{8+re8x}.weight'] = state_dict['conv_hr.weight']
-        crt_net[f'model.{8+re8x}.bias'] = state_dict['conv_hr.bias']
-        crt_net[f'model.{10+re8x}.weight'] = state_dict['conv_last.weight']
-        crt_net[f'model.{10+re8x}.bias'] = state_dict['conv_last.bias']
+        crt_net[f"model.{8+re8x}.weight"] = state_dict["conv_hr.weight"]
+        crt_net[f"model.{8+re8x}.bias"] = state_dict["conv_hr.bias"]
+        crt_net[f"model.{10+re8x}.weight"] = state_dict["conv_last.weight"]
+        crt_net[f"model.{10+re8x}.bias"] = state_dict["conv_last.bias"]
 
         state_dict = crt_net
     return state_dict
@@ -245,9 +265,7 @@ def infer_params(state_dict):
             nb = int(parts[3])
         elif n_parts == 3:
             part_num = int(parts[1])
-            if (part_num > scalemin
-                and parts[0] == "model"
-                and parts[2] == "weight"):
+            if part_num > scalemin and parts[0] == "model" and parts[2] == "weight":
                 scale2x += 1
             if part_num > n_uplayer:
                 n_uplayer = part_num
@@ -258,7 +276,7 @@ def infer_params(state_dict):
     nf = state_dict["model.0.weight"].shape[0]
     in_nc = state_dict["model.0.weight"].shape[1]
     out_nc = out_nc
-    scale = 2 ** scale2x
+    scale = 2**scale2x
 
     return in_nc, out_nc, nf, nb, plus, scale
 
@@ -266,7 +284,9 @@ def infer_params(state_dict):
 class UpscalerESRGAN(Upscaler):
     def __init__(self, dirname=""):
         self.name = "ESRGAN"
-        self.model_url = "https://github.com/cszn/KAIR/releases/download/v1.0/ESRGAN.pth"
+        self.model_url = (
+            "https://github.com/cszn/KAIR/releases/download/v1.0/ESRGAN.pth"
+        )
         self.model_name = "ESRGAN_4x"
         self.scalers = []
         self.user_path = dirname
@@ -306,19 +326,31 @@ class UpscalerESRGAN(Upscaler):
         else:
             filename = path
 
-        state_dict = torch.load(filename, map_location='cpu' if 'p⭐s' == 'mps' else None)
+        state_dict = torch.load(
+            filename, map_location="cpu" if "p⭐s" == "mps" else None
+        )
 
         if "params_ema" in state_dict:
             state_dict = state_dict["params_ema"]
         elif "params" in state_dict:
             state_dict = state_dict["params"]
             num_conv = 16 if "realesr-animevideov3" in filename else 32
-            model = SRVGGNetCompact(num_in_ch=3, num_out_ch=3, num_feat=64, num_conv=num_conv, upscale=4, act_type='prelu')
+            model = SRVGGNetCompact(
+                num_in_ch=3,
+                num_out_ch=3,
+                num_feat=64,
+                num_conv=num_conv,
+                upscale=4,
+                act_type="prelu",
+            )
             model.load_state_dict(state_dict)
             model.eval()
             return model
 
-        if "body.0.rdb1.conv1.weight" in state_dict and "conv_first.weight" in state_dict:
+        if (
+            "body.0.rdb1.conv1.weight" in state_dict
+            and "conv_first.weight" in state_dict
+        ):
             nb = 6 if "RealESRGAN_x4plus_anime_6B" in filename else 23
             state_dict = resrgan2normal(state_dict, nb)
         elif "conv_first.weight" in state_dict:
@@ -328,7 +360,9 @@ class UpscalerESRGAN(Upscaler):
 
         in_nc, out_nc, nf, nb, plus, mscale = infer_params(state_dict)
 
-        model = RRDBNet(in_nc=in_nc, out_nc=out_nc, nf=nf, nb=nb, upscale=mscale, plus=plus)
+        model = RRDBNet(
+            in_nc=in_nc, out_nc=out_nc, nf=nf, nb=nb, upscale=mscale, plus=plus
+        )
         model.load_state_dict(state_dict)
         model.eval()
 
@@ -344,17 +378,17 @@ def upscale_without_tiling(model, img):
     with torch.no_grad():
         output = model(img)
     output = output.squeeze().float().cpu().clamp_(0, 1).numpy()
-    output = 255. * np.moveaxis(output, 0, 2)
+    output = 255.0 * np.moveaxis(output, 0, 2)
     output = output.astype(np.uint8)
     output = output[:, :, ::-1]
-    return Image.fromarray(output, 'RGB')
+    return Image.fromarray(output, "RGB")
 
 
 def esrgan_upscale(model, img):
-    if 'active default' == 0: # tilling ⭐
+    if "active default" == 0:  # tilling ⭐
         return upscale_without_tiling(model, img)
-    ESRGAN_tile = 100 #⭐
-    ESRGAN_tile_overlap = 10 # ⭐
+    ESRGAN_tile = 100  # ⭐
+    ESRGAN_tile_overlap = 10  # ⭐
 
     grid = split_grid(img, ESRGAN_tile, ESRGAN_tile, ESRGAN_tile_overlap)
     newtiles = []
@@ -371,16 +405,27 @@ def esrgan_upscale(model, img):
             newrow.append([x * scale_factor, w * scale_factor, output])
         newtiles.append([y * scale_factor, h * scale_factor, newrow])
 
-    newgrid = Grid(newtiles, grid.tile_w * scale_factor, grid.tile_h * scale_factor, grid.image_w * scale_factor, grid.image_h * scale_factor, grid.overlap * scale_factor)
+    newgrid = Grid(
+        newtiles,
+        grid.tile_w * scale_factor,
+        grid.tile_h * scale_factor,
+        grid.image_w * scale_factor,
+        grid.image_h * scale_factor,
+        grid.overlap * scale_factor,
+    )
     output = combine_grid(newgrid)
     return output
+
+
 # =====================================
 # Upscaler Utils
 # =====================================
 
 from collections import namedtuple
 
-Grid = namedtuple("Grid", ["tiles", "tile_w", "tile_h", "image_w", "image_h", "overlap"])
+Grid = namedtuple(
+    "Grid", ["tiles", "tile_w", "tile_h", "image_w", "image_h", "overlap"]
+)
 
 
 def split_grid(image, tile_w=512, tile_h=512, overlap=64):
@@ -424,10 +469,18 @@ def combine_grid(grid):
     def make_mask_image(r):
         r = r * 255 / grid.overlap
         r = r.astype(np.uint8)
-        return Image.fromarray(r, 'L')
+        return Image.fromarray(r, "L")
 
-    mask_w = make_mask_image(np.arange(grid.overlap, dtype=np.float32).reshape((1, grid.overlap)).repeat(grid.tile_h, axis=0))
-    mask_h = make_mask_image(np.arange(grid.overlap, dtype=np.float32).reshape((grid.overlap, 1)).repeat(grid.image_w, axis=1))
+    mask_w = make_mask_image(
+        np.arange(grid.overlap, dtype=np.float32)
+        .reshape((1, grid.overlap))
+        .repeat(grid.tile_h, axis=0)
+    )
+    mask_h = make_mask_image(
+        np.arange(grid.overlap, dtype=np.float32)
+        .reshape((grid.overlap, 1))
+        .repeat(grid.image_w, axis=1)
+    )
 
     combined_image = Image.new("RGB", (grid.image_w, grid.image_h))
     for y, h, row in grid.tiles:
@@ -438,24 +491,32 @@ def combine_grid(grid):
                 continue
 
             combined_row.paste(tile.crop((0, 0, grid.overlap, h)), (x, 0), mask=mask_w)
-            combined_row.paste(tile.crop((grid.overlap, 0, w, h)), (x + grid.overlap, 0))
+            combined_row.paste(
+                tile.crop((grid.overlap, 0, w, h)), (x + grid.overlap, 0)
+            )
 
         if y == 0:
             combined_image.paste(combined_row, (0, 0))
             continue
 
-        combined_image.paste(combined_row.crop((0, 0, combined_row.width, grid.overlap)), (0, y), mask=mask_h)
-        combined_image.paste(combined_row.crop((0, grid.overlap, combined_row.width, h)), (0, y + grid.overlap))
+        combined_image.paste(
+            combined_row.crop((0, 0, combined_row.width, grid.overlap)),
+            (0, y),
+            mask=mask_h,
+        )
+        combined_image.paste(
+            combined_row.crop((0, grid.overlap, combined_row.width, h)),
+            (0, y + grid.overlap),
+        )
 
     return combined_image
+
+
 # =====================================
 # Upscaler loaders
 # =====================================
 import os
-import shutil
-import importlib
 from urllib.parse import urlparse
-
 
 
 def load_file_from_url(
@@ -477,20 +538,29 @@ def load_file_from_url(
     if not os.path.exists(cached_file):
         print(f'Downloading: "{url}" to {cached_file}\n')
         from torch.hub import download_url_to_file
+
         download_url_to_file(url, cached_file, progress=progress)
     return cached_file
 
 
-def load_models(model_path: str, model_url: str = None, command_path: str = None, ext_filter=None, download_name=None, ext_blacklist=None) -> list:
-    """
-    """
+def load_models(
+    model_path: str,
+    model_url: str = None,
+    command_path: str = None,
+    ext_filter=None,
+    download_name=None,
+    ext_blacklist=None,
+) -> list:
+    """ """
     output = []
 
     try:
         places = []
 
         if command_path is not None and command_path != model_path:
-            pretrained_path = os.path.join(command_path, 'experiments/pretrained_models')
+            pretrained_path = os.path.join(
+                command_path, "experiments/pretrained_models"
+            )
             if os.path.exists(pretrained_path):
                 print(f"Appending path: {pretrained_path}")
                 places.append(pretrained_path)
@@ -504,14 +574,20 @@ def load_models(model_path: str, model_url: str = None, command_path: str = None
                 if os.path.islink(full_path) and not os.path.exists(full_path):
                     print(f"Skipping broken symlink: {full_path}")
                     continue
-                if ext_blacklist is not None and any(full_path.endswith(x) for x in ext_blacklist):
+                if ext_blacklist is not None and any(
+                    full_path.endswith(x) for x in ext_blacklist
+                ):
                     continue
                 if full_path not in output:
                     output.append(full_path)
 
         if model_url is not None and len(output) == 0:
             if download_name is not None:
-                output.append(load_file_from_url(model_url, model_dir=places[0], file_name=download_name))
+                output.append(
+                    load_file_from_url(
+                        model_url, model_dir=places[0], file_name=download_name
+                    )
+                )
             else:
                 output.append(model_url)
 
@@ -528,6 +604,7 @@ def friendly_name(file: str):
     file = os.path.basename(file)
     model_name, extension = os.path.splitext(file)
     return model_name
+
 
 # =====================================
 # UpscalerESRGAN ARCH
@@ -546,10 +623,26 @@ import torch.nn.functional as F
 # RRDBNet Generator
 ####################
 
+
 class RRDBNet(nn.Module):
-    def __init__(self, in_nc, out_nc, nf, nb, nr=3, gc=32, upscale=4, norm_type=None,
-            act_type='leakyrelu', mode='CNA', upsample_mode='upconv', convtype='Conv2D',
-            finalact=None, gaussian_noise=False, plus=False):
+    def __init__(
+        self,
+        in_nc,
+        out_nc,
+        nf,
+        nb,
+        nr=3,
+        gc=32,
+        upscale=4,
+        norm_type=None,
+        act_type="leakyrelu",
+        mode="CNA",
+        upsample_mode="upconv",
+        convtype="Conv2D",
+        finalact=None,
+        gaussian_noise=False,
+        plus=False,
+    ):
         super(RRDBNet, self).__init__()
         n_upscale = int(math.log(upscale, 2))
         if upscale == 3:
@@ -561,29 +654,67 @@ class RRDBNet(nn.Module):
         elif in_nc != 4 and in_nc % 4 == 0:
             self.resrgan_scale = 2
 
-        fea_conv = conv_block(in_nc, nf, kernel_size=3, norm_type=None, act_type=None, convtype=convtype)
-        rb_blocks = [RRDB(nf, nr, kernel_size=3, gc=32, stride=1, bias=1, pad_type='zero',
-            norm_type=norm_type, act_type=act_type, mode='CNA', convtype=convtype,
-            gaussian_noise=gaussian_noise, plus=plus) for _ in range(nb)]
-        LR_conv = conv_block(nf, nf, kernel_size=3, norm_type=norm_type, act_type=None, mode=mode, convtype=convtype)
+        fea_conv = conv_block(
+            in_nc, nf, kernel_size=3, norm_type=None, act_type=None, convtype=convtype
+        )
+        rb_blocks = [
+            RRDB(
+                nf,
+                nr,
+                kernel_size=3,
+                gc=32,
+                stride=1,
+                bias=1,
+                pad_type="zero",
+                norm_type=norm_type,
+                act_type=act_type,
+                mode="CNA",
+                convtype=convtype,
+                gaussian_noise=gaussian_noise,
+                plus=plus,
+            )
+            for _ in range(nb)
+        ]
+        LR_conv = conv_block(
+            nf,
+            nf,
+            kernel_size=3,
+            norm_type=norm_type,
+            act_type=None,
+            mode=mode,
+            convtype=convtype,
+        )
 
-        if upsample_mode == 'upconv':
+        if upsample_mode == "upconv":
             upsample_block = upconv_block
-        elif upsample_mode == 'pixelshuffle':
+        elif upsample_mode == "pixelshuffle":
             upsample_block = pixelshuffle_block
         else:
-            raise NotImplementedError(f'upsample mode [{upsample_mode}] is not found')
+            raise NotImplementedError(f"upsample mode [{upsample_mode}] is not found")
         if upscale == 3:
             upsampler = upsample_block(nf, nf, 3, act_type=act_type, convtype=convtype)
         else:
-            upsampler = [upsample_block(nf, nf, act_type=act_type, convtype=convtype) for _ in range(n_upscale)]
-        HR_conv0 = conv_block(nf, nf, kernel_size=3, norm_type=None, act_type=act_type, convtype=convtype)
-        HR_conv1 = conv_block(nf, out_nc, kernel_size=3, norm_type=None, act_type=None, convtype=convtype)
+            upsampler = [
+                upsample_block(nf, nf, act_type=act_type, convtype=convtype)
+                for _ in range(n_upscale)
+            ]
+        HR_conv0 = conv_block(
+            nf, nf, kernel_size=3, norm_type=None, act_type=act_type, convtype=convtype
+        )
+        HR_conv1 = conv_block(
+            nf, out_nc, kernel_size=3, norm_type=None, act_type=None, convtype=convtype
+        )
 
         outact = act(finalact) if finalact else None
 
-        self.model = sequential(fea_conv, ShortcutBlock(sequential(*rb_blocks, LR_conv)),
-            *upsampler, HR_conv0, HR_conv1, outact)
+        self.model = sequential(
+            fea_conv,
+            ShortcutBlock(sequential(*rb_blocks, LR_conv)),
+            *upsampler,
+            HR_conv0,
+            HR_conv1,
+            outact,
+        )
 
     def forward(self, x, outm=None):
         if self.resrgan_scale == 1:
@@ -602,29 +733,94 @@ class RRDB(nn.Module):
     (ESRGAN: Enhanced Super-Resolution Generative Adversarial Networks)
     """
 
-    def __init__(self, nf, nr=3, kernel_size=3, gc=32, stride=1, bias=1, pad_type='zero',
-            norm_type=None, act_type='leakyrelu', mode='CNA', convtype='Conv2D',
-            spectral_norm=False, gaussian_noise=False, plus=False):
+    def __init__(
+        self,
+        nf,
+        nr=3,
+        kernel_size=3,
+        gc=32,
+        stride=1,
+        bias=1,
+        pad_type="zero",
+        norm_type=None,
+        act_type="leakyrelu",
+        mode="CNA",
+        convtype="Conv2D",
+        spectral_norm=False,
+        gaussian_noise=False,
+        plus=False,
+    ):
         super(RRDB, self).__init__()
         # This is for backwards compatibility with existing models
         if nr == 3:
-            self.RDB1 = ResidualDenseBlock_5C(nf, kernel_size, gc, stride, bias, pad_type,
-                    norm_type, act_type, mode, convtype, spectral_norm=spectral_norm,
-                    gaussian_noise=gaussian_noise, plus=plus)
-            self.RDB2 = ResidualDenseBlock_5C(nf, kernel_size, gc, stride, bias, pad_type,
-                    norm_type, act_type, mode, convtype, spectral_norm=spectral_norm,
-                    gaussian_noise=gaussian_noise, plus=plus)
-            self.RDB3 = ResidualDenseBlock_5C(nf, kernel_size, gc, stride, bias, pad_type,
-                    norm_type, act_type, mode, convtype, spectral_norm=spectral_norm,
-                    gaussian_noise=gaussian_noise, plus=plus)
+            self.RDB1 = ResidualDenseBlock_5C(
+                nf,
+                kernel_size,
+                gc,
+                stride,
+                bias,
+                pad_type,
+                norm_type,
+                act_type,
+                mode,
+                convtype,
+                spectral_norm=spectral_norm,
+                gaussian_noise=gaussian_noise,
+                plus=plus,
+            )
+            self.RDB2 = ResidualDenseBlock_5C(
+                nf,
+                kernel_size,
+                gc,
+                stride,
+                bias,
+                pad_type,
+                norm_type,
+                act_type,
+                mode,
+                convtype,
+                spectral_norm=spectral_norm,
+                gaussian_noise=gaussian_noise,
+                plus=plus,
+            )
+            self.RDB3 = ResidualDenseBlock_5C(
+                nf,
+                kernel_size,
+                gc,
+                stride,
+                bias,
+                pad_type,
+                norm_type,
+                act_type,
+                mode,
+                convtype,
+                spectral_norm=spectral_norm,
+                gaussian_noise=gaussian_noise,
+                plus=plus,
+            )
         else:
-            RDB_list = [ResidualDenseBlock_5C(nf, kernel_size, gc, stride, bias, pad_type,
-                                              norm_type, act_type, mode, convtype, spectral_norm=spectral_norm,
-                                              gaussian_noise=gaussian_noise, plus=plus) for _ in range(nr)]
+            RDB_list = [
+                ResidualDenseBlock_5C(
+                    nf,
+                    kernel_size,
+                    gc,
+                    stride,
+                    bias,
+                    pad_type,
+                    norm_type,
+                    act_type,
+                    mode,
+                    convtype,
+                    spectral_norm=spectral_norm,
+                    gaussian_noise=gaussian_noise,
+                    plus=plus,
+                )
+                for _ in range(nr)
+            ]
             self.RDBs = nn.Sequential(*RDB_list)
 
     def forward(self, x):
-        if hasattr(self, 'RDB1'):
+        if hasattr(self, "RDB1"):
             out = self.RDB1(x)
             out = self.RDB2(out)
             out = self.RDB3(out)
@@ -644,33 +840,96 @@ class ResidualDenseBlock_5C(nn.Module):
             {Rakotonirina} and A. {Rasoanaivo}
     """
 
-    def __init__(self, nf=64, kernel_size=3, gc=32, stride=1, bias=1, pad_type='zero',
-            norm_type=None, act_type='leakyrelu', mode='CNA', convtype='Conv2D',
-            spectral_norm=False, gaussian_noise=False, plus=False):
+    def __init__(
+        self,
+        nf=64,
+        kernel_size=3,
+        gc=32,
+        stride=1,
+        bias=1,
+        pad_type="zero",
+        norm_type=None,
+        act_type="leakyrelu",
+        mode="CNA",
+        convtype="Conv2D",
+        spectral_norm=False,
+        gaussian_noise=False,
+        plus=False,
+    ):
         super(ResidualDenseBlock_5C, self).__init__()
 
         self.noise = GaussianNoise() if gaussian_noise else None
         self.conv1x1 = conv1x1(nf, gc) if plus else None
 
-        self.conv1 = conv_block(nf, gc, kernel_size, stride, bias=bias, pad_type=pad_type,
-            norm_type=norm_type, act_type=act_type, mode=mode, convtype=convtype,
-            spectral_norm=spectral_norm)
-        self.conv2 = conv_block(nf+gc, gc, kernel_size, stride, bias=bias, pad_type=pad_type,
-            norm_type=norm_type, act_type=act_type, mode=mode, convtype=convtype,
-            spectral_norm=spectral_norm)
-        self.conv3 = conv_block(nf+2*gc, gc, kernel_size, stride, bias=bias, pad_type=pad_type,
-            norm_type=norm_type, act_type=act_type, mode=mode, convtype=convtype,
-            spectral_norm=spectral_norm)
-        self.conv4 = conv_block(nf+3*gc, gc, kernel_size, stride, bias=bias, pad_type=pad_type,
-            norm_type=norm_type, act_type=act_type, mode=mode, convtype=convtype,
-            spectral_norm=spectral_norm)
-        if mode == 'CNA':
+        self.conv1 = conv_block(
+            nf,
+            gc,
+            kernel_size,
+            stride,
+            bias=bias,
+            pad_type=pad_type,
+            norm_type=norm_type,
+            act_type=act_type,
+            mode=mode,
+            convtype=convtype,
+            spectral_norm=spectral_norm,
+        )
+        self.conv2 = conv_block(
+            nf + gc,
+            gc,
+            kernel_size,
+            stride,
+            bias=bias,
+            pad_type=pad_type,
+            norm_type=norm_type,
+            act_type=act_type,
+            mode=mode,
+            convtype=convtype,
+            spectral_norm=spectral_norm,
+        )
+        self.conv3 = conv_block(
+            nf + 2 * gc,
+            gc,
+            kernel_size,
+            stride,
+            bias=bias,
+            pad_type=pad_type,
+            norm_type=norm_type,
+            act_type=act_type,
+            mode=mode,
+            convtype=convtype,
+            spectral_norm=spectral_norm,
+        )
+        self.conv4 = conv_block(
+            nf + 3 * gc,
+            gc,
+            kernel_size,
+            stride,
+            bias=bias,
+            pad_type=pad_type,
+            norm_type=norm_type,
+            act_type=act_type,
+            mode=mode,
+            convtype=convtype,
+            spectral_norm=spectral_norm,
+        )
+        if mode == "CNA":
             last_act = None
         else:
             last_act = act_type
-        self.conv5 = conv_block(nf+4*gc, nf, 3, stride, bias=bias, pad_type=pad_type,
-            norm_type=norm_type, act_type=last_act, mode=mode, convtype=convtype,
-            spectral_norm=spectral_norm)
+        self.conv5 = conv_block(
+            nf + 4 * gc,
+            nf,
+            3,
+            stride,
+            bias=bias,
+            pad_type=pad_type,
+            norm_type=norm_type,
+            act_type=last_act,
+            mode=mode,
+            convtype=convtype,
+            spectral_norm=spectral_norm,
+        )
 
     def forward(self, x):
         x1 = self.conv1(x)
@@ -692,6 +951,7 @@ class ResidualDenseBlock_5C(nn.Module):
 # ESRGANplus
 ####################
 
+
 class GaussianNoise(nn.Module):
     def __init__(self, sigma=0.1, is_relative_detach=False):
         super().__init__()
@@ -702,10 +962,13 @@ class GaussianNoise(nn.Module):
     def forward(self, x):
         if self.training and self.sigma != 0:
             self.noise = self.noise.to(x.device)
-            scale = self.sigma * x.detach() if self.is_relative_detach else self.sigma * x
+            scale = (
+                self.sigma * x.detach() if self.is_relative_detach else self.sigma * x
+            )
             sampled_noise = self.noise.repeat(*x.size()).normal_() * scale
             x = x + sampled_noise
         return x
+
 
 def conv1x1(in_planes, out_planes, stride=1):
     return nn.Conv2d(in_planes, out_planes, kernel_size=1, stride=stride, bias=False)
@@ -715,12 +978,21 @@ def conv1x1(in_planes, out_planes, stride=1):
 # SRVGGNetCompact
 ####################
 
+
 class SRVGGNetCompact(nn.Module):
     """A compact VGG-style network structure for super-resolution.
     This class is copied from https://github.com/xinntao/Real-ESRGAN
     """
 
-    def __init__(self, num_in_ch=3, num_out_ch=3, num_feat=64, num_conv=16, upscale=4, act_type='prelu'):
+    def __init__(
+        self,
+        num_in_ch=3,
+        num_out_ch=3,
+        num_feat=64,
+        num_conv=16,
+        upscale=4,
+        act_type="prelu",
+    ):
         super(SRVGGNetCompact, self).__init__()
         self.num_in_ch = num_in_ch
         self.num_out_ch = num_out_ch
@@ -733,11 +1005,11 @@ class SRVGGNetCompact(nn.Module):
         # the first conv
         self.body.append(nn.Conv2d(num_in_ch, num_feat, 3, 1, 1))
         # the first activation
-        if act_type == 'relu':
+        if act_type == "relu":
             activation = nn.ReLU(inplace=True)
-        elif act_type == 'prelu':
+        elif act_type == "prelu":
             activation = nn.PReLU(num_parameters=num_feat)
-        elif act_type == 'leakyrelu':
+        elif act_type == "leakyrelu":
             activation = nn.LeakyReLU(negative_slope=0.1, inplace=True)
         self.body.append(activation)
 
@@ -745,11 +1017,11 @@ class SRVGGNetCompact(nn.Module):
         for _ in range(num_conv):
             self.body.append(nn.Conv2d(num_feat, num_feat, 3, 1, 1))
             # activation
-            if act_type == 'relu':
+            if act_type == "relu":
                 activation = nn.ReLU(inplace=True)
-            elif act_type == 'prelu':
+            elif act_type == "prelu":
                 activation = nn.PReLU(num_parameters=num_feat)
-            elif act_type == 'leakyrelu':
+            elif act_type == "leakyrelu":
                 activation = nn.LeakyReLU(negative_slope=0.1, inplace=True)
             self.body.append(activation)
 
@@ -765,7 +1037,7 @@ class SRVGGNetCompact(nn.Module):
 
         out = self.upsampler(out)
         # add the nearest upsampled image, so that the network learns the residual
-        base = F.interpolate(x, scale_factor=self.upscale, mode='nearest')
+        base = F.interpolate(x, scale_factor=self.upscale, mode="nearest")
         out += base
         return out
 
@@ -774,13 +1046,16 @@ class SRVGGNetCompact(nn.Module):
 # Upsampler
 ####################
 
+
 class Upsample(nn.Module):
     r"""Upsamples a given multi-channel 1D (temporal), 2D (spatial) or 3D (volumetric) data.
     The input data is assumed to be of the form
     `minibatch x channels x [optional depth] x [optional height] x width`.
     """
 
-    def __init__(self, size=None, scale_factor=None, mode="nearest", align_corners=None):
+    def __init__(
+        self, size=None, scale_factor=None, mode="nearest", align_corners=None
+    ):
         super(Upsample, self).__init__()
         if isinstance(scale_factor, tuple):
             self.scale_factor = tuple(float(factor) for factor in scale_factor)
@@ -791,19 +1066,25 @@ class Upsample(nn.Module):
         self.align_corners = align_corners
 
     def forward(self, x):
-        return nn.functional.interpolate(x, size=self.size, scale_factor=self.scale_factor, mode=self.mode, align_corners=self.align_corners)
+        return nn.functional.interpolate(
+            x,
+            size=self.size,
+            scale_factor=self.scale_factor,
+            mode=self.mode,
+            align_corners=self.align_corners,
+        )
 
     def extra_repr(self):
         if self.scale_factor is not None:
-            info = f'scale_factor={self.scale_factor}'
+            info = f"scale_factor={self.scale_factor}"
         else:
-            info = f'size={self.size}'
-        info += f', mode={self.mode}'
+            info = f"size={self.size}"
+        info += f", mode={self.mode}"
         return info
 
 
 def pixel_unshuffle(x, scale):
-    """ Pixel unshuffle.
+    """Pixel unshuffle.
     Args:
         x (Tensor): Input feature with shape (b, c, hh, hw).
         scale (int): Downsample ratio.
@@ -819,15 +1100,34 @@ def pixel_unshuffle(x, scale):
     return x_view.permute(0, 1, 3, 5, 2, 4).reshape(b, out_channel, h, w)
 
 
-def pixelshuffle_block(in_nc, out_nc, upscale_factor=2, kernel_size=3, stride=1, bias=True,
-                        pad_type='zero', norm_type=None, act_type='relu', convtype='Conv2D'):
+def pixelshuffle_block(
+    in_nc,
+    out_nc,
+    upscale_factor=2,
+    kernel_size=3,
+    stride=1,
+    bias=True,
+    pad_type="zero",
+    norm_type=None,
+    act_type="relu",
+    convtype="Conv2D",
+):
     """
     Pixel shuffle layer
     (Real-Time Single Image and Video Super-Resolution Using an Efficient Sub-Pixel Convolutional
     Neural Network, CVPR17)
     """
-    conv = conv_block(in_nc, out_nc * (upscale_factor ** 2), kernel_size, stride, bias=bias,
-                        pad_type=pad_type, norm_type=None, act_type=None, convtype=convtype)
+    conv = conv_block(
+        in_nc,
+        out_nc * (upscale_factor**2),
+        kernel_size,
+        stride,
+        bias=bias,
+        pad_type=pad_type,
+        norm_type=None,
+        act_type=None,
+        convtype=convtype,
+    )
     pixel_shuffle = nn.PixelShuffle(upscale_factor)
 
     n = norm(norm_type, out_nc) if norm_type else None
@@ -835,20 +1135,36 @@ def pixelshuffle_block(in_nc, out_nc, upscale_factor=2, kernel_size=3, stride=1,
     return sequential(conv, pixel_shuffle, n, a)
 
 
-def upconv_block(in_nc, out_nc, upscale_factor=2, kernel_size=3, stride=1, bias=True,
-                pad_type='zero', norm_type=None, act_type='relu', mode='nearest', convtype='Conv2D'):
-    """ Upconv layer """
-    upscale_factor = (1, upscale_factor, upscale_factor) if convtype == 'Conv3D' else upscale_factor
+def upconv_block(
+    in_nc,
+    out_nc,
+    upscale_factor=2,
+    kernel_size=3,
+    stride=1,
+    bias=True,
+    pad_type="zero",
+    norm_type=None,
+    act_type="relu",
+    mode="nearest",
+    convtype="Conv2D",
+):
+    """Upconv layer"""
+    upscale_factor = (
+        (1, upscale_factor, upscale_factor) if convtype == "Conv3D" else upscale_factor
+    )
     upsample = Upsample(scale_factor=upscale_factor, mode=mode)
-    conv = conv_block(in_nc, out_nc, kernel_size, stride, bias=bias,
-                        pad_type=pad_type, norm_type=norm_type, act_type=act_type, convtype=convtype)
+    conv = conv_block(
+        in_nc,
+        out_nc,
+        kernel_size,
+        stride,
+        bias=bias,
+        pad_type=pad_type,
+        norm_type=norm_type,
+        act_type=act_type,
+        convtype=convtype,
+    )
     return sequential(upsample, conv)
-
-
-
-
-
-
 
 
 ####################
@@ -871,20 +1187,20 @@ def make_layer(basic_block, num_basic_block, **kwarg):
 
 
 def act(act_type, inplace=True, neg_slope=0.2, n_prelu=1, beta=1.0):
-    """ activation helper """
+    """activation helper"""
     act_type = act_type.lower()
-    if act_type == 'relu':
+    if act_type == "relu":
         layer = nn.ReLU(inplace)
-    elif act_type in ('leakyrelu', 'lrelu'):
+    elif act_type in ("leakyrelu", "lrelu"):
         layer = nn.LeakyReLU(neg_slope, inplace)
-    elif act_type == 'prelu':
+    elif act_type == "prelu":
         layer = nn.PReLU(num_parameters=n_prelu, init=neg_slope)
-    elif act_type == 'tanh':  # [-1, 1] range output
+    elif act_type == "tanh":  # [-1, 1] range output
         layer = nn.Tanh()
-    elif act_type == 'sigmoid':  # [0, 1] range output
+    elif act_type == "sigmoid":  # [0, 1] range output
         layer = nn.Sigmoid()
     else:
-        raise NotImplementedError(f'activation layer [{act_type}] is not found')
+        raise NotImplementedError(f"activation layer [{act_type}] is not found")
     return layer
 
 
@@ -897,32 +1213,35 @@ class Identity(nn.Module):
 
 
 def norm(norm_type, nc):
-    """ Return a normalization layer """
+    """Return a normalization layer"""
     norm_type = norm_type.lower()
-    if norm_type == 'batch':
+    if norm_type == "batch":
         layer = nn.BatchNorm2d(nc, affine=True)
-    elif norm_type == 'instance':
+    elif norm_type == "instance":
         layer = nn.InstanceNorm2d(nc, affine=False)
-    elif norm_type == 'none':
-        def norm_layer(x): return Identity()
+    elif norm_type == "none":
+
+        def norm_layer(x):
+            return Identity()
+
     else:
-        raise NotImplementedError(f'normalization layer [{norm_type}] is not found')
+        raise NotImplementedError(f"normalization layer [{norm_type}] is not found")
     return layer
 
 
 def pad(pad_type, padding):
-    """ padding layer helper """
+    """padding layer helper"""
     pad_type = pad_type.lower()
     if padding == 0:
         return None
-    if pad_type == 'reflect':
+    if pad_type == "reflect":
         layer = nn.ReflectionPad2d(padding)
-    elif pad_type == 'replicate':
+    elif pad_type == "replicate":
         layer = nn.ReplicationPad2d(padding)
-    elif pad_type == 'zero':
+    elif pad_type == "zero":
         layer = nn.ZeroPad2d(padding)
     else:
-        raise NotImplementedError(f'padding layer [{pad_type}] is not implemented')
+        raise NotImplementedError(f"padding layer [{pad_type}] is not implemented")
     return layer
 
 
@@ -933,7 +1252,8 @@ def get_valid_padding(kernel_size, dilation):
 
 
 class ShortcutBlock(nn.Module):
-    """ Elementwise sum the output of a submodule to its input """
+    """Elementwise sum the output of a submodule to its input"""
+
     def __init__(self, submodule):
         super(ShortcutBlock, self).__init__()
         self.sub = submodule
@@ -943,14 +1263,14 @@ class ShortcutBlock(nn.Module):
         return output
 
     def __repr__(self):
-        return 'Identity + \n|' + self.sub.__repr__().replace('\n', '\n|')
+        return "Identity + \n|" + self.sub.__repr__().replace("\n", "\n|")
 
 
 def sequential(*args):
-    """ Flatten Sequential. It unwraps nn.Sequential. """
+    """Flatten Sequential. It unwraps nn.Sequential."""
     if len(args) == 1:
         if isinstance(args[0], OrderedDict):
-            raise NotImplementedError('sequential does not support OrderedDict input.')
+            raise NotImplementedError("sequential does not support OrderedDict input.")
         return args[0]  # No sequential is needed.
     modules = []
     for module in args:
@@ -962,38 +1282,86 @@ def sequential(*args):
     return nn.Sequential(*modules)
 
 
-def conv_block(in_nc, out_nc, kernel_size, stride=1, dilation=1, groups=1, bias=True,
-               pad_type='zero', norm_type=None, act_type='relu', mode='CNA', convtype='Conv2D',
-               spectral_norm=False):
-    """ Conv layer with padding, normalization, activation """
-    assert mode in ['CNA', 'NAC', 'CNAC'], f'Wrong conv mode [{mode}]'
+def conv_block(
+    in_nc,
+    out_nc,
+    kernel_size,
+    stride=1,
+    dilation=1,
+    groups=1,
+    bias=True,
+    pad_type="zero",
+    norm_type=None,
+    act_type="relu",
+    mode="CNA",
+    convtype="Conv2D",
+    spectral_norm=False,
+):
+    """Conv layer with padding, normalization, activation"""
+    assert mode in ["CNA", "NAC", "CNAC"], f"Wrong conv mode [{mode}]"
     padding = get_valid_padding(kernel_size, dilation)
-    p = pad(pad_type, padding) if pad_type and pad_type != 'zero' else None
-    padding = padding if pad_type == 'zero' else 0
+    p = pad(pad_type, padding) if pad_type and pad_type != "zero" else None
+    padding = padding if pad_type == "zero" else 0
 
-    if convtype=='PartialConv2D':
-        from torchvision.ops import PartialConv2d  # this is definitely not going to work, but PartialConv2d doesn't work anyway and this shuts up static analyzer
-        c = PartialConv2d(in_nc, out_nc, kernel_size=kernel_size, stride=stride, padding=padding,
-               dilation=dilation, bias=bias, groups=groups)
-    elif convtype=='DeformConv2D':
+    if convtype == "PartialConv2D":
+        from torchvision.ops import (
+            PartialConv2d,
+        )  # this is definitely not going to work, but PartialConv2d doesn't work anyway and this shuts up static analyzer
+
+        c = PartialConv2d(
+            in_nc,
+            out_nc,
+            kernel_size=kernel_size,
+            stride=stride,
+            padding=padding,
+            dilation=dilation,
+            bias=bias,
+            groups=groups,
+        )
+    elif convtype == "DeformConv2D":
         from torchvision.ops import DeformConv2d  # not tested
-        c = DeformConv2d(in_nc, out_nc, kernel_size=kernel_size, stride=stride, padding=padding,
-               dilation=dilation, bias=bias, groups=groups)
-    elif convtype=='Conv3D':
-        c = nn.Conv3d(in_nc, out_nc, kernel_size=kernel_size, stride=stride, padding=padding,
-                dilation=dilation, bias=bias, groups=groups)
+
+        c = DeformConv2d(
+            in_nc,
+            out_nc,
+            kernel_size=kernel_size,
+            stride=stride,
+            padding=padding,
+            dilation=dilation,
+            bias=bias,
+            groups=groups,
+        )
+    elif convtype == "Conv3D":
+        c = nn.Conv3d(
+            in_nc,
+            out_nc,
+            kernel_size=kernel_size,
+            stride=stride,
+            padding=padding,
+            dilation=dilation,
+            bias=bias,
+            groups=groups,
+        )
     else:
-        c = nn.Conv2d(in_nc, out_nc, kernel_size=kernel_size, stride=stride, padding=padding,
-                dilation=dilation, bias=bias, groups=groups)
+        c = nn.Conv2d(
+            in_nc,
+            out_nc,
+            kernel_size=kernel_size,
+            stride=stride,
+            padding=padding,
+            dilation=dilation,
+            bias=bias,
+            groups=groups,
+        )
 
     if spectral_norm:
         c = nn.utils.spectral_norm(c)
 
     a = act(act_type) if act_type else None
-    if 'CNA' in mode:
+    if "CNA" in mode:
         n = norm(norm_type, out_nc) if norm_type else None
         return sequential(p, c, n, a)
-    elif mode == 'NAC':
+    elif mode == "NAC":
         if norm_type is None and act_type is not None:
             a = act(act_type, inplace=False)
         n = norm(norm_type, in_nc) if norm_type else None
