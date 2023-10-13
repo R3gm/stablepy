@@ -2,7 +2,7 @@
 
 **Description:**
 
-The goal of this project is to make Stable Diffusion more accessible, simple and easy-to-use Stable Diffusion with python
+The goal of this project is to make Stable Diffusion more accessible, simple and easy-to-use with python.  Stablepy is constructed on top of the Diffusion library
 
 **Usage:**
 
