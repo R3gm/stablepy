@@ -38,6 +38,7 @@ from .utils import save_pil_image_with_metadata
 from .lora_loader import lora_mix_load
 from .inpainting_canvas import draw, make_inpaint_condition
 from .adetailer import ad_model_process
+from ..upscalers.esrgan import UpscalerESRGAN
 import os
 from compel import Compel
 from compel import EmbeddingsProvider, ReturnedEmbeddingsType
@@ -984,6 +985,8 @@ class Model_Diffusers:
         leave_progress_bar = False,
         disable_progress_bar = False,
         image_previews = False,
+        upscaler_model_path = None,
+        upscaler_increases_size = 1.5,
     ):
         if self.task_name != "txt2img" and image == None:
             raise ValueError
@@ -1441,6 +1444,21 @@ class Model_Diffusers:
                 torch.cuda.empty_cache()
                 gc.collect()
 
+            # Upscale
+            if upscaler_model_path != None:
+                scaler = UpscalerESRGAN()
+                result_scaler = []
+                for img_pre_up in images:
+                    image_pos_up = scaler.upscale(
+                        img_pre_up, 
+                        upscaler_increases_size, 
+                        upscaler_model_path
+                    )
+                    torch.cuda.empty_cache()
+                    gc.collect()
+                    result_scaler.append(image_pos_up)
+                images = result_scaler
+
             # Show images if loop
             if loop_generation > 1:
 
@@ -1464,7 +1482,6 @@ class Model_Diffusers:
                     img_height,
                     clip_skip,
             ]
-
             for image_ in images:
                 image_path = save_pil_image_with_metadata(image_, "./images", metadata)
                 image_list.append(image_path)
