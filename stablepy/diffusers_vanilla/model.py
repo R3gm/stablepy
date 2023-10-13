@@ -279,7 +279,7 @@ class Model_Diffusers:
                     controlnet=controlnet,
                     torch_dtype=self.type_model_precision)
             else:
-                raise ZeroDivisionError("Not implemented")
+                raise ZeroDivisionError("Not implemented for SDXL")
             #     pipe = StableDiffusionControlNetPipeline.from_pretrained(
             #         base_model_id,
             #         vae = AutoencoderKL.from_pretrained(base_model_id, subfolder='vae') if vae_model == None else AutoencoderKL.from_single_file(vae_model),
@@ -904,7 +904,7 @@ class Model_Diffusers:
                       print(f"ERROR: LoRA not compatible: {select_lora}")
             return self.pipe
         else:
-            # Unload numerically unstable but fast
+            # Unload numerically unstable but fast and need less memory
             if select_lora != None:
                 try:
                     self.pipe = lora_mix_load(self.pipe, select_lora, -lora_weights_scale, device=device, dtype=self.type_model_precision)
@@ -1159,14 +1159,6 @@ class Model_Diffusers:
                 prompt_ti = prompt
                 negative_prompt_ti = negative_prompt
 
-            # prompt embed chunks style a1...
-            # prompt_emb = merge_embeds(tokenize_line(prompt_ti, self.pipe.tokenizer), compel)
-            # negative_prompt_emb = merge_embeds(tokenize_line(negative_prompt_ti, self.pipe.tokenizer), compel)
-
-            # fix error shape
-            # if prompt_emb.shape != negative_prompt_emb.shape:
-            #     prompt_emb, negative_prompt_emb = compel.pad_conditioning_tensors_to_same_length([prompt_emb, negative_prompt_emb])
-
             conditioning, pooled = compel([prompt_ti, negative_prompt_ti])
             prompt_emb = None
             negative_prompt_emb = None
@@ -1183,7 +1175,7 @@ class Model_Diffusers:
         try:
             self.pipe.scheduler = self.get_scheduler(sampler)
         except:
-            print("Error in sampler, please try again")
+            print("Error in sampler, please try again; Bug report to https://github.com/R3gm/stablepy or https://github.com/R3gm/SD_diffusers_interactive")
             self.pipe = None
             torch.cuda.empty_cache()
             gc.collect()
@@ -1211,7 +1203,7 @@ class Model_Diffusers:
                     print("To use this function, you have to upload an image in the cell below first 👇")
                     return
                 else:
-                    raise ValueError("Unsupported image type or not control image found")
+                    raise ValueError("Unsupported image type or not control image found; Bug report to https://github.com/R3gm/stablepy or https://github.com/R3gm/SD_diffusers_interactive")
 
             # Extract the RGB channels
             try:
@@ -1221,7 +1213,7 @@ class Model_Diffusers:
                 self.pipe = None
                 torch.cuda.empty_cache()
                 gc.collect()
-                raise ValueError("Unsupported image type") # return
+                raise ValueError("Unsupported image type; Bug report to https://github.com/R3gm/stablepy or https://github.com/R3gm/SD_diffusers_interactive") # return
 
         # Get params preprocess
         preprocess_params_config = {}
