@@ -1607,11 +1607,15 @@ class Model_Diffusers:
                 # for img_single in images:
                 # image_ad = img_single.convert("RGB")
                 # image_pil_list.append(image_ad)
+                if self.task_name != "txt2img" and self.task_name != "Inpaint":
+                    images = images[1:]
                 images = ad_model_process(
                     adetailer=adetailer,
                     image_list_task=images,
                     **adetailer_params,
                 )
+                if self.task_name != "txt2img" and self.task_name != "Inpaint":
+                    images = [control_image] + images
                 # del adetailer
                 torch.cuda.empty_cache()
                 gc.collect()
