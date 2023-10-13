@@ -1,4 +1,3 @@
-
 # =====================================
 # Inpainting canvas
 # =====================================
@@ -72,14 +71,12 @@ var data = new Promise(resolve=>{
 </script>
 """
 
-import base64, os
+import base64, os, shutil
 from base64 import b64decode
-import matplotlib.pyplot as plt
 import numpy as np
 from shutil import copyfile
-import shutil
 import matplotlib.pyplot as plt
-from IPython.display import display
+from IPython.display import display, HTML
 
 class NotValid(Exception):
     pass
