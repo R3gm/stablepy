@@ -93,7 +93,7 @@ def draw(imgm, filename="drawing.png", w=400, h=200, line_width=1):
         binary = b64decode(data.split(",")[1])
         with open(filename, "wb") as f:
             f.write(binary)
-        print(f"created mask: {filename}")
+        print(f"created draw: {filename}")
     except:
         raise NotValid("This option is only compatible in Colab.")
 
