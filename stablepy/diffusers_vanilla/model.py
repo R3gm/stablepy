@@ -1390,7 +1390,9 @@ class Model_Diffusers:
                 numpy_array_mask = np.array(mask_control_img, dtype=np.uint8)
                 array_rgb_mask = numpy_array_mask[:, :, :3]
             elif not gui_active:
-                # Convert control image for draw
+                # Convert control image to draw
+                import base64
+                import matplotlib.pyplot as plt
                 name_without_extension = os.path.splitext(image.split("/")[-1])[0]
                 image64 = base64.b64encode(open(image, "rb").read())
                 image64 = image64.decode("utf-8")
