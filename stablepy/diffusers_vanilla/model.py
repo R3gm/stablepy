@@ -348,8 +348,8 @@ class Model_Diffusers:
 
             pipe.scheduler = UniPCMultistepScheduler.from_config(pipe.scheduler.config)
 
-        if self.device.type == "cuda":
-            pipe.enable_xformers_memory_efficient_attention()
+        # if self.device.type == "cuda":
+        #     pipe.enable_xformers_memory_efficient_attention()
 
         pipe.to(self.device)
         torch.cuda.empty_cache()
@@ -1117,6 +1117,7 @@ class Model_Diffusers:
         # self.pipe = self.process_lora(lora_D, lora_scale_D)
         # self.pipe = self.process_lora(lora_E, lora_scale_E)
 
+        xformers_memory_efficient_attention=False # disabled
         if xformers_memory_efficient_attention and torch.cuda.is_available():
             self.pipe.disable_xformers_memory_efficient_attention()
         self.pipe.to(self.device)
@@ -1308,8 +1309,8 @@ class Model_Diffusers:
 
             compel = None
             del compel
-
-        if torch.cuda.is_available():
+        
+        if torch.cuda.is_available() and xformers_memory_efficient_attention:
             if xformers_memory_efficient_attention:
                 self.pipe.enable_xformers_memory_efficient_attention()
             else:

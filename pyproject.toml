@@ -7,9 +7,9 @@ readme = "README.md"
 
 [tool.poetry.dependencies]
 python = "^3.10"
-torch = {version = "2.0.1+cu118", source = "pytorch-gpu-src"}
-torchvision = {version = "0.15.2+cu118", source = "pytorch-gpu-src"}
-torchaudio = {version = "2.0.2+cu118", source = "pytorch-gpu-src"}
+torch = {version = "2.1.0+cu118", source = "pytorch-gpu-src"}
+torchvision = {version = "0.16.0+cu118", source = "pytorch-gpu-src"}
+torchaudio = {version = "2.1.0+cu118", source = "pytorch-gpu-src"}
 omegaconf = "2.3.0"
 diffusers = {git = "https://github.com/huggingface/diffusers.git"}
 compel = {git = "https://github.com/damian0815/compel.git"}
@@ -19,11 +19,10 @@ accelerate = "^0.23.0"
 safetensors = "0.3.3"
 mediapy = "^1.1.9"
 ipywidgets = "7.7.1"
-controlnet-aux = "0.0.6"
+controlnet-aux = "^0.0.6"
 mediapipe = "0.10.1"
 pytorch-lightning = "^2.0.9.post0"
 asdff = {git = "https://github.com/R3gm/asdff.git"}
-xformers = "0.0.22"
 
 
 [[tool.poetry.source]]
