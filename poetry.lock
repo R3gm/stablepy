@@ -4385,28 +4385,6 @@ files = [
 notebook = ">=4.4.1"
 
 [[package]]
-name = "xformers"
-version = "0.0.22.post4"
-description = "XFormers: A collection of composable Transformer building blocks."
-optional = false
-python-versions = ">=3.7"
-files = [
-    {file = "xformers-0.0.22.post4-cp310-cp310-manylinux2014_x86_64.whl", hash = "sha256:7075114dbf698b609b599f0d35032c0b2f9a389751e8bbf4dd3c628376b0dd9c"},
-    {file = "xformers-0.0.22.post4-cp310-cp310-win_amd64.whl", hash = "sha256:7901a41141348dd389f6cca759ebaa5480d98ecf40bb1c8c1a6cfe7b7d81413e"},
-    {file = "xformers-0.0.22.post4-cp311-cp311-manylinux2014_x86_64.whl", hash = "sha256:b429475157d5043f4fcd17fd247801b6c96199b9d973aea3f22c0328216dcd14"},
-    {file = "xformers-0.0.22.post4-cp311-cp311-win_amd64.whl", hash = "sha256:cee27b7e9ccc00d3d893cb293cab675624847ec022485c212c3ff85ddece15a6"},
-    {file = "xformers-0.0.22.post4-cp38-cp38-manylinux2014_x86_64.whl", hash = "sha256:83e96c3999753fbf71c70afb002d3e8715b8a73efbd16f99810b7152222a730e"},
-    {file = "xformers-0.0.22.post4-cp38-cp38-win_amd64.whl", hash = "sha256:b162a9a043bce9d27b715fe378f25c5756945976c430dea84a1de977ce0c0d09"},
-    {file = "xformers-0.0.22.post4-cp39-cp39-manylinux2014_x86_64.whl", hash = "sha256:3c4c7bac62164cae75b64db0a4f6eab4aa65b8136ab65d04af3dfead1bf922e1"},
-    {file = "xformers-0.0.22.post4-cp39-cp39-win_amd64.whl", hash = "sha256:242433f5eea7390779368e1d0d588c7dfb26cda6aa2d9743c64abda3884607eb"},
-    {file = "xformers-0.0.22.post4.tar.gz", hash = "sha256:ed58b1529e9ad2a094dd4b41585c09d356951f94fc4c2ceb2df89e3191dea72d"},
-]
-
-[package.dependencies]
-numpy = "*"
-torch = "2.1.0"
-
-[[package]]
 name = "yarl"
 version = "1.9.2"
 description = "Yet another URL library"
@@ -4511,4 +4489,4 @@ testing = ["big-O", "jaraco.functools", "jaraco.itertools", "more-itertools", "p
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.10"
-content-hash = "57d74e59d3e16152af08a359ee89d6d25107dce77de26d58f492b1f33c397199"
+content-hash = "22837cebebc5a87de52bf20c656b197272e4d19d0efc78903c49ccbf6628c011"
