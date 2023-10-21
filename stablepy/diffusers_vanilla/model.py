@@ -1081,13 +1081,12 @@ class Model_Diffusers:
         self,
         prompt,
         negative_prompt,
-        active_textual_inversion,
         textual_inversion,
         clip_skip,
         syntax_weights,
         ):
 
-        if active_textual_inversion and self.embed_loaded != textual_inversion:
+        if self.embed_loaded != textual_inversion:
             # Textual Inversion
             for name, directory_name in textual_inversion:
                 try:
@@ -1233,7 +1232,6 @@ class Model_Diffusers:
         lora_scale_D=1.0,
         lora_E=None,
         lora_scale_E=1.0,
-        active_textual_inversion=False,
         textual_inversion=[],  # List of tuples [(activation_token, path_embedding),...]
         syntax_weights="Classic", # Classic or Compel
         sampler="DPM++ 2M",
@@ -1356,7 +1354,6 @@ class Model_Diffusers:
             prompt_emb, negative_prompt_emb =  self.create_prompt_embeds(
                 prompt = prompt,
                 negative_prompt = negative_prompt,
-                active_textual_inversion = active_textual_inversion,
                 textual_inversion = textual_inversion,
                 clip_skip = clip_skip,
                 syntax_weights = syntax_weights,
@@ -1364,7 +1361,7 @@ class Model_Diffusers:
 
             # Prompt Optimizations for SDXL
         else:
-            if active_textual_inversion:
+            if self.embed_loaded != textual_inversion:
                 # implement
                 print("SDXL textual inversion not available")
 
@@ -1715,7 +1712,6 @@ class Model_Diffusers:
                 prompt_emb_ad, negative_prompt_emb_ad = self.create_prompt_embeds(
                     prompt=prompt_ad,
                     negative_prompt=negative_prompt_ad,
-                    active_textual_inversion=active_textual_inversion,
                     textual_inversion=textual_inversion,
                     clip_skip=clip_skip,
                     syntax_weights=syntax_weights,
