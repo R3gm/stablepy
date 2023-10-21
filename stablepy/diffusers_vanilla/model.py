@@ -59,6 +59,7 @@ import ipywidgets as widgets, mediapy
 from IPython.display import display
 from PIL import Image
 from asdff.sd import AdCnPreloadPipe
+from typing import Union, Optional, List, Tuple, Dict, Any, Callable
 
 # =====================================
 # Utils preprocessor
@@ -1202,58 +1203,211 @@ class Model_Diffusers:
 
     def __call__(
         self,
-        prompt="",
-        negative_prompt="",
-        img_height=512,
-        img_width=512,
-        num_images=1,
-        num_steps=30,
-        guidance_scale=7.5,
-        clip_skip=True,
-        seed=-1,
-        image=None,  # path, np.array, or PIL image # for Inpaint, controlnet and t2i
-        preprocessor_name=None,
-        preprocess_resolution=512,
-        image_resolution=512,
-        additional_prompt="",
-        image_mask=None, # Inpaint
-        strength=1.0, # Inpaint
-        low_threshold=100,  # Canny
-        high_threshold=200,  # Canny
-        value_threshold=0.1,  # MLSD
-        distance_threshold=0.1,  # MLSD
-        lora_A=None,
-        lora_scale_A=1.0,
-        lora_B=None,
-        lora_scale_B=1.0,
-        lora_C=None,
-        lora_scale_C=1.0,
-        lora_D=None,
-        lora_scale_D=1.0,
-        lora_E=None,
-        lora_scale_E=1.0,
-        textual_inversion=[],  # List of tuples [(activation_token, path_embedding),...]
-        syntax_weights="Classic", # Classic or Compel
-        sampler="DPM++ 2M",
-        xformers_memory_efficient_attention=False, # disabled
-        gui_active=False,
-        loop_generation=1,
-        controlnet_conditioning_scale=1.0,
-        control_guidance_start=0.0,
-        control_guidance_end=1.0,
-        generator_in_cpu=False,  # Initial noise not in CPU
-        FreeU=False,
-        adetailer_active=False,
-        adetailer_params={},
-        leave_progress_bar=False,
-        disable_progress_bar=False,
-        image_previews=False,
-        upscaler_model_path=None,
-        upscaler_increases_size=1.5,
-        t2i_adapter_preprocessor=True,
-        t2i_adapter_conditioning_scale = 1.0,
-        t2i_adapter_conditioning_factor = 1.0,
+        prompt: str = "",
+        negative_prompt: str = "",
+        img_height: int = 512,
+        img_width: int = 512,
+        num_images: int = 1,
+        num_steps: int = 30,
+        guidance_scale: float = 7.5,
+        clip_skip: Optional[bool] = True,
+        seed: int = -1,
+        sampler: str = "DPM++ 2M",
+        syntax_weights: str = "Classic",
+
+        lora_A: Optional[str] = None,
+        lora_scale_A: float = 1.0,
+        lora_B: Optional[str] = None,
+        lora_scale_B: float = 1.0,
+        lora_C: Optional[str] = None,
+        lora_scale_C: float = 1.0,
+        lora_D: Optional[str] = None,
+        lora_scale_D: float = 1.0,
+        lora_E: Optional[str] = None,
+        lora_scale_E: float = 1.0,
+        textual_inversion: List[Tuple[str, str]] = [],
+        FreeU: bool = False,
+        adetailer_active: bool = False,
+        adetailer_params: Dict[str, Any] = {},
+        additional_prompt: str = "",
+        upscaler_model_path: Optional[str] = None,
+        upscaler_increases_size: float = 1.5,
+
+        image: Optional[Any] = None,
+        preprocessor_name: Optional[str] = "None",
+        preprocess_resolution: int = 512,
+        image_resolution: int = 512,
+        image_mask: Optional[Any] = None,
+        strength: float = 1.0,
+        low_threshold: int = 100,
+        high_threshold: int = 200,
+        value_threshold: float = 0.1,
+        distance_threshold: float = 0.1,
+        controlnet_conditioning_scale: float = 1.0,
+        control_guidance_start: float = 0.0,
+        control_guidance_end: float = 1.0,
+        t2i_adapter_preprocessor: bool = True,
+        t2i_adapter_conditioning_scale: float = 1.0,
+        t2i_adapter_conditioning_factor: float = 1.0,
+
+        loop_generation: int = 1,
+        generator_in_cpu: bool = False,
+        leave_progress_bar: bool = False,
+        disable_progress_bar: bool = False,
+        image_previews: bool = False,
+        xformers_memory_efficient_attention: bool = False,
+        gui_active: bool = False,
     ):
+        
+        """
+        The call function for the generation.
+    
+        Args:
+            prompt (str , optional):
+                The prompt or prompts to guide image generation. 
+            negative_prompt (str , optional):
+                The prompt or prompts to guide what to not include in image generation. Ignored when not using guidance (`guidance_scale < 1`).
+            img_height (int, optional, defaults to 512):
+                The height in pixels of the generated image.
+            img_width (int, optional, defaults to 512):
+                The width in pixels of the generated image.
+            num_images (int, optional, defaults to 1):
+                The number of images to generate per prompt.
+            num_steps (int, optional, defaults to 30):
+                The number of denoising steps. More denoising steps usually lead to a higher quality image at the
+                expense of slower inference.
+            guidance_scale (float, optional, defaults to 7.5):
+                A higher guidance scale value encourages the model to generate images closely linked to the text
+                `prompt` at the expense of lower image quality. Guidance scale is enabled when `guidance_scale > 1`.
+            clip_skip (bool, optional):
+                Number of layers to be skipped from CLIP while computing the prompt embeddings. It can be placed on 
+                the penultimate (True) or last layer (False).
+            seed (int, optional, defaults to -1):
+                A seed for controlling the randomness of the image generation process. -1 design a random seed.
+            sampler (str, optional, defaults to "DPM++ 2M"):
+                The sampler used for the generation process.
+            syntax_weights (str, optional, defaults to "Classic"):
+                Specifies the type of syntax weights used during generation. "Classic" is (word:weight), "Compel" is (word)weight
+            lora_A (str, optional):
+                Placeholder for lora A parameter.
+            lora_scale_A (float, optional, defaults to 1.0):
+                Placeholder for lora scale A parameter.
+            lora_B (str, optional):
+                Placeholder for lora B parameter.
+            lora_scale_B (float, optional, defaults to 1.0):
+                Placeholder for lora scale B parameter.
+            lora_C (str, optional):
+                Placeholder for lora C parameter.
+            lora_scale_C (float, optional, defaults to 1.0):
+                Placeholder for lora scale C parameter.
+            lora_D (str, optional):
+                Placeholder for lora D parameter.
+            lora_scale_D (float, optional, defaults to 1.0):
+                Placeholder for lora scale D parameter.
+            lora_E (str, optional):
+                Placeholder for lora E parameter.
+            lora_scale_E (float, optional, defaults to 1.0):
+                Placeholder for lora scale E parameter.
+            textual_inversion (List[Tuple[str, str]], optional, defaults to []):
+                Placeholder for textual inversion list of tuples. Help the model to adapt to a particular 
+                style. [("<token_activation>","<path_embeding>"),...]
+            FreeU (bool, optional, defaults to False):
+                Is a method that substantially improves diffusion model sample quality at no costs.
+            adetailer_active (bool, optional, defaults to False):
+                Guided Inpainting to Correct Image, it is preferable to use low values for strength.
+            adetailer_params (Dict[str, Any], optional, defaults to {}):
+                Placeholder for adetailer parameters.
+            additional_prompt (str, optional):
+                Placeholder for additional prompt.
+            upscaler_model_path (str, optional):
+                Placeholder for upscaler model path.
+            upscaler_increases_size (float, optional, defaults to 1.5):
+                Placeholder for upscaler increases size parameter.
+            image (Any, optional):
+                The image to be used for the Inpaint, ControlNet, or T2I adapter.
+            preprocessor_name (str, optional, defaults to "None"):
+                Preprocessor name for ControlNet.
+            preprocess_resolution (int, optional, defaults to 512):
+                Preprocess resolution for the Inpaint, ControlNet, or T2I adapter.
+            image_resolution (int, optional, defaults to 512):
+                Image resolution for the Inpaint, ControlNet, or T2I adapter.
+            image_mask (Any, optional):
+                Path image mask for the Inpaint.
+            strength (float, optional, defaults to 1.0):
+                Strength parameter for the Inpaint.
+            low_threshold (int, optional, defaults to 100):
+                Low threshold parameter for ControlNet and T2I Adapter Canny.
+            high_threshold (int, optional, defaults to 200):
+                High threshold parameter for ControlNet and T2I Adapter Canny.
+            value_threshold (float, optional, defaults to 0.1):
+                Value threshold parameter for ControlNet MLSD.
+            distance_threshold (float, optional, defaults to 0.1):
+                Distance threshold parameter for ControlNet MLSD.
+            controlnet_conditioning_scale (float, optional, defaults to 1.0):
+                The outputs of the ControlNet are multiplied by `controlnet_conditioning_scale` before they are added
+                to the residual in the original `unet`. Used in ControlNet and Inpaint
+            control_guidance_start (float, optional, defaults to 0.0):
+                The percentage of total steps at which the ControlNet starts applying. Used in ControlNet and Inpaint
+            control_guidance_end (float, optional, defaults to 1.0):
+                The percentage of total steps at which the ControlNet stops applying. Used in ControlNet and Inpaint
+            t2i_adapter_preprocessor (bool, optional, defaults to True):
+                Preprocessor for the image in XL_canny by default is True.
+            t2i_adapter_conditioning_scale (float, optional, defaults to 1.0):
+                The outputs of the adapter are multiplied by `t2i_adapter_conditioning_scale` before they are added to the
+                residual in the original unet.
+            t2i_adapter_conditioning_factor (float, optional, defaults to 1.0):
+                The fraction of timesteps for which adapter should be applied. If `t2i_adapter_conditioning_factor` is
+                `0.0`, adapter is not applied at all. If `t2i_adapter_conditioning_factor` is `1.0`, adapter is applied for
+                all timesteps. If `t2i_adapter_conditioning_factor` is `0.5`, adapter is applied for half of the timesteps.
+            loop_generation (int, optional, defaults to 1):
+                The number of times the specified `num_images` will be generated.
+            generator_in_cpu (bool, optional, defaults to False):
+                The generator by default is specified on the GPU. To obtain more consistent results across various environments, 
+                it is preferable to use the generator on the CPU.
+            leave_progress_bar (bool, optional, defaults to False):
+                Leave the progress bar after generating the image.
+            disable_progress_bar (bool, optional, defaults to False):
+                Do not display the progress bar during image generation.
+            image_previews (bool, optional, defaults to False):
+                Displaying the image denoising process.
+            xformers_memory_efficient_attention (bool, optional, defaults to False):
+                Improves generation time, currently disabled.
+            gui_active (bool, optional, defaults to False):
+                utility when used with a GUI, it changes the behavior especially by displaying confirmation messages or options.
+    
+        Specific parameter usage details:
+        
+            Additional parameters that will be used in Inpaint:
+                - image
+                - image_mask
+                - image_resolution
+                - strength
+                
+            Additional parameters that will be used in ControlNet depending on the task:
+                - image
+                - preprocessor_name
+                - preprocess_resolution
+                - image_resolution
+                - controlnet_conditioning_scale
+                - control_guidance_start
+                - control_guidance_end
+                for Canny:
+                    - low_threshold
+                    - high_threshold
+                for MLSD:
+                    - value_threshold
+                    - distance_threshold
+        
+            Additional parameters that will be used in T2I adapter depending on the task:
+                - image
+                - preprocess_resolution
+                - image_resolution
+                - t2i_adapter_preprocessor
+                - t2i_adapter_conditioning_scale
+                - t2i_adapter_conditioning_factor
+            
+        """
+
         if self.task_name != "txt2img" and image == None:
             raise ValueError
         if img_height % 8 != 0 or img_width % 8 != 0:
