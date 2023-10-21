@@ -268,7 +268,6 @@ class Model_Diffusers:
             and reload == False
         ):
             if self.type_model_precision == type_model_precision or self.device.type == "cpu":
-                print("___")
                 return
 
         if hasattr(self, "pipe") and os.path.isfile(base_model_id):
@@ -293,7 +292,7 @@ class Model_Diffusers:
         
         # Load model
         if self.base_model_id == base_model_id and self.pipe is not None and reload == False and self.vae_model == vae_model and unload_model == False:
-            print("Previous loaded model") # not return
+            print("Previous loaded base model") # not return
             class_name = self.class_name
         else:
             # Unload previous model and stuffs
@@ -478,10 +477,6 @@ class Model_Diffusers:
         return
 
     def load_controlnet_weight(self, task_name: str) -> None:
-        if task_name == self.task_name:
-            return
-        #if self.pipe is not None and hasattr(self.pipe, "controlnet"):
-        #    del self.pipe.controlnet
         torch.cuda.empty_cache()
         gc.collect()
         model_id = CONTROLNET_MODEL_IDS[task_name]
@@ -493,7 +488,6 @@ class Model_Diffusers:
         gc.collect()
         self.pipe.controlnet = controlnet
         #self.task_name = task_name
-        print("change cn")
 
     def get_prompt(self, prompt: str, additional_prompt: str) -> str:
         if not prompt:
@@ -920,10 +914,9 @@ class Model_Diffusers:
         if self.class_name == "StableDiffusionPipeline":
             if "anime" in preprocessor_name:
                 self.load_controlnet_weight("lineart_anime")
-                print("linear anime")
+                print("Linear anime")
             else:
                 self.load_controlnet_weight("lineart")
-                print("linear")
 
         return control_image
 
@@ -1095,7 +1088,7 @@ class Model_Diffusers:
                         print(f"Applied : {name}")
 
                 except ValueError:
-                    print(f"Previous loaded embed {name}")
+                    #print(f"Previous loaded embed {name}")
                     pass
                 except Exception as e:
                     print(str(e))
@@ -1443,7 +1436,7 @@ class Model_Diffusers:
         ]:
             for single_lora in self.lora_memory:
                 if single_lora != None:
-                    print(f"LoRA in memory:{single_lora}")
+                    print(f"LoRA in memory: {single_lora}")
             pass
 
         else:
@@ -1557,9 +1550,7 @@ class Model_Diffusers:
         try:
             self.pipe.scheduler = self.get_scheduler(sampler)
         except:
-            print(
-                "Error in sampler, please try again"
-            )
+            print("Error in sampler, please try again")
             self.pipe = None
             torch.cuda.empty_cache()
             gc.collect()
@@ -1736,7 +1727,7 @@ class Model_Diffusers:
                 # preprocess_params_config_xl["additional_prompt"] = additional_prompt # ""
 
             if self.task_name == "sdxl_canny": # preprocessor true default
-                print("SDXL Canny")
+                print("SDXL Canny: Preprocessor active by default")
                 control_image = self.process_canny(
                     **preprocess_params_config_xl,
                     low_threshold=low_threshold,
