@@ -274,7 +274,7 @@ class Model_Diffusers:
             unload_model = False
             if self.pipe == None:
                 unload_model = True
-            elif type_model_precision != self.pipe.dtype and self.device.type != "cpu":
+            elif type_model_precision != self.type_model_precision and self.device.type != "cpu":
                 unload_model = True
         else:
             if hasattr(self, "pipe"):
