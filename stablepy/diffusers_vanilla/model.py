@@ -1285,7 +1285,9 @@ class Model_Diffusers:
             seed (int, optional, defaults to -1):
                 A seed for controlling the randomness of the image generation process. -1 design a random seed.
             sampler (str, optional, defaults to "DPM++ 2M"):
-                The sampler used for the generation process.
+                The sampler used for the generation process. Available samplers: DPM++ 2M, DPM++ 2M Karras, DPM++ 2M SDE, 
+                DPM++ 2M SDE Karras, DPM++ SDE, DPM++ SDE Karras, DPM2, DPM2 Karras, Euler, Euler a, Heun, LMS, LMS Karras, 
+                DDIM, DEISMultistep and UniPCMultistep
             syntax_weights (str, optional, defaults to "Classic"):
                 Specifies the type of syntax weights used during generation. "Classic" is (word:weight), "Compel" is (word)weight
             lora_A (str, optional):
