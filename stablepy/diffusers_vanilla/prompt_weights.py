@@ -163,9 +163,8 @@ def get_embed_new(prompt, pipeline, compel, only_convert_string=False, compel_pr
         # fix bug weights conversion excessive emphasis
         prompt = prompt.replace("((", "(").replace("))", ")")
 
-    # convert to compel
+    # Convert to Compel
     attention = parse_prompt_attention(prompt)
-    print("postattention", attention)
     global_attention_chanks = []
 
     for att in attention:
@@ -178,7 +177,7 @@ def get_embed_new(prompt, pipeline, compel, only_convert_string=False, compel_pr
                     "prompt": f'{small_chank},'
                 }
                 global_attention_chanks.append(temp_dict)
-    print("postsplit for , ", global_attention_chanks)
+
     max_tokens = pipeline.tokenizer.model_max_length - 2
     global_prompt_chanks = []
     current_list = []
@@ -199,9 +198,7 @@ def get_embed_new(prompt, pipeline, compel, only_convert_string=False, compel_pr
             current_length += item['lenght']
     if current_list:
         global_prompt_chanks.append(current_list)
-    print("split for max tokens", global_attention_chanks)
-    print("attentiontoinvoke", [prompt_attention_to_invoke_prompt(i) for i in global_prompt_chanks])
-    print(' '.join([prompt_attention_to_invoke_prompt(i) for i in global_prompt_chanks]))
+
     if only_convert_string:
         return ' '.join([prompt_attention_to_invoke_prompt(i) for i in global_prompt_chanks])
 
