@@ -349,7 +349,8 @@ class Model_Diffusers:
 
             # Load VAE after loaded model
             if vae_model is None :
-                print("previous loaded vae")
+                #print("Default vae")
+                pass
             elif class_name == "StableDiffusionPipeline":
                 if os.path.isfile(vae_model):
                     self.pipe.vae = AutoencoderKL.from_single_file(
