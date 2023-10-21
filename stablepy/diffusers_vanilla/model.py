@@ -1087,7 +1087,7 @@ class Model_Diffusers:
         syntax_weights,
         ):
 
-        if self.embed_loaded != textual_inversion:
+        if self.embed_loaded != textual_inversion and textual_inversion != []:
             # Textual Inversion
             for name, directory_name in textual_inversion:
                 try:
@@ -1515,7 +1515,7 @@ class Model_Diffusers:
 
             # Prompt Optimizations for SDXL
         else:
-            if self.embed_loaded != textual_inversion:
+            if self.embed_loaded != textual_inversion and textual_inversion != []:
                 # implement
                 print("SDXL textual inversion not available")
 
