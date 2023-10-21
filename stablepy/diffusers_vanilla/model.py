@@ -289,7 +289,7 @@ class Model_Diffusers:
 
         if self.type_model_precision == torch.float32 and os.path.isfile(base_model_id):
             print("Working with full precision")
-        print("enter for search load", task_name, self.task_name, self.vae_model, vae_model, self.type_model_precision, type_model_precision)
+        
         # Load model
         if self.base_model_id == base_model_id and self.pipe is not None and reload == False and self.vae_model == vae_model and unload_model == False:
             print("Previous loaded model") # not return
@@ -476,26 +476,11 @@ class Model_Diffusers:
         self.class_name = class_name
         return
 
-
-    def set_base_model(self, base_model_id: str) -> str:
-        if not base_model_id or base_model_id == self.base_model_id:
-            return self.base_model_id
-        del self.pipe
-        torch.cuda.empty_cache()
-        gc.collect()
-        try:
-            self.pipe = self.load_pipe(base_model_id, self.task_name, self.vae_model)
-        except Exception:
-            self.pipe = self.load_pipe(
-                self.base_model_id, self.task_name, self.vae_model
-            )
-        return self.base_model_id
-
     def load_controlnet_weight(self, task_name: str) -> None:
         if task_name == self.task_name:
             return
-        if self.pipe is not None and hasattr(self.pipe, "controlnet"):
-            del self.pipe.controlnet
+        #if self.pipe is not None and hasattr(self.pipe, "controlnet"):
+        #    del self.pipe.controlnet
         torch.cuda.empty_cache()
         gc.collect()
         model_id = CONTROLNET_MODEL_IDS[task_name]
@@ -506,7 +491,8 @@ class Model_Diffusers:
         torch.cuda.empty_cache()
         gc.collect()
         self.pipe.controlnet = controlnet
-        self.task_name = task_name
+        #self.task_name = task_name
+        print("change cn")
 
     def get_prompt(self, prompt: str, additional_prompt: str) -> str:
         if not prompt:
@@ -1217,10 +1203,8 @@ class Model_Diffusers:
 
     def __call__(
         self,
-        prompt=None,
+        prompt="",
         negative_prompt="",
-        # prompt_embeds = None,
-        # negative_prompt_embeds = None,
         img_height=512,
         img_width=512,
         num_images=1,
