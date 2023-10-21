@@ -1581,7 +1581,7 @@ class Model_Diffusers:
             control_image = self.process_ip2p(**preprocess_params_config)
 
         # RUN Preprocess sdxl
-        if self.class_name != "StableDiffusionPipeline":
+        if self.class_name == "StableDiffusionXLPipeline":
             # Get params preprocess XL
             preprocess_params_config_xl = {}
             if self.task_name != "txt2img" and self.task_name != "Inpaint":
@@ -1647,7 +1647,7 @@ class Model_Diffusers:
             }
 
         # New params
-        if self.class_name != "StableDiffusionPipeline":
+        if self.class_name == "StableDiffusionXLPipeline":
             # pipe sdxl
             if self.task_name == "txt2img":
                 pipe_params_config["height"] = img_height
@@ -1746,7 +1746,7 @@ class Model_Diffusers:
                         calculate_seed
                     )
 
-            if self.class_name != "StableDiffusionPipeline":
+            if self.class_name == "StableDiffusionXLPipeline":
                 # sdxl pipe
                 images = self.pipe(
                     prompt_embeds=conditioning[0:1],
