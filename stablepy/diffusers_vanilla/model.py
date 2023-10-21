@@ -1068,13 +1068,13 @@ class Model_Diffusers:
                     self.pipe.scheduler.config, use_karras_sigmas=True
                 )
 
-            case "DDIMScheduler":
+            case "DDIM":
                 return DDIMScheduler.from_config(self.pipe.scheduler.config)
 
-            case "DEISMultistepScheduler":
+            case "DEISMultistep":
                 return DEISMultistepScheduler.from_config(self.pipe.scheduler.config)
 
-            case "UniPCMultistepScheduler":
+            case "UniPCMultistep":
                 return UniPCMultistepScheduler.from_config(self.pipe.scheduler.config)
 
     def create_prompt_embeds(
