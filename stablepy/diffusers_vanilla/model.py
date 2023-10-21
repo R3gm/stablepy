@@ -199,27 +199,27 @@ class Preprocessor:
 # =====================================
 
 CONTROLNET_MODEL_IDS = {
-    "Openpose": "lllyasviel/control_v11p_sd15_openpose",
-    "Canny": "lllyasviel/control_v11p_sd15_canny",
-    "MLSD": "lllyasviel/control_v11p_sd15_mlsd",
+    "openpose": "lllyasviel/control_v11p_sd15_openpose",
+    "canny": "lllyasviel/control_v11p_sd15_canny",
+    "mlsd": "lllyasviel/control_v11p_sd15_mlsd",
     "scribble": "lllyasviel/control_v11p_sd15_scribble",
     "softedge": "lllyasviel/control_v11p_sd15_softedge",
     "segmentation": "lllyasviel/control_v11p_sd15_seg",
     "depth": "lllyasviel/control_v11f1p_sd15_depth",
-    "NormalBae": "lllyasviel/control_v11p_sd15_normalbae",
+    "normalbae": "lllyasviel/control_v11p_sd15_normalbae",
     "lineart": "lllyasviel/control_v11p_sd15_lineart",
     "lineart_anime": "lllyasviel/control_v11p_sd15s2_lineart_anime",
     "shuffle": "lllyasviel/control_v11e_sd15_shuffle",
     "ip2p": "lllyasviel/control_v11e_sd15_ip2p",
-    "Inpaint": "lllyasviel/control_v11p_sd15_inpaint",
+    "inpaint": "lllyasviel/control_v11p_sd15_inpaint",
     "txt2img": "Nothinghere",
-    "XL_canny": "TencentARC/t2i-adapter-canny-sdxl-1.0",
-    "XL_sketch": "TencentARC/t2i-adapter-sketch-sdxl-1.0",
-    "XL_lineart": "TencentARC/t2i-adapter-lineart-sdxl-1.0",
-    "XL_depth-midas": "TencentARC/t2i-adapter-depth-midas-sdxl-1.0",
-    #"XL_depth-zoe": "TencentARC/t2i-adapter-depth-zoe-sdxl-1.0",
-    "XL_openpose": "TencentARC/t2i-adapter-openpose-sdxl-1.0",
-    #"XL_recolor": "TencentARC/t2i-adapter-recolor-sdxl-1.0",
+    "sdxl_canny": "TencentARC/t2i-adapter-canny-sdxl-1.0",
+    "sdxl_sketch": "TencentARC/t2i-adapter-sketch-sdxl-1.0",
+    "sdxl_lineart": "TencentARC/t2i-adapter-lineart-sdxl-1.0",
+    "sdxl_depth-midas": "TencentARC/t2i-adapter-depth-midas-sdxl-1.0",
+    "sdxl_openpose": "TencentARC/t2i-adapter-openpose-sdxl-1.0",
+    #"sdxl_depth-zoe": "TencentARC/t2i-adapter-depth-zoe-sdxl-1.0",
+    #"sdxl_recolor": "TencentARC/t2i-adapter-recolor-sdxl-1.0",
 }
 
 
@@ -232,7 +232,7 @@ class Model_Diffusers:
     def __init__(
         self,
         base_model_id: str = "runwayml/stable-diffusion-v1-5",
-        task_name: str = "Canny",
+        task_name: str = "txt2img",
         vae_model=None,
         type_model_precision=torch.float16,
     ):
@@ -254,7 +254,7 @@ class Model_Diffusers:
     def load_pipe(
         self,
         base_model_id: str,
-        task_name,
+        task_name="txt2img",
         vae_model=None,
         type_model_precision=torch.float16,
         reload=False,
@@ -365,7 +365,7 @@ class Model_Diffusers:
         # Load task
         model_id = CONTROLNET_MODEL_IDS[task_name]
 
-        if task_name == "Inpaint":
+        if task_name == "inpaint":
             match class_name:
                 case "StableDiffusionPipeline":
 
@@ -398,7 +398,7 @@ class Model_Diffusers:
                     )
 
 
-        if task_name != "txt2img" and task_name != "Inpaint":
+        if task_name != "txt2img" and task_name != "inpaint":
             match class_name:
                 case "StableDiffusionPipeline":
 
@@ -671,8 +671,6 @@ class Model_Diffusers:
             detect_resolution=preprocess_resolution,
         )
 
-        self.load_controlnet_weight("Canny")
-
         return control_image
 
     @torch.inference_mode()
@@ -695,7 +693,6 @@ class Model_Diffusers:
             thr_v=value_threshold,
             thr_d=distance_threshold,
         )
-        self.load_controlnet_weight("MLSD")
 
         return control_image
 
@@ -730,7 +727,6 @@ class Model_Diffusers:
                 detect_resolution=preprocess_resolution,
                 safe=False,
             )
-        self.load_controlnet_weight("scribble")
 
         return control_image
 
@@ -747,8 +743,6 @@ class Model_Diffusers:
         image = HWC3(image)
         image = resize_image(image, resolution=image_resolution)
         control_image = PIL.Image.fromarray(image)
-
-        self.load_controlnet_weight("scribble")
 
         return control_image
 
@@ -787,7 +781,6 @@ class Model_Diffusers:
             )
         else:
             raise ValueError
-        self.load_controlnet_weight("softedge")
 
         return control_image
 
@@ -814,7 +807,6 @@ class Model_Diffusers:
                 detect_resolution=preprocess_resolution,
                 hand_and_face=True,
             )
-        self.load_controlnet_weight("Openpose")
 
         return control_image
 
@@ -840,7 +832,6 @@ class Model_Diffusers:
                 image_resolution=image_resolution,
                 detect_resolution=preprocess_resolution,
             )
-        self.load_controlnet_weight("segmentation")
 
         return control_image
 
@@ -866,7 +857,6 @@ class Model_Diffusers:
                 image_resolution=image_resolution,
                 detect_resolution=preprocess_resolution,
             )
-        self.load_controlnet_weight("depth")
 
         return control_image
 
@@ -892,7 +882,6 @@ class Model_Diffusers:
                 image_resolution=image_resolution,
                 detect_resolution=preprocess_resolution,
             )
-        self.load_controlnet_weight("NormalBae")
 
         return control_image
 
@@ -927,10 +916,14 @@ class Model_Diffusers:
                 image_resolution=image_resolution,
                 detect_resolution=preprocess_resolution,
             )
-        if "anime" in preprocessor_name:
-            self.load_controlnet_weight("lineart_anime")
-        else:
-            self.load_controlnet_weight("lineart")
+            
+        if self.class_name == "StableDiffusionPipeline":
+            if "anime" in preprocessor_name:
+                self.load_controlnet_weight("lineart_anime")
+                print("linear anime")
+            else:
+                self.load_controlnet_weight("lineart")
+                print("linear")
 
         return control_image
 
@@ -954,7 +947,6 @@ class Model_Diffusers:
                 image=image,
                 image_resolution=image_resolution,
             )
-        self.load_controlnet_weight("shuffle")
 
         return control_image
 
@@ -970,7 +962,6 @@ class Model_Diffusers:
         image = HWC3(image)
         image = resize_image(image, resolution=image_resolution)
         control_image = PIL.Image.fromarray(image)
-        self.load_controlnet_weight("ip2p")
 
         return control_image
 
@@ -994,8 +985,6 @@ class Model_Diffusers:
         control_mask = PIL.Image.fromarray(image_mask)
 
         control_image = make_inpaint_condition(init_image, control_mask)
-
-        self.load_controlnet_weight("Inpaint")
 
         return init_image, control_mask, control_image
 
@@ -1353,7 +1342,7 @@ class Model_Diffusers:
             control_guidance_end (float, optional, defaults to 1.0):
                 The percentage of total steps at which the ControlNet stops applying. Used in ControlNet and Inpaint
             t2i_adapter_preprocessor (bool, optional, defaults to True):
-                Preprocessor for the image in XL_canny by default is True.
+                Preprocessor for the image in sdxl_canny by default is True.
             t2i_adapter_conditioning_scale (float, optional, defaults to 1.0):
                 The outputs of the adapter are multiplied by `t2i_adapter_conditioning_scale` before they are added to the
                 residual in the original unet.
@@ -1618,7 +1607,7 @@ class Model_Diffusers:
 
         # Get params preprocess
         preprocess_params_config = {}
-        if self.task_name != "txt2img" and self.task_name != "Inpaint":
+        if self.task_name != "txt2img" and self.task_name != "inpaint":
             preprocess_params_config["image"] = array_rgb
             preprocess_params_config["image_resolution"] = image_resolution
             # preprocess_params_config["additional_prompt"] = additional_prompt # ""
@@ -1628,11 +1617,11 @@ class Model_Diffusers:
                     preprocess_params_config[
                         "preprocess_resolution"
                     ] = preprocess_resolution
-                if self.task_name != "MLSD" and self.task_name != "Canny":
+                if self.task_name != "mlsd" and self.task_name != "canny":
                     preprocess_params_config["preprocessor_name"] = preprocessor_name
 
         # RUN Preprocess sd
-        if self.task_name == "Inpaint":
+        if self.task_name == "inpaint":
             # Get mask for Inpaint
             if gui_active or os.path.exists(image_mask):
                 # Read image mask from gui
@@ -1684,11 +1673,11 @@ class Model_Diffusers:
                 image_mask=array_rgb_mask,
             )
 
-        elif self.task_name == "Openpose":
+        elif self.task_name == "openpose":
             print("Openpose")
             control_image = self.process_openpose(**preprocess_params_config)
 
-        elif self.task_name == "Canny":
+        elif self.task_name == "canny":
             print("Canny")
             control_image = self.process_canny(
                 **preprocess_params_config,
@@ -1696,7 +1685,7 @@ class Model_Diffusers:
                 high_threshold=high_threshold,
             )
 
-        elif self.task_name == "MLSD":
+        elif self.task_name == "mlsd":
             print("MLSD")
             control_image = self.process_mlsd(
                 **preprocess_params_config,
@@ -1720,7 +1709,7 @@ class Model_Diffusers:
             print("Depth")
             control_image = self.process_depth(**preprocess_params_config)
 
-        elif self.task_name == "NormalBae":
+        elif self.task_name == "normalbae":
             print("NormalBae")
             control_image = self.process_normal(**preprocess_params_config)
 
@@ -1740,38 +1729,38 @@ class Model_Diffusers:
         if self.class_name == "StableDiffusionXLPipeline":
             # Get params preprocess XL
             preprocess_params_config_xl = {}
-            if self.task_name != "txt2img" and self.task_name != "Inpaint":
+            if self.task_name != "txt2img" and self.task_name != "inpaint":
                 preprocess_params_config_xl["image"] = array_rgb
                 preprocess_params_config_xl["preprocess_resolution"] = preprocess_resolution
                 preprocess_params_config_xl["image_resolution"] = image_resolution
                 # preprocess_params_config_xl["additional_prompt"] = additional_prompt # ""
 
-            if self.task_name == "XL_canny": # preprocessor true default
+            if self.task_name == "sdxl_canny": # preprocessor true default
                 print("SDXL Canny")
                 control_image = self.process_canny(
                     **preprocess_params_config_xl,
                     low_threshold=low_threshold,
                     high_threshold=high_threshold,
                 )
-            elif self.task_name == "XL_openpose":
+            elif self.task_name == "sdxl_openpose":
                 print("SDXL Openpose")
                 control_image = self.process_openpose(
                     preprocessor_name = "Openpose" if t2i_adapter_preprocessor else "None",
                     **preprocess_params_config_xl,
                 )
-            elif self.task_name == "XL_sketch":
+            elif self.task_name == "sdxl_sketch":
                 print("SDXL Scribble")
                 control_image = self.process_scribble(
                     preprocessor_name = "PidiNet" if t2i_adapter_preprocessor else "None",
                     **preprocess_params_config_xl,
                 )
-            elif self.task_name == "XL_depth-midas":
+            elif self.task_name == "sdxl_depth-midas":
                 print("SDXL Depth")
                 control_image = self.process_depth(
                     preprocessor_name = "Midas" if t2i_adapter_preprocessor else "None",
                     **preprocess_params_config_xl,
                 )
-            elif self.task_name == "XL_lineart":
+            elif self.task_name == "sdxl_lineart":
                 print("SDXL Lineart")
                 control_image = self.process_lineart(
                     preprocessor_name = "Lineart" if t2i_adapter_preprocessor else "None",
@@ -1808,12 +1797,12 @@ class Model_Diffusers:
             if self.task_name == "txt2img":
                 pipe_params_config["height"] = img_height
                 pipe_params_config["width"] = img_width
-            elif self.task_name == "Inpaint":
+            elif self.task_name == "inpaint":
                 pipe_params_config["strength"] = strength
                 pipe_params_config["image"] = init_image
                 pipe_params_config["mask_image"] = control_mask
                 print(f"Image resolution: {str(init_image.size)}")
-            elif self.task_name != "txt2img" and self.task_name != "Inpaint":
+            elif self.task_name != "txt2img" and self.task_name != "inpaint":
                 pipe_params_config["image"] = control_image
                 pipe_params_config["adapter_conditioning_scale"] = t2i_adapter_conditioning_scale
                 pipe_params_config["adapter_conditioning_factor"] = t2i_adapter_conditioning_factor
@@ -1821,7 +1810,7 @@ class Model_Diffusers:
         elif self.task_name == "txt2img":
             pipe_params_config["height"] = img_height
             pipe_params_config["width"] = img_width
-        elif self.task_name == "Inpaint":
+        elif self.task_name == "inpaint":
             pipe_params_config["strength"] = strength
             pipe_params_config["init_image"] = init_image
             pipe_params_config["control_mask"] = control_mask
@@ -1832,7 +1821,7 @@ class Model_Diffusers:
             pipe_params_config["control_guidance_start"] = control_guidance_start
             pipe_params_config["control_guidance_end"] = control_guidance_end
             print(f"Image resolution: {str(init_image.size)}")
-        elif self.task_name != "txt2img" and self.task_name != "Inpaint":
+        elif self.task_name != "txt2img" and self.task_name != "inpaint":
             pipe_params_config["control_image"] = control_image
             pipe_params_config[
                 "controlnet_conditioning_scale"
@@ -1912,13 +1901,13 @@ class Model_Diffusers:
                     #generator=pipe_params_config["generator"],
                     **pipe_params_config,
                 ).images
-                if self.task_name != "txt2img" and self.task_name != "Inpaint":
+                if self.task_name != "txt2img" and self.task_name != "inpaint":
                     images = [control_image] + images
             elif self.task_name == "txt2img":
                 images = self.run_pipe_SD(**pipe_params_config)
-            elif self.task_name == "Inpaint":
+            elif self.task_name == "inpaint":
                 images = self.run_pipe_inpaint(**pipe_params_config)
-            elif self.task_name != "txt2img" and self.task_name != "Inpaint":
+            elif self.task_name != "txt2img" and self.task_name != "inpaint":
                 results = self.run_pipe(
                     **pipe_params_config
                 )  ## pipe ControlNet add condition_weights
@@ -1934,14 +1923,14 @@ class Model_Diffusers:
                 # for img_single in images:
                 # image_ad = img_single.convert("RGB")
                 # image_pil_list.append(image_ad)
-                if self.task_name != "txt2img" and self.task_name != "Inpaint":
+                if self.task_name != "txt2img" and self.task_name != "inpaint":
                     images = images[1:]
                 images = ad_model_process(
                     adetailer=adetailer,
                     image_list_task=images,
                     **adetailer_params,
                 )
-                if self.task_name != "txt2img" and self.task_name != "Inpaint":
+                if self.task_name != "txt2img" and self.task_name != "inpaint":
                     images = [control_image] + images
                 # del adetailer
                 torch.cuda.empty_cache()
