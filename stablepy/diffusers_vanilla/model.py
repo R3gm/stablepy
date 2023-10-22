@@ -46,7 +46,7 @@ from diffusers import (
     DEISMultistepScheduler,
     UniPCMultistepScheduler,
 )
-from .prompt_weights import get_embed_new
+from .prompt_weights import get_embed_new, add_comma_after_pattern_ti
 from .utils import save_pil_image_with_metadata
 from .lora_loader import lora_mix_load
 from .inpainting_canvas import draw, make_inpaint_condition
@@ -1111,6 +1111,11 @@ class Model_Diffusers:
             negative_prompt, self.pipe.tokenizer
         )
 
+        # separate the multi-vector textual inversion by comma
+        if self.embed_loaded != []:
+            prompt_ti = add_comma_after_pattern_ti(prompt_ti)
+            negative_prompt_ti = add_comma_after_pattern_ti(negative_prompt_ti)
+            
         # Syntax weights
         self.pipe.to(self.device)
         if syntax_weights == "Classic":
