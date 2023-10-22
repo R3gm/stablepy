@@ -2,9 +2,8 @@
 # Prompt weights
 # =====================================
 import torch
-
+import re
 def parse_prompt_attention(text):
-    import re
     re_attention = re.compile(r"""
       \\\(|
       \\\)|
@@ -203,3 +202,8 @@ def get_embed_new(prompt, pipeline, compel, only_convert_string=False, compel_pr
         return ' '.join([prompt_attention_to_invoke_prompt(i) for i in global_prompt_chanks])
 
     return merge_embeds([prompt_attention_to_invoke_prompt(i) for i in global_prompt_chanks], compel)
+
+def add_comma_after_pattern_ti(text):
+    pattern = re.compile(r'\b\w+_\d+\b')
+    modified_text = pattern.sub(lambda x: x.group() + ',', text)
+    return modified_text
