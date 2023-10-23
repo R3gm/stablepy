@@ -2,13 +2,22 @@
 
 **Description:**
 
-The goal of this project is to make Stable Diffusion more accessible, simple and easy-to-use with python.  Stablepy is constructed on top of the Diffusion library
+The goal of this project is to make Stable Diffusion more accessible, simple and easy-to-use with python.  Stablepy is constructed on top of the Diffusers library
 
 **Usage:**
 
 To use the project, simply create a new instance of the `Model_Diffusers` class. This class takes several arguments, including the path to the Stable Diffusion model file and the task name.
 
 Once you have created a new instance of the `Model_Diffusers` class, you can call the `model()` method to generate an image. The `model()` method takes several arguments, including the prompt, the number of steps, the guidance scale, the sampler, the image width, the image height, the path to the upscaler model (if using), etc.
+
+**Demo:**
+
+See [stablepy_demo.ipynb](https://github.com/R3gm/stablepy/blob/main/stablepy_demo.ipynb)
+
+<a target="_blank" href="https://colab.research.google.com/github/R3gm/stablepy/blob/main/stablepy_demo.ipynb">
+  <img src="https://colab.research.google.com/assets/colab-badge.svg" alt="Open In Colab"/>
+</a>
+
 
 **Examples:**
 
