@@ -63,7 +63,11 @@ def ad_model_process(
         torch.cuda.empty_cache()
         gc.collect()
 
-        image_list_ad.append(result_ad[0][0])
+        try:
+            image_list_ad.append(result_ad[0][0])
+        except:
+            print("ADETAILER: No detections found")
+            image_list_ad.append(images_ad)
 
     torch.cuda.empty_cache()
     gc.collect()
