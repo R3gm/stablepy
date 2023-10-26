@@ -52,7 +52,7 @@ from stablepy import Model_Diffusers
 # Generate an ControlNet diffusion
 model = Model_Diffusers(
     base_model_id='./models/toonyou_beta6.safetensors',
-    task_name= 'Canny',
+    task_name= 'canny',
 )
 
 images, path_images = model(
