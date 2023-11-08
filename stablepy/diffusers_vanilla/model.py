@@ -60,6 +60,10 @@ from IPython.display import display
 from PIL import Image
 from asdff.sd import AdCnPreloadPipe
 from typing import Union, Optional, List, Tuple, Dict, Any, Callable
+import logging
+import diffusers
+logging.getLogger("diffusers").setLevel(logging.ERROR)
+diffusers.utils.logging.set_verbosity(40)
 
 # =====================================
 # Utils preprocessor
@@ -227,6 +231,33 @@ CONTROLNET_MODEL_IDS = {
 #     for model_id in CONTROLNET_MODEL_IDS.values():
 #         ControlNetModel.from_pretrained(model_id)
 
+SCHEDULER_CONFIG_MAP = {
+    "DPM++ 2M": (DPMSolverMultistepScheduler, {}),
+    "DPM++ 2M Karras": (DPMSolverMultistepScheduler, {"use_karras_sigmas": True}),
+    "DPM++ 2M SDE": (DPMSolverMultistepScheduler, {"algorithm_type": "sde-dpmsolver++"}),
+    "DPM++ 2M SDE Karras": (DPMSolverMultistepScheduler, {"use_karras_sigmas": True, "algorithm_type": "sde-dpmsolver++"}),
+    "DPM++ SDE": (DPMSolverSinglestepScheduler, {}),
+    "DPM++ SDE Karras": (DPMSolverSinglestepScheduler, {"use_karras_sigmas": True}),
+    "DPM2": (KDPM2DiscreteScheduler, {}),
+    "DPM2 Karras": (KDPM2DiscreteScheduler, {"use_karras_sigmas": True}),
+    "Euler": (EulerDiscreteScheduler, {}),
+    "Euler a": (EulerAncestralDiscreteScheduler, {}),
+    "Heun": (HeunDiscreteScheduler, {}),
+    "LMS": (LMSDiscreteScheduler, {}),
+    "LMS Karras": (LMSDiscreteScheduler, {"use_karras_sigmas": True}),
+    "DDIM": (DDIMScheduler, {}),
+    "DEISMultistep": (DEISMultistepScheduler, {}),
+    "UniPCMultistep": (UniPCMultistepScheduler, {}),
+    "Euler Karras": (EulerDiscreteScheduler, {"use_karras_sigmas": True}),
+    
+    "DPM++ 2M Lu": (DPMSolverMultistepScheduler, {"use_lu_lambdas": True}),
+    "DPM++ 2M Ef": (DPMSolverMultistepScheduler, {"euler_at_final": True}),
+    "DPM++ 2M SDE Lu": (DPMSolverMultistepScheduler, {"use_lu_lambdas": True, "algorithm_type": "sde-dpmsolver++"}),
+    "DPM++ 2M SDE Ef": (DPMSolverMultistepScheduler, {"algorithm_type": "sde-dpmsolver++", "euler_at_final": True}),
+}
+
+scheduler_names = list(SCHEDULER_CONFIG_MAP.keys())
+
 
 class Model_Diffusers:
     def __init__(
@@ -289,7 +320,7 @@ class Model_Diffusers:
 
         if self.type_model_precision == torch.float32 and os.path.isfile(base_model_id):
             print("Working with full precision")
-        
+
         # Load model
         if self.base_model_id == base_model_id and self.pipe is not None and reload == False and self.vae_model == vae_model and unload_model == False:
             print("Previous loaded base model") # not return
@@ -911,7 +942,7 @@ class Model_Diffusers:
                 image_resolution=image_resolution,
                 detect_resolution=preprocess_resolution,
             )
-            
+
         if self.class_name == "StableDiffusionPipeline":
             if "anime" in preprocessor_name:
                 self.load_controlnet_weight("lineart_anime")
@@ -983,83 +1014,11 @@ class Model_Diffusers:
         return init_image, control_mask, control_image
 
     def get_scheduler(self, name):
-        # Get scheduler
-        match name:
-            case "DPM++ 2M":
-                return DPMSolverMultistepScheduler.from_config(
-                    self.pipe.scheduler.config
-                )
-
-            case "DPM++ 2M Karras":
-                return DPMSolverMultistepScheduler.from_config(
-                    self.pipe.scheduler.config, use_karras_sigmas=True
-                )
-
-            case "DPM++ 2M SDE":
-                return DPMSolverMultistepScheduler.from_config(
-                    self.pipe.scheduler.config, algorithm_type="sde-dpmsolver++"
-                )
-
-            case "DPM++ 2M SDE Karras":
-                return DPMSolverMultistepScheduler.from_config(
-                    self.pipe.scheduler.config,
-                    use_karras_sigmas=True,
-                    algorithm_type="sde-dpmsolver++",
-                )
-
-            case "DPM++ SDE":
-                return DPMSolverSinglestepScheduler.from_config(
-                    self.pipe.scheduler.config,
-                )
-
-            case "DPM++ SDE Karras":
-                return DPMSolverSinglestepScheduler.from_config(
-                    self.pipe.scheduler.config, use_karras_sigmas=True
-                )
-
-            case "DPM2":
-                return KDPM2DiscreteScheduler.from_config(
-                    self.pipe.scheduler.config,
-                )
-
-            case "DPM2 Karras":
-                return KDPM2DiscreteScheduler.from_config(
-                    self.pipe.scheduler.config, use_karras_sigmas=True
-                )
-
-            case "Euler":
-                return EulerDiscreteScheduler.from_config(
-                    self.pipe.scheduler.config,
-                )
-
-            case "Euler a":
-                return EulerAncestralDiscreteScheduler.from_config(
-                    self.pipe.scheduler.config,
-                )
-
-            case "Heun":
-                return HeunDiscreteScheduler.from_config(
-                    self.pipe.scheduler.config,
-                )
-
-            case "LMS":
-                return LMSDiscreteScheduler.from_config(
-                    self.pipe.scheduler.config,
-                )
-
-            case "LMS Karras":
-                return LMSDiscreteScheduler.from_config(
-                    self.pipe.scheduler.config, use_karras_sigmas=True
-                )
-
-            case "DDIM":
-                return DDIMScheduler.from_config(self.pipe.scheduler.config)
-
-            case "DEISMultistep":
-                return DEISMultistepScheduler.from_config(self.pipe.scheduler.config)
-
-            case "UniPCMultistep":
-                return UniPCMultistepScheduler.from_config(self.pipe.scheduler.config)
+        if name in SCHEDULER_CONFIG_MAP:
+            scheduler_class, config = SCHEDULER_CONFIG_MAP[name]
+            return scheduler_class.from_config(self.pipe.scheduler.config, **config)
+        else:
+            raise ValueError(f"Scheduler with name {name} not found. Valid schedulers: {', '.join(scheduler_names)}")
 
     def create_prompt_embeds(
         self,
@@ -1115,7 +1074,7 @@ class Model_Diffusers:
         if self.embed_loaded != []:
             prompt_ti = add_comma_after_pattern_ti(prompt_ti)
             negative_prompt_ti = add_comma_after_pattern_ti(negative_prompt_ti)
-            
+
         # Syntax weights
         self.pipe.to(self.device)
         if syntax_weights == "Classic":
@@ -1246,13 +1205,13 @@ class Model_Diffusers:
         xformers_memory_efficient_attention: bool = False,
         gui_active: bool = False,
     ):
-        
+
         """
         The call function for the generation.
-    
+
         Args:
             prompt (str , optional):
-                The prompt or prompts to guide image generation. 
+                The prompt or prompts to guide image generation.
             negative_prompt (str , optional):
                 The prompt or prompts to guide what to not include in image generation. Ignored when not using guidance (`guidance_scale < 1`).
             img_height (int, optional, defaults to 512):
@@ -1268,14 +1227,14 @@ class Model_Diffusers:
                 A higher guidance scale value encourages the model to generate images closely linked to the text
                 `prompt` at the expense of lower image quality. Guidance scale is enabled when `guidance_scale > 1`.
             clip_skip (bool, optional):
-                Number of layers to be skipped from CLIP while computing the prompt embeddings. It can be placed on 
+                Number of layers to be skipped from CLIP while computing the prompt embeddings. It can be placed on
                 the penultimate (True) or last layer (False).
             seed (int, optional, defaults to -1):
                 A seed for controlling the randomness of the image generation process. -1 design a random seed.
             sampler (str, optional, defaults to "DPM++ 2M"):
-                The sampler used for the generation process. Available samplers: DPM++ 2M, DPM++ 2M Karras, DPM++ 2M SDE, 
-                DPM++ 2M SDE Karras, DPM++ SDE, DPM++ SDE Karras, DPM2, DPM2 Karras, Euler, Euler a, Heun, LMS, LMS Karras, 
-                DDIM, DEISMultistep and UniPCMultistep
+                The sampler used for the generation process. Available samplers: DPM++ 2M, DPM++ 2M Karras, DPM++ 2M SDE,
+                DPM++ 2M SDE Karras, DPM++ SDE, DPM++ SDE Karras, DPM2, DPM2 Karras, Euler, Euler a, Heun, LMS, LMS Karras,
+                DDIM, DEISMultistep, UniPCMultistep, Euler Karras, DPM++ 2M Lu, DPM++ 2M Ef, DPM++ 2M SDE Lu and DPM++ 2M SDE Ef.
             syntax_weights (str, optional, defaults to "Classic"):
                 Specifies the type of syntax weights used during generation. "Classic" is (word:weight), "Compel" is (word)weight
             lora_A (str, optional):
@@ -1299,7 +1258,7 @@ class Model_Diffusers:
             lora_scale_E (float, optional, defaults to 1.0):
                 Placeholder for lora scale E parameter.
             textual_inversion (List[Tuple[str, str]], optional, defaults to []):
-                Placeholder for textual inversion list of tuples. Help the model to adapt to a particular 
+                Placeholder for textual inversion list of tuples. Help the model to adapt to a particular
                 style. [("<token_activation>","<path_embeding>"),...]
             FreeU (bool, optional, defaults to False):
                 Is a method that substantially improves diffusion model sample quality at no costs.
@@ -1352,7 +1311,7 @@ class Model_Diffusers:
             loop_generation (int, optional, defaults to 1):
                 The number of times the specified `num_images` will be generated.
             generator_in_cpu (bool, optional, defaults to False):
-                The generator by default is specified on the GPU. To obtain more consistent results across various environments, 
+                The generator by default is specified on the GPU. To obtain more consistent results across various environments,
                 it is preferable to use the generator on the CPU.
             leave_progress_bar (bool, optional, defaults to False):
                 Leave the progress bar after generating the image.
@@ -1364,15 +1323,19 @@ class Model_Diffusers:
                 Improves generation time, currently disabled.
             gui_active (bool, optional, defaults to False):
                 utility when used with a GUI, it changes the behavior especially by displaying confirmation messages or options.
-    
+
         Specific parameter usage details:
-        
+
             Additional parameters that will be used in Inpaint:
                 - image
                 - image_mask
                 - image_resolution
                 - strength
-                
+                - image_resolution
+                - controlnet_conditioning_scale
+                - control_guidance_start
+                - control_guidance_end
+
             Additional parameters that will be used in ControlNet depending on the task:
                 - image
                 - preprocessor_name
@@ -1387,7 +1350,7 @@ class Model_Diffusers:
                 for MLSD:
                     - value_threshold
                     - distance_threshold
-        
+
             Additional parameters that will be used in T2I adapter depending on the task:
                 - image
                 - preprocess_resolution
@@ -1395,7 +1358,7 @@ class Model_Diffusers:
                 - t2i_adapter_preprocessor
                 - t2i_adapter_conditioning_scale
                 - t2i_adapter_conditioning_factor
-            
+
         """
 
         if self.task_name != "txt2img" and image == None:
