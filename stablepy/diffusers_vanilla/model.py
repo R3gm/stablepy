@@ -249,7 +249,7 @@ SCHEDULER_CONFIG_MAP = {
     "DEISMultistep": (DEISMultistepScheduler, {}),
     "UniPCMultistep": (UniPCMultistepScheduler, {}),
     "Euler Karras": (EulerDiscreteScheduler, {"use_karras_sigmas": True}),
-    
+
     "DPM++ 2M Lu": (DPMSolverMultistepScheduler, {"use_lu_lambdas": True}),
     "DPM++ 2M Ef": (DPMSolverMultistepScheduler, {"euler_at_final": True}),
     "DPM++ 2M SDE Lu": (DPMSolverMultistepScheduler, {"use_lu_lambdas": True, "algorithm_type": "sde-dpmsolver++"}),
@@ -376,6 +376,7 @@ class Model_Diffusers:
                             torch_dtype=torch.float16,
                             use_safetensors=True,
                             variant="fp16",
+                            add_watermarker=False,
                         )
 
             # Load VAE after loaded model
@@ -506,6 +507,10 @@ class Model_Diffusers:
         self.task_name = task_name
         self.vae_model = vae_model
         self.class_name = class_name
+
+        if self.class_name == "StableDiffusionXLPipeline":
+            self.pipe.watermark = None
+
         return
 
     def load_controlnet_weight(self, task_name: str) -> None:
