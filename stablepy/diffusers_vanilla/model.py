@@ -61,6 +61,7 @@ from PIL import Image
 from asdff.sd import AdCnPreloadPipe
 from typing import Union, Optional, List, Tuple, Dict, Any, Callable
 import logging
+from diffusers import AutoPipelineForImage2Image
 import diffusers
 logging.getLogger("diffusers").setLevel(logging.ERROR)
 diffusers.utils.logging.set_verbosity(40)
@@ -224,6 +225,7 @@ CONTROLNET_MODEL_IDS = {
     "sdxl_openpose": "TencentARC/t2i-adapter-openpose-sdxl-1.0",
     #"sdxl_depth-zoe": "TencentARC/t2i-adapter-depth-zoe-sdxl-1.0",
     #"sdxl_recolor": "TencentARC/t2i-adapter-recolor-sdxl-1.0",
+    "img2img": "Nothinghere",
 }
 
 
@@ -430,7 +432,7 @@ class Model_Diffusers:
                     )
 
 
-        if task_name != "txt2img" and task_name != "inpaint":
+        if task_name not in ["txt2img", "inpaint", "img2img"]:
             match class_name:
                 case "StableDiffusionPipeline":
 
@@ -471,7 +473,7 @@ class Model_Diffusers:
                     ).to(self.device)
 
 
-        if task_name == "txt2img":
+        if task_name in ["txt2img", "img2img"]:
             match class_name:
 
                 case "StableDiffusionPipeline":
@@ -496,7 +498,9 @@ class Model_Diffusers:
                         unet=self.pipe.unet,
                         scheduler=self.pipe.scheduler,
                     )
-
+            
+            if task_name == "img2img":
+                self.pipe = AutoPipelineForImage2Image.from_pipe(self.pipe)
 
         # Create new base values
         self.pipe.to(self.device)
@@ -509,6 +513,8 @@ class Model_Diffusers:
         self.class_name = class_name
 
         if self.class_name == "StableDiffusionXLPipeline":
+            self.pipe.enable_vae_slicing()
+            self.pipe.enable_vae_tiling()
             self.pipe.watermark = None
 
         return
@@ -678,6 +684,38 @@ class Model_Diffusers:
             controlnet_conditioning_scale=controlnet_conditioning_scale,
             control_guidance_start=control_guidance_start,
             control_guidance_end=control_guidance_end,
+        ).images
+
+    @torch.autocast("cuda")
+    def run_pipe_img2img(
+        self,
+        prompt: str,
+        negative_prompt: str,
+        prompt_embeds,
+        negative_prompt_embeds,
+        num_images: int,
+        num_steps: int,
+        guidance_scale: float,
+        clip_skip: int,
+        strength: float,
+        init_image,
+        generator,
+    ) -> list[PIL.Image.Image]:
+        # Return PIL images
+        # generator = torch.Generator().manual_seed(seed)
+        return self.pipe(
+            prompt=None,
+            negative_prompt=None,
+            prompt_embeds=prompt_embeds,
+            negative_prompt_embeds=negative_prompt_embeds,
+            eta=1.0,
+            strength=strength,
+            image=init_image,  # original image
+            num_images_per_prompt=num_images,
+            num_inference_steps=num_steps,
+            guidance_scale=guidance_scale,
+            clip_skip=clip_skip,
+            generator=generator,
         ).images
 
     ### self.x_process return image_preprocessor###
@@ -1017,6 +1055,21 @@ class Model_Diffusers:
         control_image = make_inpaint_condition(init_image, control_mask)
 
         return init_image, control_mask, control_image
+
+    @torch.inference_mode()
+    def process_img2img(
+        self,
+        image: np.ndarray,
+        image_resolution: int,
+    ) -> list[PIL.Image.Image]:
+        if image is None:
+            raise ValueError
+
+        image = HWC3(image)
+        image = resize_image(image, resolution=image_resolution)
+        init_image = PIL.Image.fromarray(image)
+
+        return init_image
 
     def get_scheduler(self, name):
         if name in SCHEDULER_CONFIG_MAP:
@@ -1532,7 +1585,7 @@ class Model_Diffusers:
 
         self.pipe.safety_checker = None
 
-        # Get Control image
+        # Get image Global
         if self.task_name != "txt2img":
             if isinstance(image, str):
                 # If the input is a string (file path), open it as an image
@@ -1570,9 +1623,9 @@ class Model_Diffusers:
                     "Unsupported image type; Bug report to https://github.com/R3gm/stablepy or https://github.com/R3gm/SD_diffusers_interactive"
                 )  # return
 
-        # Get params preprocess
+        # Get params preprocess Global
         preprocess_params_config = {}
-        if self.task_name != "txt2img" and self.task_name != "inpaint":
+        if self.task_name not in ["txt2img", "inpaint", "img2img"]:
             preprocess_params_config["image"] = array_rgb
             preprocess_params_config["image_resolution"] = image_resolution
             # preprocess_params_config["additional_prompt"] = additional_prompt # ""
@@ -1585,7 +1638,7 @@ class Model_Diffusers:
                 if self.task_name != "mlsd" and self.task_name != "canny":
                     preprocess_params_config["preprocessor_name"] = preprocessor_name
 
-        # RUN Preprocess sd
+        # RUN Preprocess
         if self.task_name == "inpaint":
             # Get mask for Inpaint
             if gui_active or os.path.exists(image_mask):
@@ -1690,11 +1743,16 @@ class Model_Diffusers:
             print("Ip2p")
             control_image = self.process_ip2p(**preprocess_params_config)
 
-        # RUN Preprocess sdxl
+        elif self.task_name == "img2img":
+            preprocess_params_config["image"] = array_rgb
+            preprocess_params_config["image_resolution"] = image_resolution
+            init_image = self.process_img2img(**preprocess_params_config)
+
+        # RUN Preprocess T2I for sdxl
         if self.class_name == "StableDiffusionXLPipeline":
             # Get params preprocess XL
             preprocess_params_config_xl = {}
-            if self.task_name != "txt2img" and self.task_name != "inpaint":
+            if self.task_name not in ["txt2img", "inpaint", "img2img"]:
                 preprocess_params_config_xl["image"] = array_rgb
                 preprocess_params_config_xl["preprocess_resolution"] = preprocess_resolution
                 preprocess_params_config_xl["image_resolution"] = image_resolution
@@ -1767,7 +1825,7 @@ class Model_Diffusers:
                 pipe_params_config["image"] = init_image
                 pipe_params_config["mask_image"] = control_mask
                 print(f"Image resolution: {str(init_image.size)}")
-            elif self.task_name != "txt2img" and self.task_name != "inpaint":
+            elif self.task_name not in ["txt2img", "inpaint", "img2img"]:
                 pipe_params_config["image"] = control_image
                 pipe_params_config["adapter_conditioning_scale"] = t2i_adapter_conditioning_scale
                 pipe_params_config["adapter_conditioning_factor"] = t2i_adapter_conditioning_factor
@@ -1786,7 +1844,7 @@ class Model_Diffusers:
             pipe_params_config["control_guidance_start"] = control_guidance_start
             pipe_params_config["control_guidance_end"] = control_guidance_end
             print(f"Image resolution: {str(init_image.size)}")
-        elif self.task_name != "txt2img" and self.task_name != "inpaint":
+        elif self.task_name not in ["txt2img", "inpaint", "img2img"]:
             pipe_params_config["control_image"] = control_image
             pipe_params_config[
                 "controlnet_conditioning_scale"
@@ -1794,6 +1852,9 @@ class Model_Diffusers:
             pipe_params_config["control_guidance_start"] = control_guidance_start
             pipe_params_config["control_guidance_end"] = control_guidance_end
             print(f"Image resolution: {str(control_image.size)}")
+        self.task_name == "img2img":
+            pipe_params_config["strength"] = strength
+            pipe_params_config["init_image"] = init_image
 
         # Adetailer params and pipe
         if adetailer_active and self.class_name == "StableDiffusionPipeline":
@@ -1866,18 +1927,20 @@ class Model_Diffusers:
                     #generator=pipe_params_config["generator"],
                     **pipe_params_config,
                 ).images
-                if self.task_name != "txt2img" and self.task_name != "inpaint":
+                if self.task_name not in ["txt2img", "inpaint", "img2img"]:
                     images = [control_image] + images
             elif self.task_name == "txt2img":
                 images = self.run_pipe_SD(**pipe_params_config)
             elif self.task_name == "inpaint":
                 images = self.run_pipe_inpaint(**pipe_params_config)
-            elif self.task_name != "txt2img" and self.task_name != "inpaint":
+            elif self.task_name not in ["txt2img", "inpaint", "img2img"]:
                 results = self.run_pipe(
                     **pipe_params_config
                 )  ## pipe ControlNet add condition_weights
                 images = [control_image] + results
                 del results
+            elif self.task_name == "img2img":
+                images = self.run_pipe_img2img(**pipe_params_config)
 
             torch.cuda.empty_cache()
             gc.collect()
@@ -1888,14 +1951,14 @@ class Model_Diffusers:
                 # for img_single in images:
                 # image_ad = img_single.convert("RGB")
                 # image_pil_list.append(image_ad)
-                if self.task_name != "txt2img" and self.task_name != "inpaint":
+                if self.task_name not in ["txt2img", "inpaint", "img2img"]:
                     images = images[1:]
                 images = ad_model_process(
                     adetailer=adetailer,
                     image_list_task=images,
                     **adetailer_params,
                 )
-                if self.task_name != "txt2img" and self.task_name != "inpaint":
+                if self.task_name not in ["txt2img", "inpaint", "img2img"]:
                     images = [control_image] + images
                 # del adetailer
                 torch.cuda.empty_cache()
