@@ -1389,10 +1389,14 @@ class Model_Diffusers:
                 - image_mask
                 - image_resolution
                 - strength
-                - image_resolution
                 - controlnet_conditioning_scale
                 - control_guidance_start
                 - control_guidance_end
+
+            Additional parameters that will be used in img2img:
+                - image
+                - image_resolution
+                - strength
 
             Additional parameters that will be used in ControlNet depending on the task:
                 - image
