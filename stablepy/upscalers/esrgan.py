@@ -20,7 +20,6 @@ class Upscaler:
     filter = None
     model = None
     user_path = None
-    scalers: []
     tile = True
 
     def __init__(self, create_dirs=False):
@@ -34,7 +33,7 @@ class Upscaler:
         self.half = True
         self.pre_pad = 0
         self.mod_scale = None
-        self.model_download_path = None
+        self.model_download_path = "upscalers"
 
         if self.model_path is None and self.name:
             self.model_path = os.path.join(
@@ -79,44 +78,12 @@ class Upscaler:
     def load_model(self, path: str):
         pass
 
-    def find_models(self, ext_filter=None) -> list:
-        return load_models(
-            model_path=self.model_path,
-            model_url=self.model_url,
-            command_path=self.user_path,
-            ext_filter=ext_filter,
-        )
-
     def update_status(self, prompt):
-        print(f"\nextras: {prompt}", file=shared.progress_print_out)
-
-
-class UpscalerData:
-    name = None
-    data_path = None
-    scale: int = 4
-    scaler: Upscaler = None
-    model: None
-
-    def __init__(
-        self,
-        name: str,
-        path: str,
-        upscaler: Upscaler = None,
-        scale: int = 4,
-        model=None,
-    ):
-        self.name = name
-        self.data_path = path
-        self.local_data_path = path
-        self.scaler = upscaler
-        self.scale = scale
-        self.model = model
+        print(f"extras: {prompt}")
 
 
 class UpscalerNone(Upscaler):
     name = "None"
-    scalers = []
 
     def load_model(self, path):
         pass
@@ -126,11 +93,9 @@ class UpscalerNone(Upscaler):
 
     def __init__(self, dirname=None):
         super().__init__(False)
-        self.scalers = [UpscalerData("None", None, self)]
 
 
 class UpscalerLanczos(Upscaler):
-    scalers = []
 
     def do_upscale(self, img, selected_model=None):
         return img.resize(
@@ -144,11 +109,9 @@ class UpscalerLanczos(Upscaler):
     def __init__(self, dirname=None):
         super().__init__(False)
         self.name = "Lanczos"
-        self.scalers = [UpscalerData("Lanczos", None, self)]
 
 
 class UpscalerNearest(Upscaler):
-    scalers = []
 
     def do_upscale(self, img, selected_model=None):
         return img.resize(
@@ -162,7 +125,6 @@ class UpscalerNearest(Upscaler):
     def __init__(self, dirname=None):
         super().__init__(False)
         self.name = "Nearest"
-        self.scalers = [UpscalerData("Nearest", None, self)]
 
 
 # =====================================
@@ -282,28 +244,18 @@ def infer_params(state_dict):
 
 
 class UpscalerESRGAN(Upscaler):
-    def __init__(self, dirname=""):
+    def __init__(self, tile=100, tile_overlap=10,  dirname=""):
         self.name = "ESRGAN"
         self.model_url = (
             "https://github.com/cszn/KAIR/releases/download/v1.0/ESRGAN.pth"
         )
         self.model_name = "ESRGAN_4x"
-        self.scalers = []
         self.user_path = dirname
-        super().__init__()
-        model_paths = self.find_models(ext_filter=[".pt", ".pth"])
-        scalers = []
-        if len(model_paths) == 0:
-            scaler_data = UpscalerData(self.model_name, self.model_url, self, 4)
-            scalers.append(scaler_data)
-        for file in model_paths:
-            if file.startswith("http"):
-                name = self.model_name
-            else:
-                name = modelloader.friendly_name(file)
 
-            scaler_data = UpscalerData(name, file, self, 4)
-            self.scalers.append(scaler_data)
+        super().__init__()
+
+        self.tile = tile
+        self.tile_overlap = tile_overlap
 
     def do_upscale(self, img, selected_model):
         try:
@@ -312,22 +264,21 @@ class UpscalerESRGAN(Upscaler):
             print(f"Unable to load ESRGAN model {selected_model}: {e}", file=sys.stderr)
             return img
         model.to(device_upscaler)
-        img = esrgan_upscale(model, img)
+        img = esrgan_upscale(model, img, self.tile, self.tile_overlap)
         return img
 
     def load_model(self, path: str):
         if path.startswith("http"):
-            # TODO: this doesn't use `path` at all?
-            filename = modelloader.load_file_from_url(
-                url=self.model_url,
+            filename = load_file_from_url(
+                url=path,
                 model_dir=self.model_download_path,
-                file_name=f"{self.model_name}.pth",
+                file_name=f"{friendly_name(path)}.pth",
             )
         else:
             filename = path
 
         state_dict = torch.load(
-            filename, map_location="cpu" if "p⭐s" == "mps" else None
+            filename, map_location="cpu"
         )
 
         if "params_ema" in state_dict:
@@ -384,15 +335,15 @@ def upscale_without_tiling(model, img):
     return Image.fromarray(output, "RGB")
 
 
-def esrgan_upscale(model, img):
-    if "active default" == 0:  # tilling ⭐
+def esrgan_upscale(model, img, ESRGAN_tile, ESRGAN_tile_overlap):
+    if ESRGAN_tile == 0:  # no tiling
         return upscale_without_tiling(model, img)
-    ESRGAN_tile = 100  # ⭐
-    ESRGAN_tile_overlap = 10  # ⭐
+    # ESRGAN_tile = 100
+    # ESRGAN_tile_overlap = 10
 
     grid = split_grid(img, ESRGAN_tile, ESRGAN_tile, ESRGAN_tile_overlap)
     newtiles = []
-    scale_factor = 4
+    scale_factor = 1 # 4
 
     for y, h, row in grid.tiles:
         newrow = []
@@ -541,61 +492,6 @@ def load_file_from_url(
 
         download_url_to_file(url, cached_file, progress=progress)
     return cached_file
-
-
-def load_models(
-    model_path: str,
-    model_url: str = None,
-    command_path: str = None,
-    ext_filter=None,
-    download_name=None,
-    ext_blacklist=None,
-) -> list:
-    """ """
-    output = []
-
-    try:
-        places = []
-
-        if command_path is not None and command_path != model_path:
-            pretrained_path = os.path.join(
-                command_path, "experiments/pretrained_models"
-            )
-            if os.path.exists(pretrained_path):
-                print(f"Appending path: {pretrained_path}")
-                places.append(pretrained_path)
-            elif os.path.exists(command_path):
-                places.append(command_path)
-
-        places.append(model_path)
-
-        for place in places:
-            for full_path in shared.walk_files(place, allowed_extensions=ext_filter):
-                if os.path.islink(full_path) and not os.path.exists(full_path):
-                    print(f"Skipping broken symlink: {full_path}")
-                    continue
-                if ext_blacklist is not None and any(
-                    full_path.endswith(x) for x in ext_blacklist
-                ):
-                    continue
-                if full_path not in output:
-                    output.append(full_path)
-
-        if model_url is not None and len(output) == 0:
-            if download_name is not None:
-                output.append(
-                    load_file_from_url(
-                        model_url, model_dir=places[0], file_name=download_name
-                    )
-                )
-            else:
-                output.append(model_url)
-
-    except Exception:
-        pass
-
-    return output
-
 
 def friendly_name(file: str):
     if file.startswith("http"):
