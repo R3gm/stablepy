@@ -51,7 +51,7 @@ from .utils import save_pil_image_with_metadata
 from .lora_loader import lora_mix_load
 from .inpainting_canvas import draw, make_inpaint_condition
 from .adetailer import ad_model_process
-from ..upscalers.esrgan import UpscalerESRGAN
+from ..upscalers.esrgan import UpscalerESRGAN, UpscalerLanczos, UpscalerNearest
 import os
 from compel import Compel
 from compel import ReturnedEmbeddingsType
@@ -250,7 +250,7 @@ SCHEDULER_CONFIG_MAP = {
     "DDIM": (DDIMScheduler, {}),
     "DEISMultistep": (DEISMultistepScheduler, {}),
     "UniPCMultistep": (UniPCMultistepScheduler, {}),
-    "Euler Karras": (EulerDiscreteScheduler, {"use_karras_sigmas": True}),
+    #"Euler Karras": (EulerDiscreteScheduler, {"use_karras_sigmas": True}),
 
     "DPM++ 2M Lu": (DPMSolverMultistepScheduler, {"use_lu_lambdas": True}),
     "DPM++ 2M Ef": (DPMSolverMultistepScheduler, {"euler_at_final": True}),
@@ -395,6 +395,10 @@ class Model_Diffusers:
                         vae_model,
                         subfolder = "vae",
                     )
+                try:
+                  self.pipe.vae.to(self.type_model_precision)
+                except:
+                  print(f"Error vae, not in {self.type_model_precision}")
 
         # Load task
         model_id = CONTROLNET_MODEL_IDS[task_name]
@@ -498,7 +502,7 @@ class Model_Diffusers:
                         unet=self.pipe.unet,
                         scheduler=self.pipe.scheduler,
                     )
-            
+
             if task_name == "img2img":
                 self.pipe = AutoPipelineForImage2Image.from_pipe(self.pipe)
 
@@ -1235,8 +1239,6 @@ class Model_Diffusers:
         adetailer_active: bool = False,
         adetailer_params: Dict[str, Any] = {},
         additional_prompt: str = "",
-        upscaler_model_path: Optional[str] = None,
-        upscaler_increases_size: float = 1.5,
 
         image: Optional[Any] = None,
         preprocessor_name: Optional[str] = "None",
@@ -1254,6 +1256,16 @@ class Model_Diffusers:
         t2i_adapter_preprocessor: bool = True,
         t2i_adapter_conditioning_scale: float = 1.0,
         t2i_adapter_conditioning_factor: float = 1.0,
+
+        upscaler_model_path: Optional[str] = None,
+        upscaler_increases_size: float = 1.5,
+        esrgan_tile: int = 100,
+        esrgan_tile_overlap: int = 10,
+        hires_steps: int = 25,
+        hires_denoising_strength: float = 0.35,
+        # hires_type: str = "pil" # latent,
+        hires_prompt: str = "",
+        hires_negative_prompt: str = "",
 
         loop_generation: int = 1,
         generator_in_cpu: bool = False,
@@ -1834,6 +1846,10 @@ class Model_Diffusers:
                 pipe_params_config["adapter_conditioning_scale"] = t2i_adapter_conditioning_scale
                 pipe_params_config["adapter_conditioning_factor"] = t2i_adapter_conditioning_factor
                 print(f"Image resolution: {str(control_image.size)}")
+            elif self.task_name == "img2img":
+                pipe_params_config["strength"] = strength
+                pipe_params_config["image"] = init_image
+                print(f"Image resolution: {str(init_image.size)}")
         elif self.task_name == "txt2img":
             pipe_params_config["height"] = img_height
             pipe_params_config["width"] = img_width
@@ -1856,12 +1872,26 @@ class Model_Diffusers:
             pipe_params_config["control_guidance_start"] = control_guidance_start
             pipe_params_config["control_guidance_end"] = control_guidance_end
             print(f"Image resolution: {str(control_image.size)}")
-        self.task_name == "img2img":
+        elif self.task_name == "img2img":
             pipe_params_config["strength"] = strength
             pipe_params_config["init_image"] = init_image
+            print(f"Image resolution: {str(init_image.size)}")
 
         # Adetailer params and pipe
         if adetailer_active and self.class_name == "StableDiffusionPipeline":
+
+            # Adetailer resolution param
+            if self.task_name == "txt2img":
+                adetailer_params["inpaint_only"]["height"] = img_height
+                adetailer_params["inpaint_only"]["width"] = img_width
+            elif self.task_name in ["img2img", "inpaint"]:
+                adetailer_params["inpaint_only"]["height"] = init_image.size[1]
+                adetailer_params["inpaint_only"]["width"] = init_image.size[0]
+            else:
+                adetailer_params["inpaint_only"]["height"] = control_image.size[1]
+                adetailer_params["inpaint_only"]["width"] = control_image.size[0]
+
+            # Adetailer embeds param
             prompt_empty = (
                 adetailer_params["inpaint_only"]["prompt"] is None
                 or adetailer_params["inpaint_only"]["prompt"] == ""
@@ -1902,6 +1932,138 @@ class Model_Diffusers:
             adetailer.inpaint_pipeline.set_progress_bar_config(
                 disable=disable_progress_bar
             )
+
+        if hires_steps > 1 and upscaler_model_path != None:
+            # Hires params BASE
+            if self.class_name == "StableDiffusionPipeline":
+                # sd
+                hires_params_config = {
+                    "prompt": None,
+                    "negative_prompt": None,
+                    "num_inference_steps" : hires_steps,
+                    "guidance_scale": guidance_scale,
+                    "clip_skip": None,
+                    "strength" : hires_denoising_strength,
+                    "eta" : 1.0,
+                }
+            else:
+                # sdxl
+                hires_params_config = {
+                    "prompt" : None,
+                    "negative_prompt" : None,
+                    "num_inference_steps" : hires_steps,
+                    "guidance_scale" : guidance_scale,
+                    "clip_skip" : None,
+                    "strength" : hires_denoising_strength,
+                }
+
+            # Verify prompt hires
+            hires_prompt_empty = (
+                hires_prompt is None
+                or hires_prompt == ""
+            )
+            hires_negative_prompt_empty = (
+                hires_negative_prompt is None
+                or hires_negative_prompt == ""
+            )
+
+            # Hires embed params
+            if self.class_name == "StableDiffusionPipeline":
+                if hires_prompt_empty and hires_negative_prompt_empty:
+                    hires_params_config["prompt_embeds"] = prompt_emb
+                    hires_params_config["negative_prompt_embeds"] = negative_prompt_emb
+                else:
+                    prompt_hires_valid = (
+                        prompt if hires_prompt_empty else hires_prompt
+                    )
+                    negative_prompt_hires_valid = (
+                        negative_prompt if hires_negative_prompt_empty else hires_negative_prompt
+                    )
+
+                    prompt_emb_hires, negative_prompt_emb_hires = self.create_prompt_embeds(
+                        prompt=prompt_hires_valid,
+                        negative_prompt=negative_prompt_hires_valid,
+                        textual_inversion=textual_inversion,
+                        clip_skip=clip_skip,
+                        syntax_weights=syntax_weights,
+                    )
+
+                    hires_params_config["prompt_embeds"] = prompt_emb_hires
+                    hires_params_config["negative_prompt_embeds"] = negative_prompt_emb_hires
+            else:
+                if hires_prompt_empty and hires_negative_prompt_empty:
+                    hires_conditioning, hires_pooled = conditioning, pooled
+                else:
+                    prompt_hires_valid = (
+                        prompt if hires_prompt_empty else hires_prompt
+                    )
+                    negative_prompt_hires_valid = (
+                        negative_prompt if hires_negative_prompt_empty else hires_negative_prompt
+                    )
+
+                    if self.embed_loaded != textual_inversion and textual_inversion != []:
+                        # implement
+                        #print("Hires SDXL textual inversion not available")
+                        pass
+
+                    # Clip skip, compel previous
+
+                    # Prompt weights for textual inversion
+                    # prompt_ti = self.pipe.maybe_convert_prompt(prompt, self.pipe.tokenizer)
+                    # negative_prompt_ti = self.pipe.maybe_convert_prompt(negative_prompt, self.pipe.tokenizer)
+
+                    # prompt syntax style a1...
+                    if syntax_weights == "Classic":
+                        self.pipe.to("cuda")
+                        hires_prompt_ti = get_embed_new(prompt_hires_valid, self.pipe, compel, only_convert_string=True)
+                        hires_negative_prompt_ti = get_embed_new(negative_prompt_hires_valid, self.pipe, compel, only_convert_string=True)
+                    else:
+                        hires_prompt_ti = prompt_hires_valid
+                        hires_negative_prompt_ti = negative_prompt_hires_valid
+
+                    hires_conditioning, hires_pooled = compel([hires_prompt_ti, hires_negative_prompt_ti])
+
+            # Hires pipe
+            if self.task_name != "txt2img":
+                if self.class_name == "StableDiffusionPipeline":
+                        hires_pipe = StableDiffusionPipeline(
+                            vae=self.pipe.vae,
+                            text_encoder=self.pipe.text_encoder,
+                            tokenizer=self.pipe.tokenizer,
+                            unet=self.pipe.unet,
+                            scheduler=self.pipe.scheduler,
+                            safety_checker=self.pipe.safety_checker,
+                            feature_extractor=self.pipe.feature_extractor,
+                            requires_safety_checker=self.pipe.config.requires_safety_checker,
+                        )
+
+                elif self.class_name == "StableDiffusionXLPipeline":
+                      hires_pipe = StableDiffusionXLPipeline(
+                          vae=self.pipe.vae,
+                          text_encoder=self.pipe.text_encoder,
+                          text_encoder_2=self.pipe.text_encoder_2,
+                          tokenizer=self.pipe.tokenizer,
+                          tokenizer_2=self.pipe.tokenizer_2,
+                          unet=self.pipe.unet,
+                          scheduler=self.pipe.scheduler,
+                      )
+
+                hires_pipe = AutoPipelineForImage2Image.from_pipe(hires_pipe)
+            else:
+                hires_pipe = AutoPipelineForImage2Image.from_pipe(self.pipe)
+
+            hires_pipe.set_progress_bar_config(leave=leave_progress_bar)
+            hires_pipe.set_progress_bar_config(disable=disable_progress_bar)
+            hires_pipe.to(self.device)
+            torch.cuda.empty_cache()
+            gc.collect()
+
+            if self.class_name == "StableDiffusionXLPipeline":
+                hires_pipe.enable_vae_slicing()
+                hires_pipe.enable_vae_tiling()
+                hires_pipe.watermark = None
+
+
 
         ### RUN PIPE ###
         for i in range(loop_generation):
@@ -1970,7 +2132,13 @@ class Model_Diffusers:
 
             # Upscale
             if upscaler_model_path != None:
-                scaler = UpscalerESRGAN()
+                if upscaler_model_path == "Lanczos":
+                    scaler = UpscalerLanczos()
+                elif upscaler_model_path == "Nearest":
+                    scaler = UpscalerNearest()
+                else:
+                    scaler = UpscalerESRGAN(esrgan_tile, esrgan_tile_overlap)
+
                 result_scaler = []
                 for img_pre_up in images:
                     image_pos_up = scaler.upscale(
@@ -1980,6 +2148,42 @@ class Model_Diffusers:
                     gc.collect()
                     result_scaler.append(image_pos_up)
                 images = result_scaler
+
+                print(f"Final resolution: {images[0].size}")
+
+                # Hires fix
+                if hires_steps > 1:
+
+                    if self.task_name not in ["txt2img", "inpaint", "img2img"]:
+                        control_image_up = images[0]
+                        images = images[1:]
+
+                    result_hires = []
+                    # image by image to avoid possible memory issues as much as possible
+                    for img_pre_hires in images:
+                        if self.class_name == "StableDiffusionXLPipeline":
+                            img_pos_hires = hires_pipe(
+                                prompt_embeds=hires_conditioning[0:1],
+                                pooled_prompt_embeds=hires_pooled[0:1],
+                                negative_prompt_embeds=hires_conditioning[1:2],
+                                negative_pooled_prompt_embeds=hires_pooled[1:2],
+                                generator=pipe_params_config["generator"],
+                                image=img_pre_hires,
+                                **hires_params_config,
+                            ).images[0]
+                        elif self.class_name == "StableDiffusionPipeline":
+                            img_pos_hires = hires_pipe(
+                                generator=pipe_params_config["generator"],
+                                image=img_pre_hires,
+                                **hires_params_config,
+                            ).images[0]
+                        torch.cuda.empty_cache()
+                        gc.collect()
+                        result_hires.append(img_pos_hires)
+                    images = result_hires
+
+                    if self.task_name not in ["txt2img", "inpaint", "img2img"]:
+                        images = [control_image_up] + images
 
             # Show images if loop
             if loop_generation > 1:
