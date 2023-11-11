@@ -139,7 +139,7 @@ def load_lora_weights(pipeline, checkpoint_path, multiplier, device, dtype):
 def lora_mix_load(pipe, lora_path, alpha_scale=1.0, device="cuda", dtype=torch.float16):
     try:
         pipe = load_lora_weights(
-            pipe, [lora_path], alpha_scale, device=device, dtype=torch.float16
+            pipe, [lora_path], alpha_scale, device=device, dtype=dtype
         )
     except:
         pipe.load_lora_weights(lora_path)
