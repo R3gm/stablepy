@@ -45,6 +45,7 @@ from diffusers import (
     DDIMScheduler,
     DEISMultistepScheduler,
     UniPCMultistepScheduler,
+    LCMScheduler,
 )
 from .prompt_weights import get_embed_new, add_comma_after_pattern_ti
 from .utils import save_pil_image_with_metadata
@@ -256,6 +257,8 @@ SCHEDULER_CONFIG_MAP = {
     "DPM++ 2M Ef": (DPMSolverMultistepScheduler, {"euler_at_final": True}),
     "DPM++ 2M SDE Lu": (DPMSolverMultistepScheduler, {"use_lu_lambdas": True, "algorithm_type": "sde-dpmsolver++"}),
     "DPM++ 2M SDE Ef": (DPMSolverMultistepScheduler, {"algorithm_type": "sde-dpmsolver++", "euler_at_final": True}),
+
+    "LCM" : (LCMScheduler, {}),
 }
 
 scheduler_names = list(SCHEDULER_CONFIG_MAP.keys())
@@ -332,6 +335,7 @@ class Model_Diffusers:
             self.pipe = None
             self.lora_memory = [None, None, None, None, None]
             self.lora_scale_memory = [1.0, 1.0, 1.0, 1.0, 1.0]
+            self.LCMconfig = None
             self.embed_loaded = []
             self.FreeU = False
             torch.cuda.empty_cache()
@@ -1515,6 +1519,22 @@ class Model_Diffusers:
             lora_scale_E,
         ]
 
+        # LCM config
+        if sampler == "LCM" and self.LCMconfig == None:
+            if self.class_name == "StableDiffusionPipeline":
+                adapter_id = "latent-consistency/lcm-lora-sdv1-5"
+            elif self.class_name == "StableDiffusionXLPipeline":
+                adapter_id = "latent-consistency/lcm-lora-sdxl"
+
+            self.process_lora(adapter_id, 1.0)
+            self.LCMconfig = adapter_id
+            print("LCM")
+        elif sampler != "LCM" and self.LCMconfig != None:
+            self.process_lora(self.LCMconfig, 1.0, unload=True)
+            self.LCMconfig = None
+        elif self.LCMconfig != None:
+            print("LCM")
+
         # FreeU
         if FreeU:
             print("FreeU active")
@@ -1879,6 +1899,11 @@ class Model_Diffusers:
 
         # Adetailer params and pipe
         if adetailer_active and self.class_name == "StableDiffusionPipeline":
+            adetailer_params["inpaint_only"]["num_inference_steps"] = num_steps
+            adetailer_params["inpaint_only"]["guidance_scale"] = guidance_scale
+            # adetailer_params["inpaint_only"]["controlnet_conditioning_scale"] = controlnet_conditioning_scale
+            # adetailer_params["inpaint_only"]["control_guidance_start"] = control_guidance_start
+            # adetailer_params["inpaint_only"]["control_guidance_end"] = control_guidance_end
 
             # Adetailer resolution param
             if self.task_name == "txt2img":
