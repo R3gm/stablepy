@@ -59,7 +59,7 @@ from compel import ReturnedEmbeddingsType
 import ipywidgets as widgets, mediapy
 from IPython.display import display
 from PIL import Image
-from asdff.sd import AdCnPreloadPipe
+#from asdff.sd import AdCnPreloadPipe
 from typing import Union, Optional, List, Tuple, Dict, Any, Callable
 import logging
 from diffusers import AutoPipelineForImage2Image
@@ -1240,9 +1240,9 @@ class Model_Diffusers:
         lora_scale_E: float = 1.0,
         textual_inversion: List[Tuple[str, str]] = [],
         FreeU: bool = False,
-        adetailer_active: bool = False,
-        adetailer_params: Dict[str, Any] = {},
-        additional_prompt: str = "",
+        adetailer_A: bool = False,
+        adetailer_A_params: Dict[str, Any] = {},
+        style_prompt: str = "",
 
         image: Optional[Any] = None,
         preprocessor_name: Optional[str] = "None",
@@ -1336,11 +1336,11 @@ class Model_Diffusers:
                 style. [("<token_activation>","<path_embeding>"),...]
             FreeU (bool, optional, defaults to False):
                 Is a method that substantially improves diffusion model sample quality at no costs.
-            adetailer_active (bool, optional, defaults to False):
+            adetailer_A (bool, optional, defaults to False):
                 Guided Inpainting to Correct Image, it is preferable to use low values for strength.
-            adetailer_params (Dict[str, Any], optional, defaults to {}):
+            adetailer_A_params (Dict[str, Any], optional, defaults to {}):
                 Placeholder for adetailer parameters.
-            additional_prompt (str, optional):
+            style_prompt (str, optional):
                 Placeholder for additional prompt.
             upscaler_model_path (str, optional):
                 Placeholder for upscaler model path.
@@ -1898,65 +1898,183 @@ class Model_Diffusers:
             print(f"Image resolution: {str(init_image.size)}")
 
         # Adetailer params and pipe
-        if adetailer_active and self.class_name == "StableDiffusionPipeline":
-            adetailer_params["inpaint_only"]["num_inference_steps"] = num_steps
-            adetailer_params["inpaint_only"]["guidance_scale"] = guidance_scale
-            # adetailer_params["inpaint_only"]["controlnet_conditioning_scale"] = controlnet_conditioning_scale
-            # adetailer_params["inpaint_only"]["control_guidance_start"] = control_guidance_start
-            # adetailer_params["inpaint_only"]["control_guidance_end"] = control_guidance_end
+
+        if adetailer_A:
+            # global params detailfix
+            default_params_detailfix = {
+                "face_detector_ad" : True,
+                "person_detector_ad" : True,
+                "hand_detector_ad" : False,
+                "prompt": "",
+                "negative_prompt" : "",
+                "strength" : 0.35,
+                "mask_dilation" : 4,
+                "mask_blur" : 4,
+                "mask_padding" : 32,
+            }
+            for key_param, default_value in default_params_detailfix.items():
+                if key_param not in adetailer_A_params:
+                    adetailer_A_params[key_param] = default_value
+                elif type(default_value) != type(adetailer_A_params[key_param]):
+                    print(f"DF: Error type param, set default {str(key_param)}")
+                    adetailer_A_params[key_param] = default_value
+
+            detailfix_params_A = {
+                "prompt": adetailer_A_params["prompt"],
+                "negative_prompt" : adetailer_A_params["negative_prompt"],
+                "strength" : adetailer_A_params["strength"],
+                "num_inference_steps" : num_steps,
+                "guidance_scale" : guidance_scale,
+            }
+
+            # clear params yolo
+            if "strength" in adetailer_A_params:
+                adetailer_A_params.pop('strength')
+            if "prompt" in adetailer_A_params:
+                adetailer_A_params.pop('prompt')
+            if "negative_prompt" in adetailer_A_params:
+                adetailer_A_params.pop('negative_prompt')
 
             # Adetailer resolution param
             if self.task_name == "txt2img":
-                adetailer_params["inpaint_only"]["height"] = img_height
-                adetailer_params["inpaint_only"]["width"] = img_width
+                detailfix_params_A["height"] = img_height
+                detailfix_params_A["width"] = img_width
             elif self.task_name in ["img2img", "inpaint"]:
-                adetailer_params["inpaint_only"]["height"] = init_image.size[1]
-                adetailer_params["inpaint_only"]["width"] = init_image.size[0]
+                detailfix_params_A["height"] = init_image.size[1]
+                detailfix_params_A["width"] = init_image.size[0]
             else:
-                adetailer_params["inpaint_only"]["height"] = control_image.size[1]
-                adetailer_params["inpaint_only"]["width"] = control_image.size[0]
+                detailfix_params_A["height"] = control_image.size[1]
+                detailfix_params_A["width"] = control_image.size[0]
 
-            # Adetailer embeds param
-            prompt_empty = (
-                adetailer_params["inpaint_only"]["prompt"] is None
-                or adetailer_params["inpaint_only"]["prompt"] == ""
+            # Adetailer valid prompt
+            prompt_empty_detailfix_A = (
+                detailfix_params_A["prompt"] is None
+                or detailfix_params_A["prompt"] == ""
             )
-            negative_prompt_empty = (
-                adetailer_params["inpaint_only"]["negative_prompt"] is None
-                or adetailer_params["inpaint_only"]["negative_prompt"] == ""
+            negative_prompt_empty_detailfix_A = (
+                detailfix_params_A["negative_prompt"] is None
+                or detailfix_params_A["negative_prompt"] == ""
             )
 
-            if prompt_empty and negative_prompt_empty:
-                adetailer_params["inpaint_only"]["prompt"] = None
-                adetailer_params["inpaint_only"]["prompt_embeds"] = prompt_emb
-                adetailer_params["inpaint_only"]["negative_prompt"] = None
-                adetailer_params["inpaint_only"]["negative_prompt_embeds"] = negative_prompt_emb
+            # Params detailfix
+            if self.class_name == "StableDiffusionPipeline":
+                # SD detailfix
+                # detailfix_params_A["controlnet_conditioning_scale"] = controlnet_conditioning_scale
+                # detailfix_params_A["control_guidance_start"] = control_guidance_start
+                # detailfix_params_A["control_guidance_end"] = control_guidance_end
+
+                if prompt_empty_detailfix_A and negative_prompt_empty_detailfix_A:
+                    detailfix_params_A["prompt"] = None
+                    detailfix_params_A["prompt_embeds"] = prompt_emb
+                    detailfix_params_A["negative_prompt"] = None
+                    detailfix_params_A["negative_prompt_embeds"] = negative_prompt_emb
+                else:
+                    prompt_df_A = (
+                        prompt if prompt_empty_detailfix_A else detailfix_params_A["prompt"]
+                    )
+                    negative_prompt_df_A = (
+                        negative_prompt if negative_prompt_empty_detailfix_A else detailfix_params_A["negative_prompt"]
+                    )
+
+                    print(prompt_df_A, negative_prompt_df_A)
+
+                    prompt_emb_ad, negative_prompt_emb_ad = self.create_prompt_embeds(
+                        prompt=prompt_df_A,
+                        negative_prompt=negative_prompt_df_A,
+                        textual_inversion=textual_inversion,
+                        clip_skip=clip_skip,
+                        syntax_weights=syntax_weights,
+                    )
+
+                    detailfix_params_A["prompt"] = None
+                    detailfix_params_A["prompt_embeds"] = prompt_emb_ad
+                    detailfix_params_A["negative_prompt"] = None
+                    detailfix_params_A["negative_prompt_embeds"] = negative_prompt_emb_ad
+
+                controlnet_detailfix = ControlNetModel.from_pretrained(
+                    "lllyasviel/control_v11p_sd15_inpaint", torch_dtype=torch.float16, variant="fp16", #, torch_dtype=self.type_model_precision
+                )
+                adetailer = StableDiffusionControlNetInpaintPipeline(
+                    vae=self.pipe.vae,
+                    text_encoder=self.pipe.text_encoder,
+                    tokenizer=self.pipe.tokenizer,
+                    unet=self.pipe.unet,
+                    controlnet=controlnet_detailfix,
+                    scheduler=self.pipe.scheduler,
+                    safety_checker=self.pipe.safety_checker,
+                    feature_extractor=self.pipe.feature_extractor,
+                    requires_safety_checker=self.pipe.config.requires_safety_checker,
+                )
             else:
-                prompt_ad = (
-                    prompt if prompt_empty else adetailer_params["inpaint_only"]["prompt"]
-                )
-                negative_prompt_ad = (
-                    negative_prompt if negative_prompt_empty else adetailer_params["inpaint_only"]["negative_prompt"]
+                # SDXL detailfix
+                if prompt_empty_detailfix_A and negative_prompt_empty_detailfix_A:
+                    conditioning_detailfix_A, pooled_detailfix_A = conditioning, pooled
+                else:
+                    prompt_df_A = (
+                        prompt if prompt_empty_detailfix_A else detailfix_params_A["prompt"]
+                    )
+                    negative_prompt_df_A = (
+                        negative_prompt if negative_prompt_empty_detailfix_A else detailfix_params_A["negative_prompt"]
+                    )
+
+                    if self.embed_loaded != textual_inversion and textual_inversion != []:
+                        # implement
+                        #print("Hires SDXL textual inversion not available")
+                        pass
+
+                    # Clip skip, compel previous
+
+                    # Prompt weights for textual inversion
+                    # prompt_ti = self.pipe.maybe_convert_prompt(prompt, self.pipe.tokenizer)
+                    # negative_prompt_ti = self.pipe.maybe_convert_prompt(negative_prompt, self.pipe.tokenizer)
+
+                    # prompt syntax style a1...
+                    if syntax_weights == "Classic":
+                        self.pipe.to("cuda")
+                        prompt_ti_df_A = get_embed_new(prompt_df_A, self.pipe, compel, only_convert_string=True)
+                        negative_prompt_ti_df_A = get_embed_new(negative_prompt_df_A, self.pipe, compel, only_convert_string=True)
+                    else:
+                        prompt_ti_df_A = prompt_df_A
+                        negative_prompt_ti_df_A = negative_prompt_df_A
+
+                    conditioning_detailfix_A, pooled_detailfix_A = compel([prompt_ti_df_A, negative_prompt_ti_df_A])
+
+                adetailer = StableDiffusionXLInpaintPipeline(
+                    vae=self.pipe.vae,
+                    text_encoder=self.pipe.text_encoder,
+                    text_encoder_2=self.pipe.text_encoder_2,
+                    tokenizer=self.pipe.tokenizer,
+                    tokenizer_2=self.pipe.tokenizer_2,
+                    unet=self.pipe.unet,
+                    # controlnet=self.controlnet,
+                    scheduler=self.pipe.scheduler,
                 )
 
-                prompt_emb_ad, negative_prompt_emb_ad = self.create_prompt_embeds(
-                    prompt=prompt_ad,
-                    negative_prompt=negative_prompt_ad,
-                    textual_inversion=textual_inversion,
-                    clip_skip=clip_skip,
-                    syntax_weights=syntax_weights,
-                )
+                adetailer.enable_vae_slicing()
+                adetailer.enable_vae_tiling()
+                adetailer.watermark = None
 
-                adetailer_params["inpaint_only"]["prompt"] = None
-                adetailer_params["inpaint_only"]["prompt_embeds"] = prompt_emb_ad
-                adetailer_params["inpaint_only"]["negative_prompt"] = None
-                adetailer_params["inpaint_only"]["negative_prompt_embeds"] = negative_prompt_emb_ad
 
-            adetailer = AdCnPreloadPipe(self.pipe)  # use the loaded sampler
-            adetailer.inpaint_pipeline.set_progress_bar_config(leave=leave_progress_bar)
-            adetailer.inpaint_pipeline.set_progress_bar_config(
-                disable=disable_progress_bar
-            )
+                # detailfix_params_A["prompt"] = None,
+                # detailfix_params_A["negative_prompt"] = None,
+                detailfix_params_A["prompt_embeds"] = conditioning_detailfix_A[0:1]
+                detailfix_params_A["pooled_prompt_embeds"] = pooled_detailfix_A[0:1]
+                detailfix_params_A["negative_prompt_embeds"] = conditioning_detailfix_A[1:2]
+                detailfix_params_A["negative_pooled_prompt_embeds"] = pooled_detailfix_A[1:2]
+                if "prompt" in detailfix_params_A:
+                    detailfix_params_A.pop('prompt')
+                if "negative_prompt" in detailfix_params_A:
+                    detailfix_params_A.pop('negative_prompt')
+
+            #adetailer = AdCnPreloadPipe(self.pipe)  # use the loaded sampler
+            adetailer.set_progress_bar_config(leave=leave_progress_bar)
+            adetailer.set_progress_bar_config(disable=disable_progress_bar)
+
+            adetailer.to(self.device)
+            torch.cuda.empty_cache()
+            gc.collect()
+
+
 
         if hires_steps > 1 and upscaler_model_path != None:
             # Hires params BASE
@@ -2137,7 +2255,7 @@ class Model_Diffusers:
             gc.collect()
 
             # Adetailer stuff
-            if adetailer_active and self.class_name == "StableDiffusionPipeline":
+            if adetailer_A:
                 # image_pil_list = []
                 # for img_single in images:
                 # image_ad = img_single.convert("RGB")
@@ -2145,9 +2263,12 @@ class Model_Diffusers:
                 if self.task_name not in ["txt2img", "inpaint", "img2img"]:
                     images = images[1:]
                 images = ad_model_process(
+                    pipe_params_df=detailfix_params_A,
                     adetailer=adetailer,
+                    class_name=self.class_name,
                     image_list_task=images,
-                    **adetailer_params,
+                    **adetailer_A_params,
+
                 )
                 if self.task_name not in ["txt2img", "inpaint", "img2img"]:
                     images = [control_image] + images
