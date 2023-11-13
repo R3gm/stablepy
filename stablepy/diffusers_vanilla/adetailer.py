@@ -3,21 +3,23 @@
 # =====================================
 from functools import partial
 from diffusers import DPMSolverMultistepScheduler, DPMSolverSinglestepScheduler
-from asdff import yolo_detector
 from huggingface_hub import hf_hub_download
-from asdff.sd import AdCnPreloadPipe
 import torch
 import gc
+from typing import Any, Callable, Iterable, List, Mapping, Optional
+import numpy as np
+from PIL import Image
+import torch
 
+DetectorType = Callable[[Image.Image], Optional[List[Image.Image]]]
 
 def ad_model_process(
     adetailer,
+    pipe_params_df,
+    class_name,
     face_detector_ad,
     person_detector_ad,
     hand_detector_ad,
-    # model_repo_id,
-    # common,
-    inpaint_only,
     image_list_task,  # pil
     mask_dilation=4,
     mask_blur=4,
@@ -26,50 +28,230 @@ def ad_model_process(
     # input: params adetailer
     # output: list of PIL images
 
-    adetailer.inpaint_pipeline.safety_checker = None
-    adetailer.inpaint_pipeline.to("cuda")
+    adetailer.safety_checker = None
+    adetailer.to("cuda")
+    
+    detectors = []
+    if person_detector_ad:
+        person_model_path = hf_hub_download("Bingsu/adetailer", "person_yolov8s-seg.pt")
+        person_detector = partial(yolo_detector, model_path=person_model_path)
+        detectors.append(person_detector)
+    if face_detector_ad:
+        face_model_path = hf_hub_download("Bingsu/adetailer", "face_yolov8n.pt")
+        face_detector = partial(yolo_detector, model_path=face_model_path)
+        detectors.append(face_detector)
+    if hand_detector_ad:
+        hand_model_path = hf_hub_download("Bingsu/adetailer", "hand_yolov8n.pt")
+        hand_detector = partial(yolo_detector, model_path=hand_model_path)
+        detectors.append(hand_detector)
 
     image_list_ad = []
 
-    common = inpaint_only
+    for i, init_image_base in enumerate(image_list_task):
+        init_image = init_image_base.convert("RGB")
+        final_image = None
 
-    for img_single in image_list_task:
-        images_ad = img_single.convert("RGB")
+        for j, detector in enumerate(detectors):
+            masks = detector(init_image)
 
-        detectors = []
-        if person_detector_ad:
-            person_model_path = hf_hub_download("Bingsu/adetailer", "person_yolov8s-seg.pt")
-            person_detector = partial(yolo_detector, model_path=person_model_path)
-            detectors.append(person_detector)
-        if face_detector_ad:
-            face_model_path = hf_hub_download("Bingsu/adetailer", "face_yolov8n.pt")
-            face_detector = partial(yolo_detector, model_path=face_model_path)
-            detectors.append(face_detector)
-        if hand_detector_ad:
-            hand_model_path = hf_hub_download("Bingsu/adetailer", "hand_yolov8n.pt")
-            hand_detector = partial(yolo_detector, model_path=hand_model_path)
-            detectors.append(hand_detector)
+            if masks is None:
+                logger.info(
+                    f"No object detected on {(i + 1)} image with {str(detector)} detector."
+                )
+                continue
 
-        result_ad = adetailer(
-            images=[images_ad],
-            common=common,
-            inpaint_only=inpaint_only,  # {**inpaint_only, "strength": 0.4}
-            detectors=detectors,
-            mask_dilation=mask_dilation,
-            mask_blur=mask_blur,
-            mask_padding=mask_padding,
-        )
+            for k, mask in enumerate(masks):
+                mask = mask.convert("L")
+                mask = mask_dilate(mask, mask_dilation)
+                bbox = mask.getbbox()
+                if bbox is None:
+                    logger.info(f"No object in {(k + 1)} mask.")
+                    continue
+                mask = mask_gaussian_blur(mask, mask_blur)
+                bbox_padded = bbox_padding(bbox, init_image.size, mask_padding)
+
+                crop_image = init_image.crop(bbox_padded)
+                crop_mask = mask.crop(bbox_padded)
+
+                pipe_params_df["image"] = crop_image
+                pipe_params_df["mask_image"] = crop_mask
+
+                if class_name == "StableDiffusionPipeline":
+                    pipe_params_df["control_image"] = make_inpaint_condition(crop_image, crop_mask)
+
+                inpaint_output = adetailer(**pipe_params_df)
+                inpaint_image: Image.Image = inpaint_output[0][0]
+                final_image = composite(
+                    init=init_image,
+                    mask=mask,
+                    gen=inpaint_image,
+                    bbox_padded=bbox_padded,
+                )
+                init_image = final_image
+
+        if final_image is not None:
+            image_list_ad.append(final_image)
+        else:
+            print("DetailFix: No detections found in image")
+            image_list_ad.append(init_image_base)
 
         torch.cuda.empty_cache()
         gc.collect()
-
-        try:
-            image_list_ad.append(result_ad[0][0])
-        except:
-            print("ADETAILER: No detections found")
-            image_list_ad.append(images_ad)
 
     torch.cuda.empty_cache()
     gc.collect()
 
     return image_list_ad
+
+
+### yolo
+
+
+from pathlib import Path
+
+import numpy as np
+import torch
+from huggingface_hub import hf_hub_download
+from PIL import Image, ImageDraw
+from torchvision.transforms.functional import to_pil_image
+from ultralytics import YOLO
+
+def create_mask_from_bbox(
+    bboxes: np.ndarray, shape: tuple[int, int]
+) -> list[Image.Image]:
+    """
+    Parameters
+    ----------
+        bboxes: list[list[float]]
+            list of [x1, y1, x2, y2]
+            bounding boxes
+        shape: tuple[int, int]
+            shape of the image (width, height)
+
+    Returns
+    -------
+        masks: list[Image.Image]
+        A list of masks
+
+    """
+    masks = []
+    for bbox in bboxes:
+        mask = Image.new("L", shape, "black")
+        mask_draw = ImageDraw.Draw(mask)
+        mask_draw.rectangle(bbox, fill="white")
+        masks.append(mask)
+    return masks
+
+
+def mask_to_pil(masks: torch.Tensor, shape: tuple[int, int]) -> list[Image.Image]:
+    """
+    Parameters
+    ----------
+    masks: torch.Tensor, dtype=torch.float32, shape=(N, H, W).
+        The device can be CUDA, but `to_pil_image` takes care of that.
+
+    shape: tuple[int, int]
+        (width, height) of the original image
+
+    Returns
+    -------
+    images: list[Image.Image]
+    """
+    n = masks.shape[0]
+    return [to_pil_image(masks[i], mode="L").resize(shape) for i in range(n)]
+
+
+def yolo_detector(
+    image: Image.Image, model_path: str | Path | None = None, confidence: float = 0.3
+) -> list[Image.Image] | None:
+    if not model_path:
+        model_path = hf_hub_download("Bingsu/adetailer", "face_yolov8n.pt")
+    model = YOLO(model_path)
+    pred = model(image, conf=confidence)
+
+    bboxes = pred[0].boxes.xyxy.cpu().numpy()
+    if bboxes.size == 0:
+        return None
+
+    if pred[0].masks is None:
+        masks = create_mask_from_bbox(bboxes, image.size)
+    else:
+        masks = mask_to_pil(pred[0].masks.data, image.size)
+
+    return masks
+
+
+###o utils
+
+import cv2
+import numpy as np
+from PIL import Image, ImageFilter, ImageOps
+import torch
+
+
+def mask_dilate(image: Image.Image, value: int = 4) -> Image.Image:
+    if value <= 0:
+        return image
+
+    arr = np.array(image)
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (value, value))
+    dilated = cv2.dilate(arr, kernel, iterations=1)
+    return Image.fromarray(dilated)
+
+
+def mask_gaussian_blur(image: Image.Image, value: int = 4) -> Image.Image:
+    if value <= 0:
+        return image
+
+    blur = ImageFilter.GaussianBlur(value)
+    return image.filter(blur)
+
+
+def bbox_padding(
+    bbox: tuple[int, int, int, int], image_size: tuple[int, int], value: int = 32
+) -> tuple[int, int, int, int]:
+    if value <= 0:
+        return bbox
+
+    arr = np.array(bbox).reshape(2, 2)
+    arr[0] -= value
+    arr[1] += value
+    arr = np.clip(arr, (0, 0), image_size)
+    return tuple(arr.flatten())
+
+
+def composite(
+    init: Image.Image,
+    mask: Image.Image,
+    gen: Image.Image,
+    bbox_padded: tuple[int, int, int, int],
+) -> Image.Image:
+    img_masked = Image.new("RGBa", init.size)
+    img_masked.paste(
+        init.convert("RGBA").convert("RGBa"),
+        mask=ImageOps.invert(mask),
+    )
+    img_masked = img_masked.convert("RGBA")
+
+    size = (
+        bbox_padded[2] - bbox_padded[0],
+        bbox_padded[3] - bbox_padded[1],
+    )
+    resized = gen.resize(size)
+
+    output = Image.new("RGBA", init.size)
+    output.paste(resized, bbox_padded)
+    output.alpha_composite(img_masked)
+    return output.convert("RGB")
+
+
+
+def make_inpaint_condition(init_image, mask_image):
+    init_image = np.array(init_image.convert("RGB")).astype(np.float32) / 255.0
+    mask_image = np.array(mask_image.convert("L")).astype(np.float32) / 255.0
+
+    assert init_image.shape[0:1] == mask_image.shape[0:1], "image and image_mask must have the same image size"
+    init_image[mask_image > 0.5] = -1.0  # set as masked pixel
+    init_image = np.expand_dims(init_image, 0).transpose(0, 3, 1, 2)
+    init_image = torch.from_numpy(init_image)
+    return init_image
