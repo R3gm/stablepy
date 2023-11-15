@@ -42,10 +42,10 @@ def custom_task_model_loader(pipe, model_category="detailfix", task_name="txt2im
             detailfix_pipe.enable_vae_tiling()
             detailfix_pipe.watermark = None
 
-        return detailfix_pipe
-
+        return detailfix_pipe ####
+    
     elif model_category in ["hires", "detailfix_img2img"]:
-        # Hires pipe
+        # Pipe hires detailfix_pipe img2img
         if task_name != "txt2img":
             if not hasattr(pipe, "text_encoder_2"):
                     hires_pipe = StableDiffusionPipeline(
@@ -78,13 +78,16 @@ def custom_task_model_loader(pipe, model_category="detailfix", task_name="txt2im
             hires_pipe.enable_vae_slicing()
             hires_pipe.enable_vae_tiling()
             hires_pipe.watermark = None
+        
+        return hires_pipe #####
 
-    elif model_category == "animatediff":       
+    elif model_category == "animatediff":  
+        # Pipe animatediff     
         if not hasattr(pipe, "text_encoder_2"):
             adapter = MotionAdapter.from_pretrained("guoyww/animatediff-motion-adapter-v1-5-2")
             adapter.to("cuda" if torch.cuda.is_available() else "cpu")
 
-            pipe = AnimateDiffPipeline(
+            animatediff_pipe = AnimateDiffPipeline(
                 vae=model.pipe.vae,
                 text_encoder=model.pipe.text_encoder,
                 tokenizer=model.pipe.tokenizer,
@@ -95,4 +98,4 @@ def custom_task_model_loader(pipe, model_category="detailfix", task_name="txt2im
         else:
             raise ValueError("Animatediff not implemented for SDXL")
 
-    return hires_pipe
+        return animatediff_pipe ####
