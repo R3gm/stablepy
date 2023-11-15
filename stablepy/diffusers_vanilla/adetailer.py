@@ -10,13 +10,11 @@ from typing import Any, Callable, Iterable, List, Mapping, Optional
 import numpy as np
 from PIL import Image
 import torch
-
-DetectorType = Callable[[Image.Image], Optional[List[Image.Image]]]
+from ..logging.logging_setup import logger
 
 def ad_model_process(
-    adetailer,
+    detailfix_pipe,
     pipe_params_df,
-    class_name,
     face_detector_ad,
     person_detector_ad,
     hand_detector_ad,
@@ -25,12 +23,14 @@ def ad_model_process(
     mask_blur=4,
     mask_padding=32,
 ):
-    # input: params adetailer
+    # input: params detailfix_pipe
     # output: list of PIL images
 
-    adetailer.safety_checker = None
-    adetailer.to("cuda")
-    
+    detailfix_pipe.safety_checker = None
+    detailfix_pipe.to("cuda")
+
+    image_list_ad = []
+
     detectors = []
     if person_detector_ad:
         person_model_path = hf_hub_download("Bingsu/adetailer", "person_yolov8s-seg.pt")
@@ -56,7 +56,7 @@ def ad_model_process(
 
             if masks is None:
                 logger.info(
-                    f"No object detected on {(i + 1)} image with {str(detector)} detector."
+                    f"No object detected on {(i + 1)} image with {str(detector).split('/')[-1][:-2]} detector."
                 )
                 continue
 
@@ -76,10 +76,11 @@ def ad_model_process(
                 pipe_params_df["image"] = crop_image
                 pipe_params_df["mask_image"] = crop_mask
 
-                if class_name == "StableDiffusionPipeline":
+                if not hasattr(detailfix_pipe, "text_encoder_2"):
+                    logger.debug("SD 1.5 adetailer")
                     pipe_params_df["control_image"] = make_inpaint_condition(crop_image, crop_mask)
 
-                inpaint_output = adetailer(**pipe_params_df)
+                inpaint_output = detailfix_pipe(**pipe_params_df)
                 inpaint_image: Image.Image = inpaint_output[0][0]
                 final_image = composite(
                     init=init_image,
@@ -92,7 +93,9 @@ def ad_model_process(
         if final_image is not None:
             image_list_ad.append(final_image)
         else:
-            print("DetailFix: No detections found in image")
+            logger.info(
+                f"DetailFix: No detections found in image. Returning original image"
+            )
             image_list_ad.append(init_image_base)
 
         torch.cuda.empty_cache()
@@ -104,17 +107,17 @@ def ad_model_process(
     return image_list_ad
 
 
-### yolo
-
-
+# =====================================
+# Yolo
+# =====================================
 from pathlib import Path
-
 import numpy as np
 import torch
 from huggingface_hub import hf_hub_download
 from PIL import Image, ImageDraw
 from torchvision.transforms.functional import to_pil_image
 from ultralytics import YOLO
+
 
 def create_mask_from_bbox(
     bboxes: np.ndarray, shape: tuple[int, int]
@@ -181,7 +184,9 @@ def yolo_detector(
     return masks
 
 
-###o utils
+# =====================================
+# Utils
+# =====================================
 
 import cv2
 import numpy as np
