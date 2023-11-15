@@ -44,7 +44,7 @@ def custom_task_model_loader(pipe, model_category="detailfix", task_name="txt2im
 
         return detailfix_pipe
 
-    elif model_category in ["hires", detailfix_img2img]:
+    elif model_category in ["hires", "detailfix_img2img"]:
         # Hires pipe
         if task_name != "txt2img":
             if not hasattr(pipe, "text_encoder_2"):
