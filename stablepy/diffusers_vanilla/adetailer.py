@@ -2,14 +2,12 @@
 # Adetailer
 # =====================================
 from functools import partial
-from diffusers import DPMSolverMultistepScheduler, DPMSolverSinglestepScheduler
+from diffusers import DPMSolverMultistepScheduler, DPMSolverSinglestepScheduler, DDIMScheduler
 from huggingface_hub import hf_hub_download
-import torch
-import gc
 from typing import Any, Callable, Iterable, List, Mapping, Optional
 import numpy as np
 from PIL import Image
-import torch
+import torch, copy, gc
 from ..logging.logging_setup import logger
 
 def ad_model_process(
@@ -23,11 +21,14 @@ def ad_model_process(
     mask_blur=4,
     mask_padding=32,
 ):
-    # input: params detailfix_pipe
+    # input: params pipe, detailfix_pipe, paras yolo
     # output: list of PIL images
 
+    scheduler_assigned = copy.deepcopy(detailfix_pipe.scheduler)
+    logger.debug(f"Base sampler detailfix_pipe: {scheduler_assigned}")
+
     detailfix_pipe.safety_checker = None
-    detailfix_pipe.to("cuda")
+    detailfix_pipe.to("cuda" if torch.cuda.is_available() else "cpu")
 
     image_list_ad = []
 
@@ -77,10 +78,30 @@ def ad_model_process(
                 pipe_params_df["mask_image"] = crop_mask
 
                 if not hasattr(detailfix_pipe, "text_encoder_2"):
-                    logger.debug("SD 1.5 adetailer")
+                    logger.debug("SD 1.5 detailfix")
                     pipe_params_df["control_image"] = make_inpaint_condition(crop_image, crop_mask)
 
-                inpaint_output = detailfix_pipe(**pipe_params_df)
+                try:
+                    inpaint_output = detailfix_pipe(**pipe_params_df)
+                except Exception as e:
+                    e = str(e)
+                    if "Tensor with 2 elements cannot be converted to Scalar" in e:
+                        try:
+                            logger.error("Sampler not compatible with DetailFix; trying with DDIM sampler")
+                            logger.debug(e)
+                            detailfix_pipe.scheduler = detailfix_pipe.default_scheduler
+                            detailfix_pipe.scheduler = DDIMScheduler.from_config(detailfix_pipe.scheduler.config)
+
+                            inpaint_output = detailfix_pipe(**pipe_params_df)
+                        except Exception as ex:
+                            logger.error("trying with base sampler")
+                            logger.debug(str(ex))
+                            detailfix_pipe.scheduler = detailfix_pipe.default_scheduler
+
+                            inpaint_output = detailfix_pipe(**pipe_params_df)
+                    else:
+                        raise ValueError(e)
+
                 inpaint_image: Image.Image = inpaint_output[0][0]
                 final_image = composite(
                     init=init_image,
@@ -100,6 +121,8 @@ def ad_model_process(
 
         torch.cuda.empty_cache()
         gc.collect()
+
+    detailfix_pipe.scheduler = scheduler_assigned
 
     torch.cuda.empty_cache()
     gc.collect()
