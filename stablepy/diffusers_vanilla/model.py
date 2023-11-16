@@ -1676,8 +1676,8 @@ class Model_Diffusers:
 
         # Debug
         try:
-            logger.debug(f"INFO PIPE: {self.pipe.__class__.__name__}")
             logger.debug(f"scheduler_type: {self.pipe.scheduler}")
+            logger.debug(f"INFO PIPE: {self.pipe.__class__.__name__}")
             logger.debug(f"text_encoder_type: {self.pipe.text_encoder.dtype}")
             logger.debug(f"unet_type: {self.pipe.unet.dtype}")
             logger.debug(f"vae_type: {self.pipe.vae.dtype}")
@@ -1723,7 +1723,7 @@ class Model_Diffusers:
                     "Unsupported image type; Bug report to https://github.com/R3gm/stablepy or https://github.com/R3gm/SD_diffusers_interactive"
                 )  # return
 
-        # Get params preprocess Global
+        # Get params preprocess Global SD 1.5
         preprocess_params_config = {}
         if self.task_name not in ["txt2img", "inpaint", "img2img"]:
             preprocess_params_config["image"] = array_rgb
@@ -1738,7 +1738,7 @@ class Model_Diffusers:
                 if self.task_name != "mlsd" and self.task_name != "canny":
                     preprocess_params_config["preprocessor_name"] = preprocessor_name
 
-        # RUN Preprocess
+        # RUN Preprocess SD 1.5
         if self.task_name == "inpaint":
             # Get mask for Inpaint
             if gui_active or os.path.exists(image_mask):
@@ -1848,7 +1848,7 @@ class Model_Diffusers:
             preprocess_params_config["image_resolution"] = image_resolution
             init_image = self.process_img2img(**preprocess_params_config)
 
-        # RUN Preprocess T2I for sdxl
+        # RUN Preprocess T2I for SDXL
         if self.class_name == "StableDiffusionXLPipeline":
             # Get params preprocess XL
             preprocess_params_config_xl = {}
@@ -1976,19 +1976,29 @@ class Model_Diffusers:
                 "mask_blur" : 4,
                 "mask_padding" : 32,
             }
+
             # Pipe detailfix_pipe
-            if hasattr(self, "detailfix_pipe") and not retain_detailfix_model_previous_load:
-              del self.detailfix_pipe
-            if not hasattr(self, "detailfix_pipe"):
-                self.detailfix_pipe = custom_task_model_loader(
+            if not hasattr(self, "detailfix_pipe") or not retain_hires_model_previous_load:
+                detailfix_pipe = custom_task_model_loader(
                     pipe=self.pipe,
-                    model_category="detailfix",
+                    model_category="hires",
+                    task_name=self.task_name,
                     torch_dtype=self.type_model_precision
                 )
+                if hasattr(self, "detailfix_pipe"):
+                    del self.detailfix_pipe
+            if retain_hires_model_previous_load:
+                if hasattr(self, "detailfix_pipe")
+                    detailfix_pipe = self.detailfix_pipe
+                else:
+                    self.detailfix_pipe = detailfix_pipe
 
-            self.detailfix_pipe.set_progress_bar_config(leave=leave_progress_bar)
-            self.detailfix_pipe.set_progress_bar_config(disable=disable_progress_bar)
-            self.detailfix_pipe.to(self.device)
+            # Define base scheduler detailfix
+            detailfix_pipe.default_scheduler = copy.deepcopy(self.default_scheduler)
+
+            detailfix_pipe.set_progress_bar_config(leave=leave_progress_bar)
+            detailfix_pipe.set_progress_bar_config(disable=disable_progress_bar)
+            detailfix_pipe.to(self.device)
             torch.cuda.empty_cache()
             gc.collect()
 
@@ -2291,18 +2301,24 @@ class Model_Diffusers:
                     )
 
             # Hires pipe
-            if hasattr(self, "hires_pipe") and not retain_hires_model_previous_load:
-              del self.hires_pipe
-            self.hires_pipe = custom_task_model_loader(
-                pipe=self.pipe,
-                model_category="hires",
-                task_name=self.task_name,
-                torch_dtype=self.type_model_precision
-            )
+            if not hasattr(self, "hires_pipe") or not retain_hires_model_previous_load:
+                hires_pipe = custom_task_model_loader(
+                    pipe=self.pipe,
+                    model_category="hires",
+                    task_name=self.task_name,
+                    torch_dtype=self.type_model_precision
+                )
+                if hasattr(self, "hires_pipe"):
+                    del self.hires_pipe
+            if retain_hires_model_previous_load:
+                if hasattr(self, "hires_pipe")
+                    hires_pipe = self.hires_pipe
+                else:
+                    self.hires_pipe = hires_pipe
 
-            self.hires_pipe.set_progress_bar_config(leave=leave_progress_bar)
-            self.hires_pipe.set_progress_bar_config(disable=disable_progress_bar)
-            self.hires_pipe.to(self.device)
+            hires_pipe.set_progress_bar_config(leave=leave_progress_bar)
+            hires_pipe.set_progress_bar_config(disable=disable_progress_bar)
+            hires_pipe.to(self.device)
             torch.cuda.empty_cache()
             gc.collect()
 
@@ -2366,14 +2382,14 @@ class Model_Diffusers:
                 if adetailer_A:
                     images = ad_model_process(
                         pipe_params_df=detailfix_params_A,
-                        detailfix_pipe=self.detailfix_pipe,
+                        detailfix_pipe=detailfix_pipe,
                         image_list_task=images,
                         **adetailer_A_params,
                     )
                 if adetailer_B:
                     images = ad_model_process(
                         pipe_params_df=detailfix_params_B,
-                        detailfix_pipe=self.detailfix_pipe,
+                        detailfix_pipe=detailfix_pipe,
                         image_list_task=images,
                         **adetailer_B_params,
                     )
@@ -2416,7 +2432,7 @@ class Model_Diffusers:
                     # image by image to avoid possible memory issues as much as possible
                     for img_pre_hires in images:
                         if self.class_name == "StableDiffusionXLPipeline":
-                            img_pos_hires = self.hires_pipe(
+                            img_pos_hires = hires_pipe(
                                 prompt_embeds=hires_conditioning[0:1],
                                 pooled_prompt_embeds=hires_pooled[0:1],
                                 negative_prompt_embeds=hires_conditioning[1:2],
@@ -2426,7 +2442,7 @@ class Model_Diffusers:
                                 **hires_params_config,
                             ).images[0]
                         elif self.class_name == "StableDiffusionPipeline":
-                            img_pos_hires = self.hires_pipe(
+                            img_pos_hires = hires_pipe(
                                 generator=pipe_params_config["generator"],
                                 image=img_pre_hires,
                                 **hires_params_config,
@@ -2477,10 +2493,6 @@ class Model_Diffusers:
 
         if hasattr(self, "compel") and not retain_compel_previous_load:
           del self.compel
-        if hasattr(self, "detailfix_pipe") and not retain_detailfix_model_previous_load:
-          del self.detailfix_pipe
-        if hasattr(self, "hires_pipe") and not retain_hires_model_previous_load:
-          del self.hires_pipe
         torch.cuda.empty_cache()
         gc.collect()
 
