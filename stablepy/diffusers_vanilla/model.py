@@ -266,6 +266,14 @@ SCHEDULER_CONFIG_MAP = {
 
 scheduler_names = list(SCHEDULER_CONFIG_MAP.keys())
 
+def process_prompts_valid(specific_prompt, specific_negative_prompt, prompt, negative_prompt):
+    specific_prompt_empty = (specific_prompt in [None, ""])
+    specific_negative_prompt_empty = (specific_negative_prompt in [None, ""])
+
+    prompt_valid = prompt if specific_prompt_empty else specific_prompt
+    negative_prompt_valid = negative_prompt if specific_negative_prompt_empty else specific_negative_prompt
+
+    return specific_prompt_empty, specific_negative_prompt_empty, prompt_valid, negative_prompt_valid
 
 class Model_Diffusers:
     def __init__(
@@ -1674,17 +1682,6 @@ class Model_Diffusers:
 
         self.pipe.safety_checker = None
 
-        # Debug
-        try:
-            logger.debug(f"scheduler_type: {self.pipe.scheduler}")
-            logger.debug(f"INFO PIPE: {self.pipe.__class__.__name__}")
-            logger.debug(f"text_encoder_type: {self.pipe.text_encoder.dtype}")
-            logger.debug(f"unet_type: {self.pipe.unet.dtype}")
-            logger.debug(f"vae_type: {self.pipe.vae.dtype}")
-            logger.debug(f"pipe_type: {self.pipe.dtype}")
-        except Exception as e:
-            logger.debug(f"{str(e)}")
-
         # Get image Global
         if self.task_name != "txt2img":
             if isinstance(image, str):
@@ -1988,7 +1985,7 @@ class Model_Diffusers:
                 if hasattr(self, "detailfix_pipe"):
                     del self.detailfix_pipe
             if retain_hires_model_previous_load:
-                if hasattr(self, "detailfix_pipe")
+                if hasattr(self, "detailfix_pipe"):
                     detailfix_pipe = self.detailfix_pipe
                 else:
                     self.detailfix_pipe = detailfix_pipe
@@ -2019,12 +2016,9 @@ class Model_Diffusers:
             }
 
             # clear params yolo
-            if "strength" in adetailer_A_params:
-                adetailer_A_params.pop('strength')
-            if "prompt" in adetailer_A_params:
-                adetailer_A_params.pop('prompt')
-            if "negative_prompt" in adetailer_A_params:
-                adetailer_A_params.pop('negative_prompt')
+            adetailer_A_params.pop('strength', None)
+            adetailer_A_params.pop('prompt', None)
+            adetailer_A_params.pop('negative_prompt', None)
 
             # detailfix_params_A resolution param
             if self.task_name == "txt2img":
@@ -2037,14 +2031,9 @@ class Model_Diffusers:
                 detailfix_params_A["height"] = control_image.size[1]
                 detailfix_params_A["width"] = control_image.size[0]
 
-            # detailfix_params_A valid prompt
-            prompt_empty_detailfix_A = (
-                detailfix_params_A["prompt"] is None
-                or detailfix_params_A["prompt"] == ""
-            )
-            negative_prompt_empty_detailfix_A = (
-                detailfix_params_A["negative_prompt"] is None
-                or detailfix_params_A["negative_prompt"] == ""
+            # Verify prompt detailfix_params_A and get valid
+            prompt_empty_detailfix_A, negative_prompt_empty_detailfix_A, prompt_df_A, negative_prompt_df_A = process_prompts_valid(
+                detailfix_params_A["prompt"], detailfix_params_A["negative_prompt"], prompt, negative_prompt
             )
 
             # Params detailfix
@@ -2055,18 +2044,9 @@ class Model_Diffusers:
                 # detailfix_params_A["control_guidance_end"] = control_guidance_end
 
                 if prompt_empty_detailfix_A and negative_prompt_empty_detailfix_A:
-                    detailfix_params_A["prompt"] = None
                     detailfix_params_A["prompt_embeds"] = prompt_emb
-                    detailfix_params_A["negative_prompt"] = None
                     detailfix_params_A["negative_prompt_embeds"] = negative_prompt_emb
                 else:
-                    prompt_df_A = (
-                        prompt if prompt_empty_detailfix_A else detailfix_params_A["prompt"]
-                    )
-                    negative_prompt_df_A = (
-                        negative_prompt if negative_prompt_empty_detailfix_A else detailfix_params_A["negative_prompt"]
-                    )
-
                     prompt_emb_ad, negative_prompt_emb_ad = self.create_prompt_embeds(
                         prompt=prompt_df_A,
                         negative_prompt=negative_prompt_df_A,
@@ -2074,24 +2054,17 @@ class Model_Diffusers:
                         clip_skip=clip_skip,
                         syntax_weights=syntax_weights,
                     )
-
-                    detailfix_params_A["prompt"] = None
                     detailfix_params_A["prompt_embeds"] = prompt_emb_ad
-                    detailfix_params_A["negative_prompt"] = None
                     detailfix_params_A["negative_prompt_embeds"] = negative_prompt_emb_ad
+
+                detailfix_params_A["prompt"] = None
+                detailfix_params_A["negative_prompt"] = None
 
             else:
                 # SDXL detailfix
                 if prompt_empty_detailfix_A and negative_prompt_empty_detailfix_A:
                     conditioning_detailfix_A, pooled_detailfix_A = conditioning, pooled
                 else:
-                    prompt_df_A = (
-                        prompt if prompt_empty_detailfix_A else detailfix_params_A["prompt"]
-                    )
-                    negative_prompt_df_A = (
-                        negative_prompt if negative_prompt_empty_detailfix_A else detailfix_params_A["negative_prompt"]
-                    )
-
                     conditioning_detailfix_A, pooled_detailfix_A = self.create_prompt_embeds(
                         prompt=prompt_df_A,
                         negative_prompt=negative_prompt_df_A,
@@ -2100,16 +2073,12 @@ class Model_Diffusers:
                         syntax_weights=syntax_weights,
                     )
 
-                # detailfix_params_A["prompt"] = None,
-                # detailfix_params_A["negative_prompt"] = None,
+                detailfix_params_A.pop('prompt', None)
+                detailfix_params_A.pop('negative_prompt', None)
                 detailfix_params_A["prompt_embeds"] = conditioning_detailfix_A[0:1]
                 detailfix_params_A["pooled_prompt_embeds"] = pooled_detailfix_A[0:1]
                 detailfix_params_A["negative_prompt_embeds"] = conditioning_detailfix_A[1:2]
                 detailfix_params_A["negative_pooled_prompt_embeds"] = pooled_detailfix_A[1:2]
-                if "prompt" in detailfix_params_A:
-                    detailfix_params_A.pop('prompt')
-                if "negative_prompt" in detailfix_params_A:
-                    detailfix_params_A.pop('negative_prompt')
 
             logger.debug(f"detailfix A prompt empty {prompt_empty_detailfix_A, negative_prompt_empty_detailfix_A}")
             if not prompt_empty_detailfix_A or not negative_prompt_empty_detailfix_A:
@@ -2134,12 +2103,9 @@ class Model_Diffusers:
             }
 
             # clear params yolo
-            if "strength" in adetailer_B_params:
-                adetailer_B_params.pop('strength')
-            if "prompt" in adetailer_B_params:
-                adetailer_B_params.pop('prompt')
-            if "negative_prompt" in adetailer_B_params:
-                adetailer_B_params.pop('negative_prompt')
+            adetailer_B_params.pop('strength', None)
+            adetailer_B_params.pop('prompt', None)
+            adetailer_B_params.pop('negative_prompt', None)
 
             # detailfix_params_B resolution param
             if self.task_name == "txt2img":
@@ -2152,14 +2118,9 @@ class Model_Diffusers:
                 detailfix_params_B["height"] = control_image.size[1]
                 detailfix_params_B["width"] = control_image.size[0]
 
-            # detailfix_params_B valid prompt
-            prompt_empty_detailfix_B = (
-                detailfix_params_B["prompt"] is None
-                or detailfix_params_B["prompt"] == ""
-            )
-            negative_prompt_empty_detailfix_B = (
-                detailfix_params_B["negative_prompt"] is None
-                or detailfix_params_B["negative_prompt"] == ""
+            # Verify prompt detailfix_params_B and get valid
+            prompt_empty_detailfix_B, negative_prompt_empty_detailfix_B, prompt_df_B, negative_prompt_df_B = process_prompts_valid(
+                detailfix_params_B["prompt"], detailfix_params_B["negative_prompt"], prompt, negative_prompt
             )
 
             # Params detailfix
@@ -2170,18 +2131,9 @@ class Model_Diffusers:
                 # detailfix_params_B["control_guidance_end"] = control_guidance_end
 
                 if prompt_empty_detailfix_B and negative_prompt_empty_detailfix_B:
-                    detailfix_params_B["prompt"] = None
                     detailfix_params_B["prompt_embeds"] = prompt_emb
-                    detailfix_params_B["negative_prompt"] = None
                     detailfix_params_B["negative_prompt_embeds"] = negative_prompt_emb
                 else:
-                    prompt_df_B = (
-                        prompt if prompt_empty_detailfix_B else detailfix_params_B["prompt"]
-                    )
-                    negative_prompt_df_B = (
-                        negative_prompt if negative_prompt_empty_detailfix_B else detailfix_params_B["negative_prompt"]
-                    )
-
                     prompt_emb_ad_b, negative_prompt_emb_ad_b = self.create_prompt_embeds(
                         prompt=prompt_df_B,
                         negative_prompt=negative_prompt_df_B,
@@ -2189,24 +2141,15 @@ class Model_Diffusers:
                         clip_skip=clip_skip,
                         syntax_weights=syntax_weights,
                     )
-
-                    detailfix_params_B["prompt"] = None
                     detailfix_params_B["prompt_embeds"] = prompt_emb_ad_b
-                    detailfix_params_B["negative_prompt"] = None
                     detailfix_params_B["negative_prompt_embeds"] = negative_prompt_emb_ad_b
-
+                detailfix_params_B["prompt"] = None
+                detailfix_params_B["negative_prompt"] = None
             else:
                 # SDXL detailfix
                 if prompt_empty_detailfix_B and negative_prompt_empty_detailfix_B:
                     conditioning_detailfix_B, pooled_detailfix_B = conditioning, pooled
                 else:
-                    prompt_df_B = (
-                        prompt if prompt_empty_detailfix_B else detailfix_params_B["prompt"]
-                    )
-                    negative_prompt_df_B = (
-                        negative_prompt if negative_prompt_empty_detailfix_B else detailfix_params_B["negative_prompt"]
-                    )
-
                     conditioning_detailfix_B, pooled_detailfix_B = self.create_prompt_embeds(
                         prompt=prompt_df_B,
                         negative_prompt=negative_prompt_df_B,
@@ -2214,20 +2157,12 @@ class Model_Diffusers:
                         clip_skip=clip_skip,
                         syntax_weights=syntax_weights,
                     )
-
-
-
-
-                # detailfix_params_B["prompt"] = None,
-                # detailfix_params_B["negative_prompt"] = None,
+                detailfix_params_B.pop('prompt', None)
+                detailfix_params_B.pop('negative_prompt', None)
                 detailfix_params_B["prompt_embeds"] = conditioning_detailfix_B[0:1]
                 detailfix_params_B["pooled_prompt_embeds"] = pooled_detailfix_B[0:1]
                 detailfix_params_B["negative_prompt_embeds"] = conditioning_detailfix_B[1:2]
                 detailfix_params_B["negative_pooled_prompt_embeds"] = pooled_detailfix_B[1:2]
-                if "prompt" in detailfix_params_B:
-                    detailfix_params_B.pop('prompt')
-                if "negative_prompt" in detailfix_params_B:
-                    detailfix_params_B.pop('negative_prompt')
 
             logger.debug(f"detailfix B prompt empty {prompt_empty_detailfix_B, negative_prompt_empty_detailfix_B}")
             if not prompt_empty_detailfix_B or not negative_prompt_empty_detailfix_B:
@@ -2248,14 +2183,9 @@ class Model_Diffusers:
             if self.class_name == "StableDiffusionPipeline":
                 hires_params_config["eta"] = 1.0
 
-            # Verify prompt hires
-            hires_prompt_empty = (
-                hires_prompt is None
-                or hires_prompt == ""
-            )
-            hires_negative_prompt_empty = (
-                hires_negative_prompt is None
-                or hires_negative_prompt == ""
+            # Verify prompt hires and get valid
+            hires_prompt_empty, hires_negative_prompt_empty, prompt_hires_valid, negative_prompt_hires_valid = process_prompts_valid(
+                hires_prompt, hires_negative_prompt, prompt, negative_prompt
             )
 
             # Hires embed params
@@ -2264,13 +2194,6 @@ class Model_Diffusers:
                     hires_params_config["prompt_embeds"] = prompt_emb
                     hires_params_config["negative_prompt_embeds"] = negative_prompt_emb
                 else:
-                    prompt_hires_valid = (
-                        prompt if hires_prompt_empty else hires_prompt
-                    )
-                    negative_prompt_hires_valid = (
-                        negative_prompt if hires_negative_prompt_empty else hires_negative_prompt
-                    )
-
                     prompt_emb_hires, negative_prompt_emb_hires = self.create_prompt_embeds(
                         prompt=prompt_hires_valid,
                         negative_prompt=negative_prompt_hires_valid,
@@ -2285,13 +2208,6 @@ class Model_Diffusers:
                 if hires_prompt_empty and hires_negative_prompt_empty:
                     hires_conditioning, hires_pooled = conditioning, pooled
                 else:
-                    prompt_hires_valid = (
-                        prompt if hires_prompt_empty else hires_prompt
-                    )
-                    negative_prompt_hires_valid = (
-                        negative_prompt if hires_negative_prompt_empty else hires_negative_prompt
-                    )
-
                     hires_conditioning, hires_pooled = self.create_prompt_embeds(
                         prompt=prompt_hires_valid,
                         negative_prompt=negative_prompt_hires_valid,
@@ -2311,7 +2227,7 @@ class Model_Diffusers:
                 if hasattr(self, "hires_pipe"):
                     del self.hires_pipe
             if retain_hires_model_previous_load:
-                if hasattr(self, "hires_pipe")
+                if hasattr(self, "hires_pipe"):
                     hires_pipe = self.hires_pipe
                 else:
                     self.hires_pipe = hires_pipe
@@ -2322,9 +2238,22 @@ class Model_Diffusers:
             torch.cuda.empty_cache()
             gc.collect()
 
+        # Debug info
+        try:
+            logger.debug(f"INFO PIPE: {self.pipe.__class__.__name__}")
+            logger.debug(f"text_encoder_type: {self.pipe.text_encoder.dtype}")
+            logger.debug(f"unet_type: {self.pipe.unet.dtype}")
+            logger.debug(f"vae_type: {self.pipe.vae.dtype}")
+            logger.debug(f"pipe_type: {self.pipe.dtype}")
+            logger.debug(f"scheduler_type: {self.pipe.scheduler}")
+            if adetailer_A or adetailer_B:
+                logger.debug(f"scheduler_detailfix: {detailfix_pipe.scheduler}")
+            if hires_steps > 1 and upscaler_model_path != None:
+                logger.debug(f"scheduler_hires: {hires_pipe.scheduler}")
+        except Exception as e:
+            logger.debug(f"{str(e)}")
 
-
-        ### RUN PIPE ###
+        # === RUN PIPE === #
         for i in range(loop_generation):
             calculate_seed = random.randint(0, 2147483647) if seed == -1 else seed
             if generator_in_cpu or self.device.type == "cpu":
