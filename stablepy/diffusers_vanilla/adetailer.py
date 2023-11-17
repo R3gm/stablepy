@@ -30,6 +30,16 @@ def ad_model_process(
     detailfix_pipe.safety_checker = None
     detailfix_pipe.to("cuda" if torch.cuda.is_available() else "cpu")
 
+    # detailfi resolution param
+    if str(detailfix_pipe.__class__.__name__) in ["StableDiffusionControlNetInpaintPipeline", "StableDiffusionXLInpaintPipeline"]:
+        pipe_params_df["height"] = image_list_task[0].size[1]
+        pipe_params_df["width"] = image_list_task[0].size[0]
+        logger.debug(f"detailfix inpaint only")
+    else:
+        pipe_params_df.pop("height", None)
+        pipe_params_df.pop("width", None)
+        logger.debug(f"detailfix img2img")
+
     image_list_ad = []
 
     detectors = []
@@ -77,7 +87,7 @@ def ad_model_process(
                 pipe_params_df["image"] = crop_image
                 pipe_params_df["mask_image"] = crop_mask
 
-                if not hasattr(detailfix_pipe, "text_encoder_2"):
+                if str(detailfix_pipe.__class__.__name__) == "StableDiffusionControlNetInpaintPipeline":
                     logger.debug("SD 1.5 detailfix")
                     pipe_params_df["control_image"] = make_inpaint_condition(crop_image, crop_mask)
 
