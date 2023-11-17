@@ -1348,15 +1348,15 @@ class Model_Diffusers:
         t2i_adapter_conditioning_scale: float = 1.0,
         t2i_adapter_conditioning_factor: float = 1.0,
 
-        upscaler_model_path: Optional[str] = None,
+        upscaler_model_path: Optional[str] = None, # add latent
         upscaler_increases_size: float = 1.5,
         esrgan_tile: int = 100,
         esrgan_tile_overlap: int = 10,
         hires_steps: int = 25,
         hires_denoising_strength: float = 0.35,
-        # hires_type: str = "pil" # latent,
         hires_prompt: str = "",
         hires_negative_prompt: str = "",
+        hires_sampler: str = "Use same sampler",
 
         loop_generation: int = 1,
         display_images: bool = True,
@@ -1972,16 +1972,28 @@ class Model_Diffusers:
                 "mask_dilation" : 4,
                 "mask_blur" : 4,
                 "mask_padding" : 32,
+                #"sampler" : "Use same sampler",
+                #"inpaint_only" : True,
             }
 
             # Pipe detailfix_pipe
             if not hasattr(self, "detailfix_pipe") or not retain_hires_model_previous_load:
-                detailfix_pipe = custom_task_model_loader(
-                    pipe=self.pipe,
-                    model_category="hires",
-                    task_name=self.task_name,
-                    torch_dtype=self.type_model_precision
-                )
+                if  adetailer_A_params.get("inpaint_only", False) == True or adetailer_B_params.get("inpaint_only", False) == True:
+                    detailfix_pipe = custom_task_model_loader(
+                        pipe=self.pipe,
+                        model_category="detailfix",
+                        task_name=self.task_name,
+                        torch_dtype=self.type_model_precision
+                    )
+                    adetailer_A_params.pop("inpaint_only", None)
+                    adetailer_B_params.pop("inpaint_only", None)
+                else:
+                    detailfix_pipe = custom_task_model_loader(
+                        pipe=self.pipe,
+                        model_category="detailfix_img2img",
+                        task_name=self.task_name,
+                        torch_dtype=self.type_model_precision
+                    )
                 if hasattr(self, "detailfix_pipe"):
                     del self.detailfix_pipe
             if retain_hires_model_previous_load:
@@ -1992,6 +2004,14 @@ class Model_Diffusers:
 
             # Define base scheduler detailfix
             detailfix_pipe.default_scheduler = copy.deepcopy(self.default_scheduler)
+            if  adetailer_A_params.get("sampler", "Use same sampler") != "Use same sampler":
+                logger.debug("detailfix_pipe will use the sampler from adetailer_A")
+                detailfix_pipe.scheduler = self.get_scheduler(adetailer_A_params[sampler])
+                adetailer_A_params.pop("sampler", None)
+            if adetailer_B_params.get("sampler", "Use same sampler") != "Use same sampler":
+                logger.debug("detailfix_pipe will use the sampler from adetailer_B")
+                detailfix_pipe.scheduler = self.get_scheduler(adetailer_A_params[sampler])
+                adetailer_B_params.pop("sampler", None)
 
             detailfix_pipe.set_progress_bar_config(leave=leave_progress_bar)
             detailfix_pipe.set_progress_bar_config(disable=disable_progress_bar)
@@ -2019,17 +2039,6 @@ class Model_Diffusers:
             adetailer_A_params.pop('strength', None)
             adetailer_A_params.pop('prompt', None)
             adetailer_A_params.pop('negative_prompt', None)
-
-            # detailfix_params_A resolution param
-            if self.task_name == "txt2img":
-                detailfix_params_A["height"] = img_height
-                detailfix_params_A["width"] = img_width
-            elif self.task_name in ["img2img", "inpaint"]:
-                detailfix_params_A["height"] = init_image.size[1]
-                detailfix_params_A["width"] = init_image.size[0]
-            else:
-                detailfix_params_A["height"] = control_image.size[1]
-                detailfix_params_A["width"] = control_image.size[0]
 
             # Verify prompt detailfix_params_A and get valid
             prompt_empty_detailfix_A, negative_prompt_empty_detailfix_A, prompt_df_A, negative_prompt_df_A = process_prompts_valid(
@@ -2106,17 +2115,6 @@ class Model_Diffusers:
             adetailer_B_params.pop('strength', None)
             adetailer_B_params.pop('prompt', None)
             adetailer_B_params.pop('negative_prompt', None)
-
-            # detailfix_params_B resolution param
-            if self.task_name == "txt2img":
-                detailfix_params_B["height"] = img_height
-                detailfix_params_B["width"] = img_width
-            elif self.task_name in ["img2img", "inpaint"]:
-                detailfix_params_B["height"] = init_image.size[1]
-                detailfix_params_B["width"] = init_image.size[0]
-            else:
-                detailfix_params_B["height"] = control_image.size[1]
-                detailfix_params_B["width"] = control_image.size[0]
 
             # Verify prompt detailfix_params_B and get valid
             prompt_empty_detailfix_B, negative_prompt_empty_detailfix_B, prompt_df_B, negative_prompt_df_B = process_prompts_valid(
@@ -2232,6 +2230,11 @@ class Model_Diffusers:
                 else:
                     self.hires_pipe = hires_pipe
 
+            # Hires scheduler
+            if  hires_sampler != "Use same sampler":
+                logger.debug("New hires sampler")
+                hires_pipe.scheduler = self.get_scheduler(hires_sampler)
+
             hires_pipe.set_progress_bar_config(leave=leave_progress_bar)
             hires_pipe.set_progress_bar_config(disable=disable_progress_bar)
             hires_pipe.to(self.device)
@@ -2245,7 +2248,7 @@ class Model_Diffusers:
             logger.debug(f"unet_type: {self.pipe.unet.dtype}")
             logger.debug(f"vae_type: {self.pipe.vae.dtype}")
             logger.debug(f"pipe_type: {self.pipe.dtype}")
-            logger.debug(f"scheduler_type: {self.pipe.scheduler}")
+            logger.debug(f"scheduler_main_pipe: {self.pipe.scheduler}")
             if adetailer_A or adetailer_B:
                 logger.debug(f"scheduler_detailfix: {detailfix_pipe.scheduler}")
             if hires_steps > 1 and upscaler_model_path != None:
