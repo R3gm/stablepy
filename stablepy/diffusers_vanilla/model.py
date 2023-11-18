@@ -1,4 +1,3 @@
-%%writefile /usr/local/lib/python3.10/dist-packages/stablepy/diffusers_vanilla/model.py
 import gc
 import time
 import numpy as np
@@ -47,6 +46,8 @@ from diffusers import (
     DEISMultistepScheduler,
     UniPCMultistepScheduler,
     LCMScheduler,
+    PNDMScheduler,
+    KDPM2AncestralDiscreteScheduler,
 )
 from .prompt_weights import get_embed_new, add_comma_after_pattern_ti
 from .utils import save_pil_image_with_metadata
@@ -250,6 +251,8 @@ SCHEDULER_CONFIG_MAP = {
     "DPM++ SDE Karras": (DPMSolverSinglestepScheduler, {"use_karras_sigmas": True}),
     "DPM2": (KDPM2DiscreteScheduler, {}),
     "DPM2 Karras": (KDPM2DiscreteScheduler, {"use_karras_sigmas": True}),
+    "DPM2 a" : (KDPM2AncestralDiscreteScheduler, {}),
+    "DPM2 a Karras" : (KDPM2AncestralDiscreteScheduler, {"use_karras_sigmas": True}),
     "Euler": (EulerDiscreteScheduler, {}),
     "Euler a": (EulerAncestralDiscreteScheduler, {}),
     "Heun": (HeunDiscreteScheduler, {}),
@@ -258,13 +261,14 @@ SCHEDULER_CONFIG_MAP = {
     "DDIM": (DDIMScheduler, {}),
     "DEISMultistep": (DEISMultistepScheduler, {}),
     "UniPCMultistep": (UniPCMultistepScheduler, {}),
+    "PNDM" : (PNDMScheduler, {}),
+
+    "LCM" : (LCMScheduler, {}),
 
     "DPM++ 2M Lu": (DPMSolverMultistepScheduler, {"use_lu_lambdas": True}),
     "DPM++ 2M Ef": (DPMSolverMultistepScheduler, {"euler_at_final": True}),
     "DPM++ 2M SDE Lu": (DPMSolverMultistepScheduler, {"use_lu_lambdas": True, "algorithm_type": "sde-dpmsolver++"}),
     "DPM++ 2M SDE Ef": (DPMSolverMultistepScheduler, {"algorithm_type": "sde-dpmsolver++", "euler_at_final": True}),
-
-    "LCM" : (LCMScheduler, {}),
 }
 
 scheduler_names = list(SCHEDULER_CONFIG_MAP.keys())
