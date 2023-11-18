@@ -55,6 +55,7 @@ from .adetailer import ad_model_process
 from ..upscalers.esrgan import UpscalerESRGAN, UpscalerLanczos, UpscalerNearest
 from ..logging.logging_setup import logger
 from .extra_model_loaders import custom_task_model_loader
+from .high_resolution import process_images_high_resolution
 import os
 from compel import Compel
 from compel import ReturnedEmbeddingsType
@@ -1364,6 +1365,8 @@ class Model_Diffusers:
         generator_in_cpu: bool = False,
         leave_progress_bar: bool = False,
         disable_progress_bar: bool = False,
+        hires_before_adetailer: bool = False,
+        hires_after_adetailer: bool = True,
         retain_compel_previous_load: bool = False,
         retain_detailfix_model_previous_load: bool = False,
         retain_hires_model_previous_load: bool = False,
@@ -1985,8 +1988,6 @@ class Model_Diffusers:
                         task_name=self.task_name,
                         torch_dtype=self.type_model_precision
                     )
-                    adetailer_A_params.pop("inpaint_only", None)
-                    adetailer_B_params.pop("inpaint_only", None)
                 else:
                     detailfix_pipe = custom_task_model_loader(
                         pipe=self.pipe,
@@ -2001,17 +2002,19 @@ class Model_Diffusers:
                     detailfix_pipe = self.detailfix_pipe
                 else:
                     self.detailfix_pipe = detailfix_pipe
+            adetailer_A_params.pop("inpaint_only", None)
+            adetailer_B_params.pop("inpaint_only", None)
 
             # Define base scheduler detailfix
             detailfix_pipe.default_scheduler = copy.deepcopy(self.default_scheduler)
             if  adetailer_A_params.get("sampler", "Use same sampler") != "Use same sampler":
                 logger.debug("detailfix_pipe will use the sampler from adetailer_A")
-                detailfix_pipe.scheduler = self.get_scheduler(adetailer_A_params[sampler])
-                adetailer_A_params.pop("sampler", None)
+                detailfix_pipe.scheduler = self.get_scheduler(adetailer_A_params["sampler"])
+            adetailer_A_params.pop("sampler", None)
             if adetailer_B_params.get("sampler", "Use same sampler") != "Use same sampler":
                 logger.debug("detailfix_pipe will use the sampler from adetailer_B")
-                detailfix_pipe.scheduler = self.get_scheduler(adetailer_A_params[sampler])
-                adetailer_B_params.pop("sampler", None)
+                detailfix_pipe.scheduler = self.get_scheduler(adetailer_A_params["sampler"])
+            adetailer_B_params.pop("sampler", None)
 
             detailfix_pipe.set_progress_bar_config(leave=leave_progress_bar)
             detailfix_pipe.set_progress_bar_config(disable=disable_progress_bar)
@@ -2214,6 +2217,13 @@ class Model_Diffusers:
                         syntax_weights=syntax_weights,
                     )
 
+                hires_params_config.pop('prompt', None)
+                hires_params_config.pop('negative_prompt', None)
+                hires_params_config["prompt_embeds"] = hires_conditioning[0:1]
+                hires_params_config["pooled_prompt_embeds"] = hires_pooled[0:1]
+                hires_params_config["negative_prompt_embeds"] = hires_conditioning[1:2]
+                hires_params_config["negative_pooled_prompt_embeds"] = hires_pooled[1:2]
+
             # Hires pipe
             if not hasattr(self, "hires_pipe") or not retain_hires_model_previous_load:
                 hires_pipe = custom_task_model_loader(
@@ -2302,6 +2312,19 @@ class Model_Diffusers:
             torch.cuda.empty_cache()
             gc.collect()
 
+            if hires_before_adetailer and upscaler_model_path != None:
+                logger.debug(f"Hires before; same seed for each image (no batch)")
+                images = process_images_high_resolution(
+                    images,
+                    upscaler_model_path,
+                    upscaler_increases_size,
+                    esrgan_tile, esrgan_tile_overlap,
+                    hires_steps, hires_params_config,
+                    self.task_name,
+                    pipe_params_config["generator"],
+                    hires_pipe,
+                )
+
             # Adetailer stuff
             if adetailer_A or adetailer_B:
                 # image_pil_list = []
@@ -2332,60 +2355,20 @@ class Model_Diffusers:
                 torch.cuda.empty_cache()
                 gc.collect()
 
-            # Upscale
-            if upscaler_model_path != None:
-                if upscaler_model_path == "Lanczos":
-                    scaler = UpscalerLanczos()
-                elif upscaler_model_path == "Nearest":
-                    scaler = UpscalerNearest()
-                else:
-                    scaler = UpscalerESRGAN(esrgan_tile, esrgan_tile_overlap)
+            if hires_after_adetailer and upscaler_model_path != None:
+                logger.debug(f"Hires after; same seed for each image (no batch)")
+                images = process_images_high_resolution(
+                    images,
+                    upscaler_model_path,
+                    upscaler_increases_size,
+                    esrgan_tile, esrgan_tile_overlap,
+                    hires_steps, hires_params_config,
+                    self.task_name,
+                    pipe_params_config["generator"],
+                    hires_pipe,
+                )
 
-                result_scaler = []
-                for img_pre_up in images:
-                    image_pos_up = scaler.upscale(
-                        img_pre_up, upscaler_increases_size, upscaler_model_path
-                    )
-                    torch.cuda.empty_cache()
-                    gc.collect()
-                    result_scaler.append(image_pos_up)
-                images = result_scaler
-
-                logger.info(f"Final resolution: {images[0].size}")
-
-                # Hires fix
-                if hires_steps > 1:
-
-                    if self.task_name not in ["txt2img", "inpaint", "img2img"]:
-                        control_image_up = images[0]
-                        images = images[1:]
-
-                    result_hires = []
-                    # image by image to avoid possible memory issues as much as possible
-                    for img_pre_hires in images:
-                        if self.class_name == "StableDiffusionXLPipeline":
-                            img_pos_hires = hires_pipe(
-                                prompt_embeds=hires_conditioning[0:1],
-                                pooled_prompt_embeds=hires_pooled[0:1],
-                                negative_prompt_embeds=hires_conditioning[1:2],
-                                negative_pooled_prompt_embeds=hires_pooled[1:2],
-                                generator=pipe_params_config["generator"],
-                                image=img_pre_hires,
-                                **hires_params_config,
-                            ).images[0]
-                        elif self.class_name == "StableDiffusionPipeline":
-                            img_pos_hires = hires_pipe(
-                                generator=pipe_params_config["generator"],
-                                image=img_pre_hires,
-                                **hires_params_config,
-                            ).images[0]
-                        torch.cuda.empty_cache()
-                        gc.collect()
-                        result_hires.append(img_pos_hires)
-                    images = result_hires
-
-                    if self.task_name not in ["txt2img", "inpaint", "img2img"]:
-                        images = [control_image_up] + images
+            logger.info(f"Seed: {calculate_seed}")
 
             # Show images if loop
             if display_images:
@@ -2419,7 +2402,6 @@ class Model_Diffusers:
             torch.cuda.empty_cache()
             gc.collect()
 
-            logger.info(f"Seed: {calculate_seed}")
             if image_list[0] != "not saved in storage":
                 logger.info(image_list)
 
