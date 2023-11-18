@@ -395,16 +395,29 @@ class Model_Diffusers:
 
                     case "StableDiffusionXLPipeline":
                         logger.info("Default VAE: madebyollin/sdxl-vae-fp16-fix")
-                        self.pipe = DiffusionPipeline.from_pretrained(
-                            base_model_id,
-                            vae=AutoencoderKL.from_pretrained(
-                                "madebyollin/sdxl-vae-fp16-fix", torch_dtype=torch.float16
-                            ),
-                            torch_dtype=torch.float16,
-                            use_safetensors=True,
-                            variant="fp16",
-                            add_watermarker=False,
-                        )
+                        try:
+                            self.pipe = DiffusionPipeline.from_pretrained(
+                                base_model_id,
+                                vae=AutoencoderKL.from_pretrained(
+                                    "madebyollin/sdxl-vae-fp16-fix", torch_dtype=torch.float16
+                                ),
+                                torch_dtype=torch.float16,
+                                use_safetensors=True,
+                                variant="fp16",
+                                add_watermarker=False,
+                            )
+                        except Exception as e:
+                            logger.debug(e)
+                            logger.debug("Loading model without parameter variant=fp16")
+                            self.pipe = DiffusionPipeline.from_pretrained(
+                                base_model_id,
+                                vae=AutoencoderKL.from_pretrained(
+                                    "madebyollin/sdxl-vae-fp16-fix", torch_dtype=torch.float16
+                                ),
+                                torch_dtype=torch.float16,
+                                use_safetensors=True,
+                                add_watermarker=False,
+                            )
 
             # Load VAE after loaded model
             if vae_model is None :
