@@ -1,7 +1,8 @@
 # =====================================
 # BASE UPSCALER
 # =====================================
-device_upscaler = "cuda"  # run in CPU is very slow
+import torch
+device_upscaler = "cuda" if torch.cuda.is_available() else "cpu"  # run in CPU is very slow
 
 from abc import abstractmethod
 import PIL
