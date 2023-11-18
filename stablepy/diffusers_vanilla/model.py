@@ -1,3 +1,4 @@
+%%writefile /usr/local/lib/python3.10/dist-packages/stablepy/diffusers_vanilla/model.py
 import gc
 import time
 import numpy as np
@@ -56,6 +57,7 @@ from ..upscalers.esrgan import UpscalerESRGAN, UpscalerLanczos, UpscalerNearest
 from ..logging.logging_setup import logger
 from .extra_model_loaders import custom_task_model_loader
 from .high_resolution import process_images_high_resolution
+from .style_prompt_config import styles_data, STYLE_NAMES, get_json_content, apply_style
 import os
 from compel import Compel
 from compel import ReturnedEmbeddingsType
@@ -297,6 +299,9 @@ class Model_Diffusers:
         )
         self.preprocessor = Preprocessor()
 
+        self.styles_data = styles_data
+        self.STYLE_NAMES = STYLE_NAMES
+        self.style_json_file = ""
 
 
     def load_pipe(
@@ -1279,6 +1284,20 @@ class Model_Diffusers:
                     pass
             return self.pipe
 
+    def load_style_file(self, style_json_file):
+        if os.path.exists(style_json_file):
+            try:
+                file_json_read = get_json_content(style_json_file)
+                self.styles_data = {k["name"]: (k["prompt"], k["negative_prompt"]) for k in file_json_read}
+                self.STYLE_NAMES = list(self.styles_data.keys())
+                self.style_json_file = style_json_file
+                logger.info(f"Styles json file loaded with {len(self.STYLE_NAMES)} styles")
+                logger.debug(str(self.STYLE_NAMES))
+            except Exception as e:
+                logger.error(str(e))
+        else:
+            logger.error("Not found styles json file in directory")
+
     def callback_pipe(self, iter, t, latents):
         # convert latents to image
         with torch.no_grad():
@@ -1330,7 +1349,8 @@ class Model_Diffusers:
         adetailer_A_params: Dict[str, Any] = {},
         adetailer_B: bool = False,
         adetailer_B_params: Dict[str, Any] = {},
-        style_prompt: str = "",
+        style_prompt: Optional[Any] = [""],
+        style_json_file: Optional[Any] = "",
 
         image: Optional[Any] = None,
         preprocessor_name: Optional[str] = "None",
@@ -1576,7 +1596,16 @@ class Model_Diffusers:
             self.pipe.disable_xformers_memory_efficient_attention()
         self.pipe.to(self.device)
 
-        # in call
+        # Load style prompt file
+        if style_json_file != "" and style_json_file != self.style_json_file:
+            self.load_style_file(style_json_file)
+        # Set style
+        if isinstance(style_prompt, str):
+            style_prompt = [style_prompt]
+        if style_prompt != [""]:
+            prompt, negative_prompt = apply_style(style_prompt, prompt, negative_prompt, self.styles_data, self.STYLE_NAMES)
+
+        # LoRA load
         if self.lora_memory == [
             lora_A,
             lora_B,
