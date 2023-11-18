@@ -1539,13 +1539,23 @@ class Model_Diffusers:
         """
 
         if self.task_name != "txt2img" and image == None:
-            raise ValueError
-        if img_height % 8 != 0 or img_width % 8 != 0:
-            raise ValueError("Height and width must be divisible by 8")
-        if control_guidance_start >= control_guidance_end:
             raise ValueError(
-                "Control guidance start (ControlNet Start Threshold) cannot be larger or equal to control guidance end (ControlNet Stop Threshold)"
+                "You need to specify the <image> for this task."
             )
+        if img_height % 8 != 0:
+            img_height = img_height + (8 - img_height % 8)
+            logger.warning(f"Height must be divisible by 8, changed to {str(img_height)}")
+        if img_width % 8 != 0:
+            img_width = img_width + (8 - img_width % 8)
+            logger.warning(f"Width must be divisible by 8, changed to {str(img_width)}")
+        if image_resolution % 8 != 0:
+            image_resolution = image_resolution + (8 - image_resolution % 8)
+            logger.warning(f"Image resolution must be divisible by 8, changed to {str(image_resolution)}")
+        if control_guidance_start >= control_guidance_end:
+            logger.error(
+                "Control guidance start (ControlNet Start Threshold) cannot be larger or equal to control guidance end (ControlNet Stop Threshold). The default values 0.0 and 1.0 will be used."
+            )
+            control_guidance_start, control_guidance_end = 0.0, 1.0
 
         self.gui_active = gui_active
         self.image_previews = image_previews
