@@ -1,4 +1,3 @@
-%%writefile /usr/local/lib/python3.10/dist-packages/stablepy/diffusers_vanilla/style_prompt_config.py
 from ..logging.logging_setup import logger
 from typing import Tuple
 import json
