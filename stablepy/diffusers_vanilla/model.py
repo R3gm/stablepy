@@ -2036,7 +2036,7 @@ class Model_Diffusers:
             }
 
             # Pipe detailfix_pipe
-            if not hasattr(self, "detailfix_pipe") or not retain_hires_model_previous_load:
+            if not hasattr(self, "detailfix_pipe") or not retain_detailfix_model_previous_load:
                 if  adetailer_A_params.get("inpaint_only", False) == True or adetailer_B_params.get("inpaint_only", False) == True:
                     detailfix_pipe = custom_task_model_loader(
                         pipe=self.pipe,
@@ -2053,7 +2053,7 @@ class Model_Diffusers:
                     )
                 if hasattr(self, "detailfix_pipe"):
                     del self.detailfix_pipe
-            if retain_hires_model_previous_load:
+            if retain_detailfix_model_previous_load:
                 if hasattr(self, "detailfix_pipe"):
                     detailfix_pipe = self.detailfix_pipe
                 else:
