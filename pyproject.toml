@@ -11,7 +11,7 @@ torch = {version = "2.1.0+cu118", source = "pytorch-gpu-src"}
 torchvision = {version = "0.16.0+cu118", source = "pytorch-gpu-src"}
 torchaudio = {version = "2.1.0+cu118", source = "pytorch-gpu-src"}
 omegaconf = "2.3.0"
-diffusers = {git = "https://github.com/huggingface/diffusers.git"}
+diffusers = "0.23.0"
 compel = {git = "https://github.com/damian0815/compel.git"}
 invisible-watermark = "^0.2.0"
 transformers = "^4.34.0"
