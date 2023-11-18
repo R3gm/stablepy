@@ -1374,7 +1374,7 @@ class Model_Diffusers:
         preprocess_resolution: int = 512,
         image_resolution: int = 512,
         image_mask: Optional[Any] = None,
-        strength: float = 1.0,
+        strength: float = 0.35,
         low_threshold: int = 100,
         high_threshold: int = 200,
         value_threshold: float = 0.1,
@@ -1397,7 +1397,7 @@ class Model_Diffusers:
         hires_sampler: str = "Use same sampler",
 
         loop_generation: int = 1,
-        display_images: bool = True,
+        display_images: bool = False,
         save_generated_images: bool = True,
         generator_in_cpu: bool = False,
         leave_progress_bar: bool = False,
@@ -1440,7 +1440,7 @@ class Model_Diffusers:
             sampler (str, optional, defaults to "DPM++ 2M"):
                 The sampler used for the generation process. Available samplers: DPM++ 2M, DPM++ 2M Karras, DPM++ 2M SDE,
                 DPM++ 2M SDE Karras, DPM++ SDE, DPM++ SDE Karras, DPM2, DPM2 Karras, Euler, Euler a, Heun, LMS, LMS Karras,
-                DDIM, DEISMultistep, UniPCMultistep, Euler Karras, DPM++ 2M Lu, DPM++ 2M Ef, DPM++ 2M SDE Lu and DPM++ 2M SDE Ef.
+                DDIM, DEISMultistep, UniPCMultistep, LCM, DPM++ 2M Lu, DPM++ 2M Ef, DPM++ 2M SDE Lu and DPM++ 2M SDE Ef.
             syntax_weights (str, optional, defaults to "Classic"):
                 Specifies the type of syntax weights used during generation. "Classic" is (word:weight), "Compel" is (word)weight
             lora_A (str, optional):
@@ -1471,17 +1471,47 @@ class Model_Diffusers:
             adetailer_A (bool, optional, defaults to False):
                 Guided Inpainting to Correct Image, it is preferable to use low values for strength.
             adetailer_A_params (Dict[str, Any], optional, defaults to {}):
-                Placeholder for detailfix_pipe parameters.
+                Placeholder for adetailer_A parameters in a dict example {"prompt": "my prompt", "inpaint_only": True ...}. 
+                If not specified, default values will be used:
+                - face_detector_ad (bool): Indicates whether face detection is enabled. Defaults to True.
+                - person_detector_ad (bool): Indicates whether person detection is enabled. Defaults to True.
+                - hand_detector_ad (bool): Indicates whether hand detection is enabled. Defaults to False.
+                - prompt (str): A prompt for the adetailer_A. Defaults to an empty string.
+                - negative_prompt (str): A negative prompt for the adetailer_A. Defaults to an empty string.
+                - strength (float): The strength parameter value. Defaults to 0.35.
+                - mask_dilation (int): The mask dilation value. Defaults to 4.
+                - mask_blur (int): The mask blur value. Defaults to 4.
+                - mask_padding (int): The mask padding value. Defaults to 32.
+                - inpaint_only (bool): Indicates if only inpainting is to be performed. Defaults to True. False is img2img mode
+                - sampler (str): The sampler type to be used. Defaults to "Use same sampler".
             adetailer_B (bool, optional, defaults to False):
                 Guided Inpainting to Correct Image, it is preferable to use low values for strength.
             adetailer_B_params (Dict[str, Any], optional, defaults to {}):
-                Placeholder for detailfix_pipe parameters.
+                Placeholder for adetailer_B parameters in a dict example {"prompt": "my prompt", "inpaint_only": True ...}. 
+                If not specified, default values will be used.
             style_prompt (str, optional):
-                Placeholder for additional prompt.
+                If a style that is in STYLE_NAMES is specified, it will be added to the original prompt and negative prompt.
+            style_json_file (str, optional):
+                JSON with styles to be applied and used in style_prompt.
             upscaler_model_path (str, optional):
                 Placeholder for upscaler model path.
             upscaler_increases_size (float, optional, defaults to 1.5):
                 Placeholder for upscaler increases size parameter.
+            esrgan_tile (int, optional, defaults to 100):
+                Tile if use a ESRGAN model.
+            esrgan_tile_overlap (int, optional, defaults to 100):
+                Tile overlap if use a ESRGAN model.
+            hires_steps (int, optional, defaults to 25):
+                The number of denoising steps for hires. More denoising steps usually lead to a higher quality image at the
+                expense of slower inference.
+            hires_denoising_strength (float, optional, defaults to 0.35):
+                Strength parameter for the hires.
+            hires_prompt (str , optional):
+                The prompt for hires. If not specified, the main prompt will be used.
+            hires_negative_prompt (str , optional):
+                The negative prompt for hires. If not specified, the main negative prompt will be used.
+            hires_sampler (str, optional, defaults to "Use same sampler"):
+                The sampler used for the hires generation process. If not specified, the main sampler will be used.
             image (Any, optional):
                 The image to be used for the Inpaint, ControlNet, or T2I adapter.
             preprocessor_name (str, optional, defaults to "None"):
@@ -1489,11 +1519,11 @@ class Model_Diffusers:
             preprocess_resolution (int, optional, defaults to 512):
                 Preprocess resolution for the Inpaint, ControlNet, or T2I adapter.
             image_resolution (int, optional, defaults to 512):
-                Image resolution for the Inpaint, ControlNet, or T2I adapter.
+                Image resolution for the Img2Img, Inpaint, ControlNet, or T2I adapter.
             image_mask (Any, optional):
                 Path image mask for the Inpaint.
-            strength (float, optional, defaults to 1.0):
-                Strength parameter for the Inpaint.
+            strength (float, optional, defaults to 0.35):
+                Strength parameter for the Inpaint and Img2Img.
             low_threshold (int, optional, defaults to 100):
                 Low threshold parameter for ControlNet and T2I Adapter Canny.
             high_threshold (int, optional, defaults to 200):
@@ -1520,6 +1550,10 @@ class Model_Diffusers:
                 all timesteps. If `t2i_adapter_conditioning_factor` is `0.5`, adapter is applied for half of the timesteps.
             loop_generation (int, optional, defaults to 1):
                 The number of times the specified `num_images` will be generated.
+            display_images (bool, optional, defaults to False):
+                If you use a notebook, you will be able to display the images generated with this parameter.
+            save_generated_images (bool, optional, defaults to True):
+                By default, the generated images are saved in the current location within the 'images' folder. You can disable this with this parameter.
             generator_in_cpu (bool, optional, defaults to False):
                 The generator by default is specified on the GPU. To obtain more consistent results across various environments,
                 it is preferable to use the generator on the CPU.
@@ -1527,6 +1561,16 @@ class Model_Diffusers:
                 Leave the progress bar after generating the image.
             disable_progress_bar (bool, optional, defaults to False):
                 Do not display the progress bar during image generation.
+            hires_before_adetailer (bool, optional, defaults to False):
+                Apply an upscale and high-resolution fix before adetailer.
+            hires_after_adetailer (bool, optional, defaults to True):
+                Apply an upscale and high-resolution fix after adetailer.
+            retain_compel_previous_load (bool, optional, defaults to False):
+                The previous compel remains preloaded in memory.
+            retain_detailfix_model_previous_load (bool, optional, defaults to False):
+                The previous adetailer model remains preloaded in memory.
+            retain_hires_model_previous_load (bool, optional, defaults to False):
+                The previous hires model remains preloaded in memory.
             image_previews (bool, optional, defaults to False):
                 Displaying the image denoising process.
             xformers_memory_efficient_attention (bool, optional, defaults to False):
