@@ -1471,7 +1471,7 @@ class Model_Diffusers:
             adetailer_A (bool, optional, defaults to False):
                 Guided Inpainting to Correct Image, it is preferable to use low values for strength.
             adetailer_A_params (Dict[str, Any], optional, defaults to {}):
-                Placeholder for adetailer_A parameters in a dict example {"prompt": "my prompt", "inpaint_only": True ...}. 
+                Placeholder for adetailer_A parameters in a dict example {"prompt": "my prompt", "inpaint_only": True ...}.
                 If not specified, default values will be used:
                 - face_detector_ad (bool): Indicates whether face detection is enabled. Defaults to True.
                 - person_detector_ad (bool): Indicates whether person detection is enabled. Defaults to True.
@@ -1487,7 +1487,7 @@ class Model_Diffusers:
             adetailer_B (bool, optional, defaults to False):
                 Guided Inpainting to Correct Image, it is preferable to use low values for strength.
             adetailer_B_params (Dict[str, Any], optional, defaults to {}):
-                Placeholder for adetailer_B parameters in a dict example {"prompt": "my prompt", "inpaint_only": True ...}. 
+                Placeholder for adetailer_B parameters in a dict example {"prompt": "my prompt", "inpaint_only": True ...}.
                 If not specified, default values will be used.
             style_prompt (str, optional):
                 If a style that is in STYLE_NAMES is specified, it will be added to the original prompt and negative prompt.
@@ -2368,47 +2368,95 @@ class Model_Diffusers:
 
         # === RUN PIPE === #
         for i in range(loop_generation):
-            calculate_seed = random.randint(0, 2147483647) if seed == -1 else seed
-            if generator_in_cpu or self.device.type == "cpu":
-                pipe_params_config["generator"] = torch.Generator().manual_seed(
-                    calculate_seed
-                )
+
+            # number seed
+            if seed == -1:
+                seeds = [random.randint(0, 2147483647) for _ in range(num_images)]
             else:
-                try:
-                    pipe_params_config["generator"] = torch.Generator(
-                        "cuda"
-                    ).manual_seed(calculate_seed)
-                except:
-                    logger.warning("Generator in CPU")
-                    pipe_params_config["generator"] = torch.Generator().manual_seed(
-                        calculate_seed
-                    )
+                if num_images == 1:
+                    seeds = [seed]
+                else:
+                    seeds = [seed] + [random.randint(0, 2147483647) for _ in range(num_images-1)]
+                    
+            # generators 
+            generators = []  # List to store all the generators
+            for calculate_seed in seeds:
+                if generator_in_cpu or self.device.type == "cpu":
+                    generator = torch.Generator().manual_seed(calculate_seed)
+                else:
+                    try:
+                        generator = torch.Generator("cuda").manual_seed(calculate_seed)
+                    except:
+                        logger.warning("Generator in CPU")
+                        generator = torch.Generator().manual_seed(calculate_seed)
 
-            if self.class_name == "StableDiffusionXLPipeline":
-                # sdxl pipe
-                images = self.pipe(
-                    prompt_embeds=conditioning[0:1],
-                    pooled_prompt_embeds=pooled[0:1],
-                    negative_prompt_embeds=conditioning[1:2],
-                    negative_pooled_prompt_embeds=pooled[1:2],
-                    #generator=pipe_params_config["generator"],
-                    **pipe_params_config,
-                ).images
-                if self.task_name not in ["txt2img", "inpaint", "img2img"]:
-                    images = [control_image] + images
-            elif self.task_name == "txt2img":
-                images = self.run_pipe_SD(**pipe_params_config)
-            elif self.task_name == "inpaint":
-                images = self.run_pipe_inpaint(**pipe_params_config)
-            elif self.task_name not in ["txt2img", "inpaint", "img2img"]:
-                results = self.run_pipe(
-                    **pipe_params_config
-                )  ## pipe ControlNet add condition_weights
-                images = [control_image] + results
-                del results
-            elif self.task_name == "img2img":
-                images = self.run_pipe_img2img(**pipe_params_config)
+                generators.append(generator)
 
+            # fix img2img bug need concat tensor prompts with generator same number (only in batch inference)
+            pipe_params_config["generator"] = generators if self.task_name != "img2img" else generators[0] # no list
+            seeds = seeds if self.task_name != "img2img" else [seeds[0]] * num_images
+
+            try:
+                if self.class_name == "StableDiffusionXLPipeline":
+                    # sdxl pipe
+                    images = self.pipe(
+                        prompt_embeds=conditioning[0:1],
+                        pooled_prompt_embeds=pooled[0:1],
+                        negative_prompt_embeds=conditioning[1:2],
+                        negative_pooled_prompt_embeds=pooled[1:2],
+                        #generator=pipe_params_config["generator"],
+                        **pipe_params_config,
+                    ).images
+                    if self.task_name not in ["txt2img", "inpaint", "img2img"]:
+                        images = [control_image] + images
+                elif self.task_name == "txt2img":
+                    images = self.run_pipe_SD(**pipe_params_config)
+                elif self.task_name == "inpaint":
+                    images = self.run_pipe_inpaint(**pipe_params_config)
+                elif self.task_name not in ["txt2img", "inpaint", "img2img"]:
+                    results = self.run_pipe(
+                        **pipe_params_config
+                    )  ## pipe ControlNet add condition_weights
+                    images = [control_image] + results
+                    del results
+                elif self.task_name == "img2img":
+                    images = self.run_pipe_img2img(**pipe_params_config)
+            except Exception as e:
+                e = str(e)
+                if "Tensor with 2 elements cannot be converted to Scalar" in e:
+                    logger.debug(e)
+                    logger.error("Error in sampler; trying with DDIM sampler")
+                    self.pipe.scheduler = self.default_scheduler
+                    self.pipe.scheduler = DDIMScheduler.from_config(self.pipe.scheduler.config)
+                    if self.class_name == "StableDiffusionXLPipeline":
+                        # sdxl pipe
+                        images = self.pipe(
+                            prompt_embeds=conditioning[0:1],
+                            pooled_prompt_embeds=pooled[0:1],
+                            negative_prompt_embeds=conditioning[1:2],
+                            negative_pooled_prompt_embeds=pooled[1:2],
+                            #generator=pipe_params_config["generator"],
+                            **pipe_params_config,
+                        ).images
+                        if self.task_name not in ["txt2img", "inpaint", "img2img"]:
+                            images = [control_image] + images
+                    elif self.task_name == "txt2img":
+                        images = self.run_pipe_SD(**pipe_params_config)
+                    elif self.task_name == "inpaint":
+                        images = self.run_pipe_inpaint(**pipe_params_config)
+                    elif self.task_name not in ["txt2img", "inpaint", "img2img"]:
+                        results = self.run_pipe(
+                            **pipe_params_config
+                        )  ## pipe ControlNet add condition_weights
+                        images = [control_image] + results
+                        del results
+                    elif self.task_name == "img2img":
+                        images = self.run_pipe_img2img(**pipe_params_config)
+                elif "The size of tensor a (0) must match the size of tensor b (3) at non-singleton" in e:
+                    raise ValueError(f"steps / strength too low for the model to produce a satisfactory response")
+                else:
+                    raise ValueError(e)
+                    
             torch.cuda.empty_cache()
             gc.collect()
 
@@ -2421,7 +2469,7 @@ class Model_Diffusers:
                     esrgan_tile, esrgan_tile_overlap,
                     hires_steps, hires_params_config,
                     self.task_name,
-                    pipe_params_config["generator"],
+                    generators[0], #pipe_params_config["generator"][0], # no generator
                     hires_pipe,
                 )
 
@@ -2464,11 +2512,11 @@ class Model_Diffusers:
                     esrgan_tile, esrgan_tile_overlap,
                     hires_steps, hires_params_config,
                     self.task_name,
-                    pipe_params_config["generator"],
+                    generators[0], #pipe_params_config["generator"][0], # no generator
                     hires_pipe,
                 )
 
-            logger.info(f"Seed: {calculate_seed}")
+            logger.info(f"Seeds: {seeds}")
 
             # Show images if loop
             if display_images:
@@ -2488,14 +2536,17 @@ class Model_Diffusers:
                 num_steps,
                 guidance_scale,
                 sampler,
-                calculate_seed,
+                0000000000, #calculate_seed,
                 img_width,
                 img_height,
                 clip_skip,
             ]
-            for image_ in images:
+
+            valid_seeds = [0] + seeds if self.task_name not in ["txt2img", "inpaint", "img2img"] else seeds
+            for image_, seed_ in zip(images, valid_seeds):
                 image_path = "not saved in storage"
                 if save_generated_images:
+                    metadata[7] = seed_
                     image_path = save_pil_image_with_metadata(image_, "./images", metadata)
                 image_list.append(image_path)
 
