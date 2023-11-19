@@ -1828,7 +1828,6 @@ class Model_Diffusers:
         if self.task_name not in ["txt2img", "inpaint", "img2img"]:
             preprocess_params_config["image"] = array_rgb
             preprocess_params_config["image_resolution"] = image_resolution
-            # preprocess_params_config["additional_prompt"] = additional_prompt # ""
 
             if self.task_name != "ip2p":
                 if self.task_name != "shuffle":
@@ -1841,7 +1840,7 @@ class Model_Diffusers:
         # RUN Preprocess SD 1.5
         if self.task_name == "inpaint":
             # Get mask for Inpaint
-            if gui_active or os.path.exists(image_mask):
+            if gui_active or os.path.exists(str(image_mask)):
                 # Read image mask from gui
                 mask_control_img = Image.open(image_mask)
                 numpy_array_mask = np.array(mask_control_img, dtype=np.uint8)
@@ -1856,6 +1855,7 @@ class Model_Diffusers:
                 img = np.array(plt.imread(f"{image}")[:, :, :3])
 
                 # Create mask interactive
+                logger.info(f"Draw the mask on this canvas using the mouse. When you finish, press 'Finish' in the bottom side of the canvas.")
                 draw(
                     image64,
                     filename=f"./{name_without_extension}_draw.png",
