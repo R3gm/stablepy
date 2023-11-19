@@ -109,6 +109,9 @@ def ad_model_process(
                             detailfix_pipe.scheduler = detailfix_pipe.default_scheduler
 
                             inpaint_output = detailfix_pipe(**pipe_params_df)
+                    elif "The size of tensor a (0) must match the size of tensor b (3) at non-singleton" in e or "cannot reshape tensor of 0 elements into shape [0, -1, 1, 512] because the unspecified dimensi" in e:
+                        logger.error(f"strength or steps too low for the model to produce a satisfactory response.")
+                        inpaint_output = [[crop_image]]
                     else:
                         raise ValueError(e)
 
