@@ -1,6 +1,7 @@
 from ..upscalers.esrgan import UpscalerESRGAN, UpscalerLanczos, UpscalerNearest
 from ..logging.logging_setup import logger
 import torch, gc
+from diffusers import DDIMScheduler
 
 def process_images_high_resolution(
     images,
@@ -42,11 +43,30 @@ def process_images_high_resolution(
 
             result_hires = []
             for img_pre_hires in images:
-                img_pos_hires = hires_pipe(
-                    generator=generator,
-                    image=img_pre_hires,
-                    **hires_params_config,
-                ).images[0]
+                try:
+                    img_pos_hires = hires_pipe(
+                        generator=generator,
+                        image=img_pre_hires,
+                        **hires_params_config,
+                    ).images[0]
+                except Exception as e:
+                    e = str(e)
+                    if "Tensor with 2 elements cannot be converted to Scalar" in e:
+                        logger.debug(e)
+                        logger.error("Error in sampler; trying with DDIM sampler")
+                        hires_pipe.scheduler = DDIMScheduler.from_config(hires_pipe.scheduler.config)
+                        img_pos_hires = hires_pipe(
+                            generator=generator,
+                            image=img_pre_hires,
+                            **hires_params_config,
+                        ).images[0]
+                    elif "The size of tensor a (0) must match the size of tensor b (3) at non-singleton" in e or "cannot reshape tensor of 0 elements into shape [0, -1, 1, 512] because the unspecified dimensi" in e:
+                        logger.error(f"strength or steps too low for the model to produce a satisfactory response, returning image only with upscaling.")
+                        img_pos_hires = img_pre_hires
+                    else:
+                        logger.error(e)
+                        logger.error("The hiresfix couldn't be applied, returning image only with upscaling.")
+                        img_pos_hires = img_pre_hires
                 torch.cuda.empty_cache()
                 gc.collect()
                 result_hires.append(img_pos_hires)
