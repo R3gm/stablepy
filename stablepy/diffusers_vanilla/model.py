@@ -289,6 +289,7 @@ class Model_Diffusers:
         task_name: str = "txt2img",
         vae_model=None,
         type_model_precision=torch.float16,
+        sdxl_safetensors = False,
     ):
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         self.base_model_id = ""
@@ -299,7 +300,7 @@ class Model_Diffusers:
         )  # For SD 1.5
 
         self.load_pipe(
-            base_model_id, task_name, vae_model, type_model_precision
+            base_model_id, task_name, vae_model, type_model_precision, sdxl_safetensors = sdxl_safetensors
         )
         self.preprocessor = Preprocessor()
 
@@ -315,6 +316,7 @@ class Model_Diffusers:
         vae_model=None,
         type_model_precision=torch.float16,
         reload=False,
+        sdxl_safetensors = False,
     ) -> DiffusionPipeline:
         if (
             base_model_id == self.base_model_id
@@ -365,6 +367,17 @@ class Model_Diffusers:
             # Load new model
             if os.path.isfile(base_model_id): # exists or not same # if os.path.exists(base_model_id):
 
+                if sdxl_safetensors:
+                    logger.info("Default VAE: madebyollin/sdxl-vae-fp16-fix")
+                    self.pipe = StableDiffusionXLPipeline.from_single_file(
+                        base_model_id,
+                        vae=AutoencoderKL.from_pretrained(
+                            "madebyollin/sdxl-vae-fp16-fix", torch_dtype=torch.float16
+                        ),
+                        torch_dtype=self.type_model_precision,
+                    )
+                    class_name = "StableDiffusionXLPipeline"
+                else:
                     self.pipe = StableDiffusionPipeline.from_single_file(
                         base_model_id,
                         # vae=None
@@ -1798,9 +1811,6 @@ class Model_Diffusers:
                 # If the input is a NumPy array, np.uint8
                 numpy_array = image.astype(np.uint8)
             else:
-                self.pipe = None
-                torch.cuda.empty_cache()
-                gc.collect()
                 if gui_active:
                     logger.info(
                         "Not found image"
@@ -1816,9 +1826,6 @@ class Model_Diffusers:
                 array_rgb = numpy_array[:, :, :3]
             except:
                 logger.error("Unsupported image type")
-                self.pipe = None
-                torch.cuda.empty_cache()
-                gc.collect()
                 raise ValueError(
                     "Unsupported image type; Bug report to https://github.com/R3gm/stablepy or https://github.com/R3gm/SD_diffusers_interactive"
                 )  # return
