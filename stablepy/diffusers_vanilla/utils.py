@@ -4,7 +4,7 @@
 import os
 from PIL import Image
 from PIL.PngImagePlugin import PngInfo
-
+from ..logging.logging_setup import logger
 
 def save_pil_image_with_metadata(image, folder_path, metadata_list):
     if not os.path.exists(folder_path):
@@ -32,7 +32,7 @@ def save_pil_image_with_metadata(image, folder_path, metadata_list):
 
         image.save(image_path, pnginfo=metadata)
     except:
-        print("Saving image without metadata")
+        logger.info("Saving image without metadata")
         image.save(image_path)
 
     return image_path
