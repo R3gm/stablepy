@@ -76,6 +76,7 @@ from base64 import b64decode
 import numpy as np
 import matplotlib.pyplot as plt
 from IPython.display import display, HTML
+from ..logging.logging_setup import logger
 import torch
 
 class NotValid(Exception):
@@ -93,9 +94,9 @@ def draw(imgm, filename="drawing.png", w=400, h=200, line_width=1):
         binary = b64decode(data.split(",")[1])
         with open(filename, "wb") as f:
             f.write(binary)
-        print(f"created draw: {filename}")
+        logger.info(f"Created draw and saved: {filename}")
     except:
-        raise NotValid("This option is only compatible in Colab.")
+        raise NotValid("You need to upload the mask image. If you're trying to use the option to draw mask from a Notebook, this option is only available for colab")
 
 
 # the control image of init_image and mask_image
