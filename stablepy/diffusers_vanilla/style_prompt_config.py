@@ -76,6 +76,8 @@ def apply_style(style_name_list: list, positive: str, negative: str = "", styles
             return positive, negative
         if style_name in STYLE_NAMES:
             p, n = styles_data.get(style_name)
+            if p.strip() == "{prompt}":
+                return positive, negative
             positive, negative = p.replace("{prompt}", positive), n + ", " + negative
         else:
             logger.warning(f"{style_name} style not found")
