@@ -1586,6 +1586,8 @@ class Model_Diffusers:
                 If you use a notebook, you will be able to display the images generated with this parameter.
             save_generated_images (bool, optional, defaults to True):
                 By default, the generated images are saved in the current location within the 'images' folder. You can disable this with this parameter.
+            image_storage_location (str , optional, defaults to "./images"):
+                The directory where the generated images are saved.
             generator_in_cpu (bool, optional, defaults to False):
                 The generator by default is specified on the GPU. To obtain more consistent results across various environments,
                 it is preferable to use the generator on the CPU.
@@ -2376,6 +2378,9 @@ class Model_Diffusers:
             hires_pipe.to(self.device)
             torch.cuda.empty_cache()
             gc.collect()
+        else:
+            hires_params_config = {}
+            hires_pipe = None
 
         # Debug info
         try:
