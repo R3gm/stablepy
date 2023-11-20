@@ -1430,6 +1430,7 @@ class Model_Diffusers:
         loop_generation: int = 1,
         display_images: bool = False,
         save_generated_images: bool = True,
+        image_storage_location: str = "./images",
         generator_in_cpu: bool = False,
         leave_progress_bar: bool = False,
         disable_progress_bar: bool = False,
@@ -2572,7 +2573,7 @@ class Model_Diffusers:
                 image_path = "not saved in storage"
                 if save_generated_images:
                     metadata[7] = seed_
-                    image_path = save_pil_image_with_metadata(image_, "./images", metadata)
+                    image_path = save_pil_image_with_metadata(image_, image_storage_location, metadata)
                 image_list.append(image_path)
 
             torch.cuda.empty_cache()
