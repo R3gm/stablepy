@@ -317,6 +317,7 @@ class Model_Diffusers:
         type_model_precision=torch.float16,
         reload=False,
         sdxl_safetensors = False,
+        retain_model_in_memory = True,
     ) -> DiffusionPipeline:
         if (
             base_model_id == self.base_model_id
@@ -351,11 +352,12 @@ class Model_Diffusers:
 
         # Load model
         if self.base_model_id == base_model_id and self.pipe is not None and reload == False and self.vae_model == vae_model and unload_model == False:
-            logger.info("Previous loaded base model") # not return
+            #logger.info("Previous loaded base model") # not return
             class_name = self.class_name
         else:
             # Unload previous model and stuffs
             self.pipe = None
+            self.model_memory = {}
             self.lora_memory = [None, None, None, None, None]
             self.lora_scale_memory = [1.0, 1.0, 1.0, 1.0, 1.0]
             self.LCMconfig = None
@@ -454,6 +456,19 @@ class Model_Diffusers:
             # Define base scheduler
             self.default_scheduler = copy.deepcopy(self.pipe.scheduler)
             logger.debug(f"Base sampler: {self.default_scheduler}")
+
+        if task_name in self.model_memory:
+            self.pipe = self.model_memory[task_name]
+            # Create new base values
+            #self.pipe.to(self.device)
+            # torch.cuda.empty_cache()
+            # gc.collect()
+            self.base_model_id = base_model_id
+            self.task_name = task_name
+            self.vae_model = vae_model
+            self.class_name = class_name
+            self.pipe.watermark = None
+            return
 
         # Load task
         model_id = CONTROLNET_MODEL_IDS[task_name]
@@ -575,6 +590,9 @@ class Model_Diffusers:
             self.pipe.enable_vae_slicing()
             self.pipe.enable_vae_tiling()
             self.pipe.watermark = None
+
+        if retain_model_in_memory == True and task_name not in self.model_memory:
+            self.model_memory[task_name] = self.pipe
 
         return
 
