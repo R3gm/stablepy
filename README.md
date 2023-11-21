@@ -4,6 +4,11 @@
 
 The goal of this project is to make Stable Diffusion more accessible, simple and easy-to-use with python.  Stablepy is constructed on top of the Diffusers library
 
+**Installation:**
+```
+pip install stablepy==0.3.0
+```
+
 **Usage:**
 
 To use the project, simply create a new instance of the `Model_Diffusers` class. This class takes several arguments, including the path to the Stable Diffusion model file and the task name.
@@ -41,6 +46,7 @@ image, path_image = model(
     img_height = 1024,
     upscaler_model_path = "./upscaler/RealESRGAN_x4plus_anime_6B.pth",
     upscaler_increases_size = 1.5,
+    hires_steps = 25,
 )
 
 image[0]
