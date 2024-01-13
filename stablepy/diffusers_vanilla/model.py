@@ -369,8 +369,6 @@ class Model_Diffusers:
                     logger.info("Default VAE")
                     self.pipe = StableDiffusionXLPipeline.from_single_file(
                         base_model_id,
-                        torch_dtype=torch.float16
-                        ),
                         torch_dtype=self.type_model_precision,
                     )
                     class_name = "StableDiffusionXLPipeline"
@@ -408,8 +406,6 @@ class Model_Diffusers:
                         try:
                             self.pipe = DiffusionPipeline.from_pretrained(
                                 base_model_id,
-                                torch_dtype=torch.float16
-                                ),
                                 torch_dtype=torch.float16,
                                 use_safetensors=True,
                                 variant="fp16",
@@ -420,8 +416,6 @@ class Model_Diffusers:
                             logger.debug("Loading model without parameter variant=fp16")
                             self.pipe = DiffusionPipeline.from_pretrained(
                                 base_model_id,
-                                torch_dtype=torch.float16
-                                ),
                                 torch_dtype=torch.float16,
                                 use_safetensors=True,
                                 add_watermarker=False,
