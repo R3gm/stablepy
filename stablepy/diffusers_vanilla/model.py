@@ -402,7 +402,7 @@ class Model_Diffusers:
                         )
 
                     case "StableDiffusionXLPipeline":
-                        logger.info("Default VAE)
+                        logger.info("Default VAE")
                         try:
                             self.pipe = DiffusionPipeline.from_pretrained(
                                 base_model_id,
