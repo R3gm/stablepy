@@ -366,11 +366,10 @@ class Model_Diffusers:
             if os.path.isfile(base_model_id): # exists or not same # if os.path.exists(base_model_id):
 
                 if sdxl_safetensors:
-                    logger.info("Default VAE: madebyollin/sdxl-vae-fp16-fix")
+                    logger.info("Default VAE")
                     self.pipe = StableDiffusionXLPipeline.from_single_file(
                         base_model_id,
-                        vae=AutoencoderKL.from_pretrained(
-                            "madebyollin/sdxl-vae-fp16-fix", torch_dtype=torch.float16
+                        torch_dtype=torch.float16
                         ),
                         torch_dtype=self.type_model_precision,
                     )
@@ -405,12 +404,11 @@ class Model_Diffusers:
                         )
 
                     case "StableDiffusionXLPipeline":
-                        logger.info("Default VAE: madebyollin/sdxl-vae-fp16-fix")
+                        logger.info("Default VAE)
                         try:
                             self.pipe = DiffusionPipeline.from_pretrained(
                                 base_model_id,
-                                vae=AutoencoderKL.from_pretrained(
-                                    "madebyollin/sdxl-vae-fp16-fix", torch_dtype=torch.float16
+                                torch_dtype=torch.float16
                                 ),
                                 torch_dtype=torch.float16,
                                 use_safetensors=True,
@@ -422,8 +420,7 @@ class Model_Diffusers:
                             logger.debug("Loading model without parameter variant=fp16")
                             self.pipe = DiffusionPipeline.from_pretrained(
                                 base_model_id,
-                                vae=AutoencoderKL.from_pretrained(
-                                    "madebyollin/sdxl-vae-fp16-fix", torch_dtype=torch.float16
+                                torch_dtype=torch.float16
                                 ),
                                 torch_dtype=torch.float16,
                                 use_safetensors=True,
@@ -434,7 +431,7 @@ class Model_Diffusers:
 
             # Load VAE after loaded model
             if vae_model is None :
-                logger.debug("Default VAE")
+                logger.info("Default VAE")
                 pass
             else:
                 if os.path.isfile(vae_model):
