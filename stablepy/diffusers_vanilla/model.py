@@ -198,7 +198,8 @@ class Preprocessor:
         self.name = ""
 
     def load(self, name: str) -> None:
-    import controlnet_aux as cnx
+        import controlnet_aux as cnx
+
         if name == self.name:
             return
         if name == "HED":
