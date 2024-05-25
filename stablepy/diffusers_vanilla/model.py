@@ -48,7 +48,7 @@ from diffusers import (
     KDPM2AncestralDiscreteScheduler,
 )
 from .prompt_weights import get_embed_new, add_comma_after_pattern_ti
-from .utils import save_pil_image_with_metadata
+from .utils import save_pil_image_with_metadata, checkpoint_model_type
 from .lora_loader import lora_mix_load
 from .inpainting_canvas import draw, make_inpaint_condition
 from .adetailer import ad_model_process
@@ -64,6 +64,7 @@ from IPython.display import display
 from PIL import Image
 from typing import Union, Optional, List, Tuple, Dict, Any, Callable
 import logging, diffusers, copy, warnings
+import traceback
 logging.getLogger("diffusers").setLevel(logging.ERROR)
 #logging.getLogger("transformers").setLevel(logging.ERROR)
 diffusers.utils.logging.set_verbosity(40)
@@ -285,7 +286,6 @@ class Model_Diffusers:
         task_name: str = "txt2img",
         vae_model=None,
         type_model_precision=torch.float16,
-        sdxl_safetensors = False,
     ):
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         self.base_model_id = ""
@@ -296,7 +296,7 @@ class Model_Diffusers:
         )  # For SD 1.5
 
         self.load_pipe(
-            base_model_id, task_name, vae_model, type_model_precision, sdxl_safetensors = sdxl_safetensors
+            base_model_id, task_name, vae_model, type_model_precision
         )
         self.preprocessor = Preprocessor()
 
@@ -312,7 +312,6 @@ class Model_Diffusers:
         vae_model=None,
         type_model_precision=torch.float16,
         reload=False,
-        sdxl_safetensors = False,
         retain_model_in_memory = True,
     ) -> DiffusionPipeline:
         if (
@@ -365,7 +364,13 @@ class Model_Diffusers:
             # Load new model
             if os.path.isfile(base_model_id): # exists or not same # if os.path.exists(base_model_id):
 
-                if sdxl_safetensors:
+                if base_model_id.endswith(".safetensors"):
+                    model_type = checkpoint_model_type(base_model_id)
+                    logger.debug(f"Infered model type is {model_type}")
+                else:
+                    model_type = "sd1.5"
+
+                if model_type == "sdxl":
                     logger.info("Default VAE: madebyollin/sdxl-vae-fp16-fix")
                     self.pipe = StableDiffusionXLPipeline.from_single_file(
                         base_model_id,
@@ -375,7 +380,7 @@ class Model_Diffusers:
                         torch_dtype=self.type_model_precision,
                     )
                     class_name = "StableDiffusionXLPipeline"
-                else:
+                elif model_type == "sd1.5":
                     self.pipe = StableDiffusionPipeline.from_single_file(
                         base_model_id,
                         # vae=None
@@ -386,6 +391,8 @@ class Model_Diffusers:
                         torch_dtype=self.type_model_precision,
                     )
                     class_name = "StableDiffusionPipeline"
+                else:
+                    raise ValueError(f"Model type {model_type} not supported.")
             else:
                 file_config = hf_hub_download(repo_id=base_model_id, filename="model_index.json")
 
@@ -1305,6 +1312,7 @@ class Model_Diffusers:
                     )
                     logger.info(select_lora)
                 except Exception as e:
+                    traceback.print_exc()
                     logger.error(f"ERROR: LoRA not compatible: {select_lora}")
                     logger.debug(f"{str(e)}")
             return self.pipe
