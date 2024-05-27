@@ -85,6 +85,7 @@ def lora_mix_load(pipe, lora_path, alpha_scale=1.0, device="cuda", dtype=torch.f
         # sdxl lora
         pipe.load_lora_weights(lora_path)
         pipe.fuse_lora(lora_scale=alpha_scale)
+        pipe.unload_lora_weights()
     else:
         # sd lora
         try:
@@ -95,5 +96,6 @@ def lora_mix_load(pipe, lora_path, alpha_scale=1.0, device="cuda", dtype=torch.f
             logger.debug(f"{str(e)} \nDiffusers loader>>")
             pipe.load_lora_weights(lora_path)
             pipe.fuse_lora(lora_scale=alpha_scale)
+            pipe.unload_lora_weights()
 
     return pipe
