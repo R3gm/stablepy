@@ -53,6 +53,8 @@ from diffusers import (
     DPMSolverSDEScheduler,
     EDMDPMSolverMultistepScheduler,
     DDPMScheduler,
+    EDMEulerScheduler,
+    TCDScheduler,
 )
 from .prompt_weights import get_embed_new, add_comma_after_pattern_ti
 from .utils import save_pil_image_with_metadata, checkpoint_model_type
@@ -254,17 +256,34 @@ T2I_PREPROCESSOR_NAME = {
     "sdxl_lineart_t2i": "Lineart",
 }
 
+FLASH_LORA = {
+    "StableDiffusionPipeline": {
+        "LCM": "latent-consistency/lcm-lora-sdv1-5",
+        "TCD": "h1t/TCD-SD15-LoRA",
+    },
+    "StableDiffusionXLPipeline": {
+        "LCM": "latent-consistency/lcm-lora-sdxl",
+        "TCD": "h1t/TCD-SDXL-LoRA",
+    },
+}
+
 SCHEDULER_CONFIG_MAP = {
     "DPM++ 2M": (DPMSolverMultistepScheduler, {"use_karras_sigmas": False}),
     "DPM++ 2M Karras": (DPMSolverMultistepScheduler, {"use_karras_sigmas": True}),
     "DPM++ 2M SDE": (DPMSolverMultistepScheduler, {"use_karras_sigmas": False, "algorithm_type": "sde-dpmsolver++"}),
     "DPM++ 2M SDE Karras": (DPMSolverMultistepScheduler, {"use_karras_sigmas": True, "algorithm_type": "sde-dpmsolver++"}),
+    "DPM++ 2S": (DPMSolverSinglestepScheduler, {"use_karras_sigmas": False}),
+    "DPM++ 2S Karras": (DPMSolverSinglestepScheduler, {"use_karras_sigmas": True}),
+    "DPM++ 1S": (DPMSolverMultistepScheduler, {"solver_order": 1}),
+    "DPM++ 1S Karras": (DPMSolverMultistepScheduler, {"solver_order": 1, "use_karras_sigmas": True}),
+    "DPM++ 3M": (DPMSolverMultistepScheduler, {"solver_order": 3}),
+    "DPM++ 3M Karras": (DPMSolverMultistepScheduler, {"solver_order": 3, "use_karras_sigmas": True}),
     "DPM++ SDE": (DPMSolverSDEScheduler, {"use_karras_sigmas": False}),
     "DPM++ SDE Karras": (DPMSolverSDEScheduler, {"use_karras_sigmas": True}),
-    "DPM2": (KDPM2DiscreteScheduler, {}),
-    "DPM2 Karras": (KDPM2DiscreteScheduler, {"use_karras_sigmas": True}),
-    "DPM2 a": (KDPM2AncestralDiscreteScheduler, {}),
-    "DPM2 a Karras": (KDPM2AncestralDiscreteScheduler, {"use_karras_sigmas": True}),
+    "KDPM2": (KDPM2DiscreteScheduler, {}),
+    "KDPM2 Karras": (KDPM2DiscreteScheduler, {"use_karras_sigmas": True}),
+    "KDPM2 a": (KDPM2AncestralDiscreteScheduler, {}),
+    "KDPM2 a Karras": (KDPM2AncestralDiscreteScheduler, {"use_karras_sigmas": True}),
     "Euler": (EulerDiscreteScheduler, {}),
     "Euler a": (EulerAncestralDiscreteScheduler, {}),
     "Heun": (HeunDiscreteScheduler, {}),
@@ -276,10 +295,10 @@ SCHEDULER_CONFIG_MAP = {
     "UniPC": (UniPCMultistepScheduler, {}),
     "UniPC Karras": (UniPCMultistepScheduler, {"use_karras_sigmas": True}),
     "PNDM": (PNDMScheduler, {}),
-    "DPM++ 2S": (DPMSolverSinglestepScheduler, {"use_karras_sigmas": False}),
-    "DPM++ 2S Karras": (DPMSolverSinglestepScheduler, {"use_karras_sigmas": True}),
-    "DPM++ 2M EDM": (EDMDPMSolverMultistepScheduler, {}),
-    "DPM++ 2M EDM Karras": (EDMDPMSolverMultistepScheduler, {"use_karras_sigmas": True}),
+    "Euler EDM": (EDMEulerScheduler, {}),
+    "Euler EDM Karras": (EDMEulerScheduler, {"use_karras_sigmas": True}),
+    "DPM++ 2M EDM": (EDMDPMSolverMultistepScheduler, {"solver_order": 2, "solver_type": "midpoint", "final_sigmas_type": "zero", "algorithm_type": "dpmsolver++"}),
+    "DPM++ 2M EDM Karras": (EDMDPMSolverMultistepScheduler, {"use_karras_sigmas": True, "solver_order": 2, "solver_type": "midpoint", "final_sigmas_type": "zero", "algorithm_type": "dpmsolver++"}),
     "DDPM": (DDPMScheduler, {}),
 
     "DPM++ 2M Lu": (DPMSolverMultistepScheduler, {"use_lu_lambdas": True}),
@@ -287,6 +306,7 @@ SCHEDULER_CONFIG_MAP = {
     "DPM++ 2M SDE Lu": (DPMSolverMultistepScheduler, {"use_lu_lambdas": True, "algorithm_type": "sde-dpmsolver++"}),
     "DPM++ 2M SDE Ef": (DPMSolverMultistepScheduler, {"algorithm_type": "sde-dpmsolver++", "euler_at_final": True}),
 
+    "TCD": (TCDScheduler, {}),
     "LCM": (LCMScheduler, {}),
 }
 
@@ -411,7 +431,7 @@ class Model_Diffusers:
             self.model_memory = {}
             self.lora_memory = [None, None, None, None, None]
             self.lora_scale_memory = [1.0, 1.0, 1.0, 1.0, 1.0]
-            self.LCMconfig = None
+            self.flash_config = None
             self.embed_loaded = []
             self.FreeU = False
             torch.cuda.empty_cache()
@@ -1200,7 +1220,7 @@ class Model_Diffusers:
             sampler (str, optional, defaults to "DPM++ 2M"):
                 The sampler used for the generation process. Available samplers: DPM++ 2M, DPM++ 2M Karras, DPM++ 2M SDE,
                 DPM++ 2M SDE Karras, DPM++ SDE, DPM++ SDE Karras, DPM2, DPM2 Karras, Euler, Euler a, Heun, LMS, LMS Karras,
-                DDIM, DEIS, UniPC, DPM2 a, DPM2 a Karras, PNDM, LCM, DPM++ 2M Lu, DPM++ 2M Ef, DPM++ 2M SDE Lu and DPM++ 2M SDE Ef.
+                DDIM, DEIS, UniPC, DPM2 a, DPM2 a Karras, PNDM, TCD, LCM, DPM++ 2M Lu, DPM++ 2M Ef, DPM++ 2M SDE Lu and DPM++ 2M SDE Ef.
             syntax_weights (str, optional, defaults to "Classic"):
                 Specifies the type of syntax weights used during generation. "Classic" is (word:weight), "Compel" is (word)weight
             lora_A (str, optional):
@@ -1481,21 +1501,28 @@ class Model_Diffusers:
             lora_scale_E,
         ]
 
-        # LCM config
-        if sampler == "LCM" and self.LCMconfig is None:
-            if self.class_name == "StableDiffusionPipeline":
-                adapter_id = "latent-consistency/lcm-lora-sdv1-5"
-            elif self.class_name == "StableDiffusionXLPipeline":
-                adapter_id = "latent-consistency/lcm-lora-sdxl"
-
-            self.process_lora(adapter_id, 1.0)
-            self.LCMconfig = adapter_id
-            logger.info("LCM")
-        elif sampler != "LCM" and self.LCMconfig is not None:
-            self.process_lora(self.LCMconfig, 1.0, unload=True)
-            self.LCMconfig = None
-        elif self.LCMconfig is not None:
-            logger.info("LCM")
+        if sampler in ["TCD", "LCM"] and self.flash_config is None:
+            # First load
+            flash_task_lora = FLASH_LORA[self.class_name][sampler]
+            self.process_lora(flash_task_lora, 1.0)
+            self.flash_config = flash_task_lora
+            logger.info(sampler)
+        elif sampler not in ["TCD", "LCM"] and self.flash_config is not None:
+            # Unload
+            self.process_lora(self.flash_config, 1.0, unload=True)
+            self.flash_config = None
+        elif self.flash_config is not None:
+            flash_task_lora = FLASH_LORA[self.class_name][sampler]
+            if flash_task_lora == self.flash_config:
+                # Same
+                pass
+            else:
+                # Change flash lora
+                logger.debug(f"Unload '{self.flash_config}' and load '{flash_task_lora}'")
+                self.process_lora(self.flash_config, 1.0, unload=True)
+                self.process_lora(flash_task_lora, 1.0)
+                self.flash_config = flash_task_lora
+            logger.info(sampler)
 
         # FreeU
         if FreeU:
