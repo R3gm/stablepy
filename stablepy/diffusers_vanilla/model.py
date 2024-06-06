@@ -56,6 +56,7 @@ from diffusers import (
     EDMEulerScheduler,
     TCDScheduler,
 )
+from diffusers.utils import load_image
 from .prompt_weights import get_embed_new, add_comma_after_pattern_ti
 from .utils import save_pil_image_with_metadata, checkpoint_model_type
 from .lora_loader import lora_mix_load
@@ -222,15 +223,15 @@ class Preprocessor:
 # =====================================
 
 CONTROLNET_MODEL_IDS = {
-    "openpose": ["lllyasviel/control_v11p_sd15_openpose", "OzzyGT/controlnet-openpose-sdxl-1.0"],
-    "canny": ["lllyasviel/control_v11p_sd15_canny", "diffusers/controlnet-canny-sdxl-1.0-mid"],
+    "openpose": ["lllyasviel/control_v11p_sd15_openpose", "r3gm/controlnet-openpose-sdxl-1.0-fp16"],
+    "canny": ["lllyasviel/control_v11p_sd15_canny", "r3gm/controlnet-canny-scribble-integrated-sdxl-v2-fp16"],
     "mlsd": "lllyasviel/control_v11p_sd15_mlsd",
-    "scribble": "lllyasviel/control_v11p_sd15_scribble",
+    "scribble": ["lllyasviel/control_v11p_sd15_scribble", "r3gm/controlnet-canny-scribble-integrated-sdxl-v2-fp16"],
     "softedge": "lllyasviel/control_v11p_sd15_softedge",
     "segmentation": "lllyasviel/control_v11p_sd15_seg",
     "depth": ["lllyasviel/control_v11f1p_sd15_depth", "diffusers/controlnet-depth-sdxl-1.0-mid"],
     "normalbae": "lllyasviel/control_v11p_sd15_normalbae",
-    "lineart": "lllyasviel/control_v11p_sd15_lineart",
+    "lineart": ["lllyasviel/control_v11p_sd15_lineart", "r3gm/controlnet-lineart-anime-sdxl-fp16"],
     "lineart_anime": "lllyasviel/control_v11p_sd15s2_lineart_anime",
     "shuffle": "lllyasviel/control_v11e_sd15_shuffle",
     "ip2p": "lllyasviel/control_v11e_sd15_ip2p",
@@ -245,7 +246,7 @@ CONTROLNET_MODEL_IDS = {
     # "sdxl_recolor_t2i": "TencentARC/t2i-adapter-recolor-sdxl-1.0",
     "img2img": "Nothinghere",
     "pattern": ["monster-labs/control_v1p_sd15_qrcode_monster", "r3gm/control_v1p_sdxl_qrcode_monster_fp16"],
-    "sdxl_tile_realistic": "OzzyGT/SDXL_Controlnet_Tile_Realistic",
+    "sdxl_tile_realistic": "Yakonrus/SDXL_Controlnet_Tile_Realistic_v2",
 }
 
 T2I_PREPROCESSOR_NAME = {
@@ -311,6 +312,36 @@ SCHEDULER_CONFIG_MAP = {
 }
 
 scheduler_names = list(SCHEDULER_CONFIG_MAP.keys())
+
+IP_ADAPTER_MODELS = {
+    "StableDiffusionPipeline": {
+        "subfolder": "models",
+        "full_face": "ip-adapter-full-face_sd15.safetensors",
+        "plus_face": "ip-adapter-plus-face_sd15.safetensors",
+        "plus": "ip-adapter-plus_sd15.safetensors",
+        "base": "ip-adapter_sd15.safetensors",
+        "base_light": "ip-adapter_sd15_light.safetensors",
+        "base_vit": "ip-adapter_sd15_vit-G.safetensors",
+        "faceid_plus": "ip-adapter-faceid-plus_sd15_lora.safetensors",
+        "faceid_plus_v2": "ip-adapter-faceid-plusv2_sd15_lora.safetensors",
+        "faceid": "ip-adapter-faceid_sd15_lora.safetensors",
+        "faceid_portrait_v2": "ip-adapter-faceid-portrait-v11_sd15.bin",  # last portrait
+        "faceid_portrait": "ip-adapter-faceid-portrait_sd15.bin",
+    },
+    "StableDiffusionXLPipeline": {
+        "subfolder": "sdxl_models",
+        "plus_face": "ip-adapter-plus-face_sdxl_vit-h.safetensors",
+        "plus": "ip-adapter-plus_sdxl_vit-h.safetensors",
+        "base": "ip-adapter_sdxl.safetensors",
+        "base_vit": "ip-adapter_sdxl_vit-h.safetensors",
+        "faceid_plus_v2": "ip-adapter-faceid-plusv2_sdxl_lora.safetensors",
+        "faceid": "ip-adapter-faceid_sdxl_lora.safetensors",
+        "faceid_portrait": "ip-adapter-faceid-portrait_sdxl.bin",
+        "faceid_portrait_v2": "ip-adapter-faceid-portrait_sdxl_unnorm.bin",
+    },
+    "ip_adapter": "h94/IP-Adapter",
+    "ip_faceid": "h94/IP-Adapter-FaceID",
+}
 
 
 def process_prompts_valid(specific_prompt, specific_negative_prompt, prompt, negative_prompt):
@@ -432,6 +463,7 @@ class Model_Diffusers:
             self.lora_memory = [None, None, None, None, None]
             self.lora_scale_memory = [1.0, 1.0, 1.0, 1.0, 1.0]
             self.flash_config = None
+            self.ip_adapter_config = None
             self.embed_loaded = []
             self.FreeU = False
             torch.cuda.empty_cache()
@@ -579,6 +611,7 @@ class Model_Diffusers:
                         safety_checker=self.pipe.safety_checker,
                         feature_extractor=self.pipe.feature_extractor,
                         requires_safety_checker=self.pipe.config.requires_safety_checker,
+                        image_encoder=self.pipe.image_encoder,
                     )
                 case "StableDiffusionXLPipeline":
 
@@ -591,6 +624,7 @@ class Model_Diffusers:
                         unet=self.pipe.unet,
                         # controlnet=self.controlnet,
                         scheduler=self.pipe.scheduler,
+                        image_encoder=self.pipe.image_encoder,
                     )
 
         if task_name not in ["txt2img", "inpaint", "img2img"]:
@@ -611,11 +645,12 @@ class Model_Diffusers:
                         safety_checker=self.pipe.safety_checker,
                         feature_extractor=self.pipe.feature_extractor,
                         requires_safety_checker=self.pipe.config.requires_safety_checker,
+                        image_encoder=self.pipe.image_encoder,
                     )
                     self.pipe.scheduler = UniPCMultistepScheduler.from_config(self.pipe.scheduler.config)
 
                 case "StableDiffusionXLPipeline":
-                    if task_name in ["openpose", "canny", "depth", "sdxl_tile_realistic", "pattern"]:
+                    if "t2i" not in task_name:
                         controlnet = ControlNetModel.from_pretrained(
                             model_id, torch_dtype=torch.float16, variant="fp16"
                         ).to(self.device)
@@ -629,6 +664,7 @@ class Model_Diffusers:
                             unet=self.pipe.unet,
                             scheduler=self.pipe.scheduler,
                             controlnet=controlnet,
+                            image_encoder=self.pipe.image_encoder,
                         ).to(self.device)
 
                     else:
@@ -647,6 +683,7 @@ class Model_Diffusers:
                             unet=self.pipe.unet,
                             adapter=adapter,
                             scheduler=self.pipe.scheduler,
+                            image_encoder=self.pipe.image_encoder,
                         ).to(self.device)
 
         if task_name in ["txt2img", "img2img"]:
@@ -662,6 +699,7 @@ class Model_Diffusers:
                         safety_checker=self.pipe.safety_checker,
                         feature_extractor=self.pipe.feature_extractor,
                         requires_safety_checker=self.pipe.config.requires_safety_checker,
+                        image_encoder=self.pipe.image_encoder,
                     )
 
                 case "StableDiffusionXLPipeline":
@@ -673,6 +711,7 @@ class Model_Diffusers:
                         tokenizer_2=self.pipe.tokenizer_2,
                         unet=self.pipe.unet,
                         scheduler=self.pipe.scheduler,
+                        image_encoder=self.pipe.image_encoder,
                     )
 
             if task_name == "img2img":
@@ -702,6 +741,9 @@ class Model_Diffusers:
         torch.cuda.empty_cache()
         gc.collect()
         model_id = CONTROLNET_MODEL_IDS[task_name]
+        if isinstance(model_id, list):
+            # SD1.5 model
+            model_id = model_id[0]
         controlnet = ControlNetModel.from_pretrained(
             model_id, torch_dtype=self.type_model_precision
         )
@@ -1175,6 +1217,11 @@ class Model_Diffusers:
         hires_negative_prompt: str = "",
         hires_sampler: str = "Use same sampler",
 
+        ip_adapter_image: Optional[Any] = [],  # str Image
+        ip_adapter_mask: Optional[Any] = [],  # str Image
+        ip_adapter_model: Optional[Any] = [],  # str
+        ip_adapter_model_scale: Optional[Any] = [],  # float
+
         loop_generation: int = 1,
         display_images: bool = False,
         save_generated_images: bool = True,
@@ -1524,6 +1571,83 @@ class Model_Diffusers:
                 self.flash_config = flash_task_lora
             logger.info(sampler)
 
+        if (ip_adapter_image and not ip_adapter_model) or (not ip_adapter_image and ip_adapter_model):
+            raise ValueError("Ip adapter require the ip adapter image and the ip adapter model for the task")
+
+        if not isinstance(ip_adapter_image, list):
+            ip_adapter_image = [ip_adapter_image]
+        if not isinstance(ip_adapter_mask, list):
+            ip_adapter_mask = [ip_adapter_mask]
+        if not isinstance(ip_adapter_model, list):
+            ip_adapter_model = [ip_adapter_model]
+        if not isinstance(ip_adapter_model_scale, list):
+            ip_adapter_model_scale = [ip_adapter_model_scale]
+
+        ip_weights = [IP_ADAPTER_MODELS[self.class_name][name] for name in ip_adapter_model]
+        ip_scales = ip_adapter_model_scale  # add instant-style
+        ip_images = [load_image(ip_img) for ip_img in ip_adapter_image]
+        ip_masks = [load_image(ip_mk) for ip_mk in ip_adapter_mask]
+
+        if self.ip_adapter_config is None and ip_adapter_image:
+            # First load
+            logger.info("ip adapter first load")
+            if all("faceid" in m for m in ip_adapter_model):
+                repo_name = IP_ADAPTER_MODELS["ip_faceid"]
+                sub_folder = None
+                image_encoder_folder = None
+            elif all("faceid" not in m for m in ip_adapter_model):
+                repo_name = IP_ADAPTER_MODELS["ip_adapter"]
+                sub_folder = IP_ADAPTER_MODELS[self.class_name]["subfolder"]
+                image_encoder_folder = f"{sub_folder}/image_encoder"
+            else:
+                raise ValueError("Can't combine ip adapters with faceid adapters")
+
+            # load ip_adapter
+            self.pipe.load_ip_adapter(
+                repo_name,
+                subfolder=sub_folder,
+                weight_name=ip_weights,
+                image_encoder_folder=image_encoder_folder,
+            )
+            self.pipe.set_ip_adapter_scale(ip_scales)
+            self.pipe.to(self.device)
+            self.ip_adapter_config = [ip_weights, ip_scales]
+
+        elif self.ip_adapter_config is not None and not ip_adapter_image:
+            # unload
+            logger.debug("ip adapter unload all")
+            self.pipe.unload_ip_adapter()
+            self.ip_adapter_config = None
+        elif self.ip_adapter_config is not None:
+            if self.ip_adapter_config == [ip_weights, ip_scales]:
+                logger.info("ip adapter in cache")
+            else:
+                # change or retain same
+                logger.debug("ip adapter reload all")
+                self.pipe.unload_ip_adapter()
+
+                if all("faceid" in m for m in ip_adapter_model):
+                    repo_name = IP_ADAPTER_MODELS["ip_faceid"]
+                    sub_folder = None
+                    image_encoder_folder = None
+                elif all("faceid" not in m for m in ip_adapter_model):
+                    repo_name = IP_ADAPTER_MODELS["ip_adapter"]
+                    sub_folder = IP_ADAPTER_MODELS[self.class_name]["subfolder"]
+                    image_encoder_folder = f"{sub_folder}/image_encoder"
+                else:
+                    raise ValueError("Can't combine ip adapters with faceid adapters")
+
+                # load ip_adapter
+                self.pipe.load_ip_adapter(
+                    repo_name,
+                    subfolder=sub_folder,
+                    weight_name=ip_weights,
+                    image_encoder_folder=image_encoder_folder,
+                )
+                self.pipe.set_ip_adapter_scale(ip_scales)
+                self.pipe.to(self.device)
+                self.ip_adapter_config = [ip_weights, ip_scales]
+
         # FreeU
         if FreeU:
             logger.info("FreeU active")
@@ -1650,7 +1774,7 @@ class Model_Diffusers:
                 pipe_params_config["strength"] = strength
                 pipe_params_config["mask_image"] = control_mask
             elif self.task_name not in ["txt2img", "inpaint", "img2img"]:
-                if self.task_name in ["openpose", "canny", "depth", "sdxl_tile_realistic", "pattern"]:
+                if "t2i" not in self.task_name:
                     pipe_params_config[
                         "controlnet_conditioning_scale"
                     ] = float(controlnet_conditioning_scale)
@@ -1661,6 +1785,31 @@ class Model_Diffusers:
                     pipe_params_config["adapter_conditioning_factor"] = float(t2i_adapter_conditioning_factor)
             elif self.task_name == "img2img":
                 pipe_params_config["strength"] = strength
+
+        if self.ip_adapter_config:
+            # ip_embeds Cache this and if change self.ip_adapter_config changed, guidance scale or num_images or ipimages or ip masks (evaluete if height and width) remake
+            do_classifier_free_guidance = guidance_scale > 1
+
+            with torch.no_grad():
+                image_embeds = self.pipe.prepare_ip_adapter_image_embeds(
+                    ip_images,
+                    None,
+                    self.device,
+                    num_images,
+                    do_classifier_free_guidance,
+                )
+
+            pipe_params_config["ip_adapter_image_embeds"] = image_embeds
+
+            if ip_masks:
+                from diffusers.image_processor import IPAdapterMaskProcessor
+
+                processor = IPAdapterMaskProcessor()
+                width, height = ip_masks[0]
+                masks = processor.preprocess(ip_masks, height=height, width=width)  # aspect ratio based on first mask
+                masks = [masks.reshape(1, masks.shape[0], masks.shape[2], masks.shape[3])]
+
+                pipe_params_config["cross_attention_kwargs"] = {"ip_adapter_masks": masks}
 
         # detailfix params and pipe global
         if adetailer_A or adetailer_B:
