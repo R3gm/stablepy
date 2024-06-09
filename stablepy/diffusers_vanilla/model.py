@@ -37,24 +37,20 @@ from controlnet_aux.util import HWC3, ade_palette
 from transformers import AutoImageProcessor, UperNetForSemanticSegmentation
 import cv2
 from diffusers import (
-    DPMSolverMultistepScheduler,
-    DPMSolverSinglestepScheduler,
-    KDPM2DiscreteScheduler,
-    EulerDiscreteScheduler,
-    EulerAncestralDiscreteScheduler,
-    HeunDiscreteScheduler,
-    LMSDiscreteScheduler,
     DDIMScheduler,
-    DEISMultistepScheduler,
     UniPCMultistepScheduler,
-    LCMScheduler,
-    PNDMScheduler,
-    KDPM2AncestralDiscreteScheduler,
-    DPMSolverSDEScheduler,
-    EDMDPMSolverMultistepScheduler,
-    DDPMScheduler,
-    EDMEulerScheduler,
-    TCDScheduler,
+)
+from .constants import (
+    CONTROLNET_MODEL_IDS,
+    VALID_TASKS,
+    T2I_PREPROCESSOR_NAME,
+    FLASH_LORA,
+    SCHEDULER_CONFIG_MAP,
+    scheduler_names,
+    IP_ADAPTER_MODELS,
+    IP_ADAPTERS_SD,
+    IP_ADAPTERS_SDXL,
+    REPO_IMAGE_ENCODER,
 )
 from diffusers.utils import load_image
 from .prompt_weights import get_embed_new, add_comma_after_pattern_ti
@@ -65,7 +61,12 @@ from .adetailer import ad_model_process
 from ..logging.logging_setup import logger
 from .extra_model_loaders import custom_task_model_loader
 from .high_resolution import process_images_high_resolution
-from .style_prompt_config import styles_data, STYLE_NAMES, get_json_content, apply_style
+from .style_prompt_config import (
+    styles_data,
+    STYLE_NAMES,
+    get_json_content,
+    apply_style
+)
 import os
 from compel import Compel, ReturnedEmbeddingsType
 import mediapy
@@ -222,127 +223,6 @@ class Preprocessor:
 # Base Model
 # =====================================
 
-CONTROLNET_MODEL_IDS = {
-    "openpose": ["lllyasviel/control_v11p_sd15_openpose", "r3gm/controlnet-openpose-sdxl-1.0-fp16"],
-    "canny": ["lllyasviel/control_v11p_sd15_canny", "r3gm/controlnet-canny-scribble-integrated-sdxl-v2-fp16"],
-    "mlsd": "lllyasviel/control_v11p_sd15_mlsd",
-    "scribble": ["lllyasviel/control_v11p_sd15_scribble", "r3gm/controlnet-canny-scribble-integrated-sdxl-v2-fp16"],
-    "softedge": "lllyasviel/control_v11p_sd15_softedge",
-    "segmentation": "lllyasviel/control_v11p_sd15_seg",
-    "depth": ["lllyasviel/control_v11f1p_sd15_depth", "diffusers/controlnet-depth-sdxl-1.0-mid"],
-    "normalbae": "lllyasviel/control_v11p_sd15_normalbae",
-    "lineart": ["lllyasviel/control_v11p_sd15_lineart", "r3gm/controlnet-lineart-anime-sdxl-fp16"],
-    "lineart_anime": "lllyasviel/control_v11p_sd15s2_lineart_anime",
-    "shuffle": "lllyasviel/control_v11e_sd15_shuffle",
-    "ip2p": "lllyasviel/control_v11e_sd15_ip2p",
-    "inpaint": "lllyasviel/control_v11p_sd15_inpaint",
-    "txt2img": "Nothinghere",
-    "sdxl_canny_t2i": "TencentARC/t2i-adapter-canny-sdxl-1.0",
-    "sdxl_sketch_t2i": "TencentARC/t2i-adapter-sketch-sdxl-1.0",
-    "sdxl_lineart_t2i": "TencentARC/t2i-adapter-lineart-sdxl-1.0",
-    "sdxl_depth-midas_t2i": "TencentARC/t2i-adapter-depth-midas-sdxl-1.0",
-    "sdxl_openpose_t2i": "TencentARC/t2i-adapter-openpose-sdxl-1.0",
-    # "sdxl_depth-zoe_t2i": "TencentARC/t2i-adapter-depth-zoe-sdxl-1.0",
-    # "sdxl_recolor_t2i": "TencentARC/t2i-adapter-recolor-sdxl-1.0",
-    "img2img": "Nothinghere",
-    "pattern": ["monster-labs/control_v1p_sd15_qrcode_monster", "r3gm/control_v1p_sdxl_qrcode_monster_fp16"],
-    "sdxl_tile_realistic": "Yakonrus/SDXL_Controlnet_Tile_Realistic_v2",
-}
-
-T2I_PREPROCESSOR_NAME = {
-    "sdxl_canny_t2i": "Canny",
-    "sdxl_openpose_t2i": "Openpose",
-    "sdxl_sketch_t2i": "PidiNet",
-    "sdxl_depth-midas_t2i": "Midas",
-    "sdxl_lineart_t2i": "Lineart",
-}
-
-FLASH_LORA = {
-    "StableDiffusionPipeline": {
-        "LCM": "latent-consistency/lcm-lora-sdv1-5",
-        "TCD": "h1t/TCD-SD15-LoRA",
-    },
-    "StableDiffusionXLPipeline": {
-        "LCM": "latent-consistency/lcm-lora-sdxl",
-        "TCD": "h1t/TCD-SDXL-LoRA",
-    },
-}
-
-SCHEDULER_CONFIG_MAP = {
-    "DPM++ 2M": (DPMSolverMultistepScheduler, {"use_karras_sigmas": False}),
-    "DPM++ 2M Karras": (DPMSolverMultistepScheduler, {"use_karras_sigmas": True}),
-    "DPM++ 2M SDE": (DPMSolverMultistepScheduler, {"use_karras_sigmas": False, "algorithm_type": "sde-dpmsolver++"}),
-    "DPM++ 2M SDE Karras": (DPMSolverMultistepScheduler, {"use_karras_sigmas": True, "algorithm_type": "sde-dpmsolver++"}),
-    "DPM++ 2S": (DPMSolverSinglestepScheduler, {"use_karras_sigmas": False}),
-    "DPM++ 2S Karras": (DPMSolverSinglestepScheduler, {"use_karras_sigmas": True}),
-    "DPM++ 1S": (DPMSolverMultistepScheduler, {"solver_order": 1}),
-    "DPM++ 1S Karras": (DPMSolverMultistepScheduler, {"solver_order": 1, "use_karras_sigmas": True}),
-    "DPM++ 3M": (DPMSolverMultistepScheduler, {"solver_order": 3}),
-    "DPM++ 3M Karras": (DPMSolverMultistepScheduler, {"solver_order": 3, "use_karras_sigmas": True}),
-    "DPM++ SDE": (DPMSolverSDEScheduler, {"use_karras_sigmas": False}),
-    "DPM++ SDE Karras": (DPMSolverSDEScheduler, {"use_karras_sigmas": True}),
-    "KDPM2": (KDPM2DiscreteScheduler, {}),
-    "KDPM2 Karras": (KDPM2DiscreteScheduler, {"use_karras_sigmas": True}),
-    "KDPM2 a": (KDPM2AncestralDiscreteScheduler, {}),
-    "KDPM2 a Karras": (KDPM2AncestralDiscreteScheduler, {"use_karras_sigmas": True}),
-    "Euler": (EulerDiscreteScheduler, {}),
-    "Euler a": (EulerAncestralDiscreteScheduler, {}),
-    "Heun": (HeunDiscreteScheduler, {}),
-    "Heun Karras": (HeunDiscreteScheduler, {"use_karras_sigmas": True}),
-    "LMS": (LMSDiscreteScheduler, {}),
-    "LMS Karras": (LMSDiscreteScheduler, {"use_karras_sigmas": True}),
-    "DDIM": (DDIMScheduler, {}),
-    "DEIS": (DEISMultistepScheduler, {}),
-    "UniPC": (UniPCMultistepScheduler, {}),
-    "UniPC Karras": (UniPCMultistepScheduler, {"use_karras_sigmas": True}),
-    "PNDM": (PNDMScheduler, {}),
-    "Euler EDM": (EDMEulerScheduler, {}),
-    "Euler EDM Karras": (EDMEulerScheduler, {"use_karras_sigmas": True}),
-    "DPM++ 2M EDM": (EDMDPMSolverMultistepScheduler, {"solver_order": 2, "solver_type": "midpoint", "final_sigmas_type": "zero", "algorithm_type": "dpmsolver++"}),
-    "DPM++ 2M EDM Karras": (EDMDPMSolverMultistepScheduler, {"use_karras_sigmas": True, "solver_order": 2, "solver_type": "midpoint", "final_sigmas_type": "zero", "algorithm_type": "dpmsolver++"}),
-    "DDPM": (DDPMScheduler, {}),
-
-    "DPM++ 2M Lu": (DPMSolverMultistepScheduler, {"use_lu_lambdas": True}),
-    "DPM++ 2M Ef": (DPMSolverMultistepScheduler, {"euler_at_final": True}),
-    "DPM++ 2M SDE Lu": (DPMSolverMultistepScheduler, {"use_lu_lambdas": True, "algorithm_type": "sde-dpmsolver++"}),
-    "DPM++ 2M SDE Ef": (DPMSolverMultistepScheduler, {"algorithm_type": "sde-dpmsolver++", "euler_at_final": True}),
-
-    "TCD": (TCDScheduler, {}),
-    "LCM": (LCMScheduler, {}),
-}
-
-scheduler_names = list(SCHEDULER_CONFIG_MAP.keys())
-
-IP_ADAPTER_MODELS = {
-    "StableDiffusionPipeline": {
-        "subfolder": "models",
-        "full_face": "ip-adapter-full-face_sd15.safetensors",
-        "plus_face": "ip-adapter-plus-face_sd15.safetensors",
-        "plus": "ip-adapter-plus_sd15.safetensors",
-        "base": "ip-adapter_sd15.safetensors",
-        "base_light": "ip-adapter_sd15_light.safetensors",
-        "base_vit": "ip-adapter_sd15_vit-G.safetensors",
-        "faceid_plus": "ip-adapter-faceid-plus_sd15_lora.safetensors",
-        "faceid_plus_v2": "ip-adapter-faceid-plusv2_sd15_lora.safetensors",
-        "faceid": "ip-adapter-faceid_sd15_lora.safetensors",
-        "faceid_portrait_v2": "ip-adapter-faceid-portrait-v11_sd15.bin",  # last portrait
-        "faceid_portrait": "ip-adapter-faceid-portrait_sd15.bin",
-    },
-    "StableDiffusionXLPipeline": {
-        "subfolder": "sdxl_models",
-        "plus_face": "ip-adapter-plus-face_sdxl_vit-h.safetensors",
-        "plus": "ip-adapter-plus_sdxl_vit-h.safetensors",
-        "base": "ip-adapter_sdxl.safetensors",
-        "base_vit": "ip-adapter_sdxl_vit-h.safetensors",
-        "faceid_plus_v2": "ip-adapter-faceid-plusv2_sdxl_lora.safetensors",
-        "faceid": "ip-adapter-faceid_sdxl_lora.safetensors",
-        "faceid_portrait": "ip-adapter-faceid-portrait_sdxl.bin",
-        "faceid_portrait_v2": "ip-adapter-faceid-portrait_sdxl_unnorm.bin",
-    },
-    "ip_adapter": "h94/IP-Adapter",
-    "ip_faceid": "h94/IP-Adapter-FaceID",
-}
-
 
 def process_prompts_valid(specific_prompt, specific_negative_prompt, prompt, negative_prompt):
     specific_prompt_empty = (specific_prompt in [None, ""])
@@ -358,9 +238,13 @@ def convert_image_to_numpy_array(image, gui_active=False):
     if isinstance(image, str):
         # If the input is a string (file path), open it as an image
         image_pil = Image.open(image)
+        if image_pil.mode != 'RGB':
+            image_pil = image_pil.convert('RGB')
         numpy_array = np.array(image_pil, dtype=np.uint8)
     elif isinstance(image, Image.Image):
         # If the input is already a PIL Image, convert it to a NumPy array
+        if image.mode != 'RGB':
+            image = image.convert('RGB')
         numpy_array = np.array(image, dtype=np.uint8)
     elif isinstance(image, np.ndarray):
         # If the input is a NumPy array, ensure it's np.uint8
@@ -411,6 +295,9 @@ class Model_Diffusers:
         self.styles_data = styles_data
         self.STYLE_NAMES = STYLE_NAMES
         self.style_json_file = ""
+
+        self.image_encoder_name = None
+        self.image_encoder_module = None
 
     def load_pipe(
         self,
@@ -624,6 +511,7 @@ class Model_Diffusers:
                         unet=self.pipe.unet,
                         # controlnet=self.controlnet,
                         scheduler=self.pipe.scheduler,
+                        feature_extractor=self.pipe.feature_extractor,
                         image_encoder=self.pipe.image_encoder,
                     )
 
@@ -664,6 +552,7 @@ class Model_Diffusers:
                             unet=self.pipe.unet,
                             scheduler=self.pipe.scheduler,
                             controlnet=controlnet,
+                            feature_extractor=self.pipe.feature_extractor,
                             image_encoder=self.pipe.image_encoder,
                         ).to(self.device)
 
@@ -683,6 +572,7 @@ class Model_Diffusers:
                             unet=self.pipe.unet,
                             adapter=adapter,
                             scheduler=self.pipe.scheduler,
+                            feature_extractor=self.pipe.feature_extractor,
                             image_encoder=self.pipe.image_encoder,
                         ).to(self.device)
 
@@ -711,6 +601,7 @@ class Model_Diffusers:
                         tokenizer_2=self.pipe.tokenizer_2,
                         unet=self.pipe.unet,
                         scheduler=self.pipe.scheduler,
+                        feature_extractor=self.pipe.feature_extractor,
                         image_encoder=self.pipe.image_encoder,
                     )
 
@@ -1136,6 +1027,175 @@ class Model_Diffusers:
         else:
             logger.error("Not found styles json file in directory")
 
+    def load_beta_styles(self):
+        from .constants import BETA_STYLE_LIST
+
+        styles_data = {k["name"]: (k["prompt"], k["negative_prompt"]) for k in BETA_STYLE_LIST}
+        STYLE_NAMES = list(styles_data.keys())
+        self.styles_data = styles_data
+        self.STYLE_NAMES = STYLE_NAMES
+        self.style_json_file = ""
+
+    def set_ip_adapter_multimode_scale(self, ip_scales, ip_adapter_mode):
+        mode_scales = []
+        for scale, mode in zip(ip_scales, ip_adapter_mode):
+            if mode == "style":
+                map_scale = {
+                    "up": {"block_0": [0.0, scale, 0.0]},
+                }
+            elif mode == "layout":
+                map_scale = {
+                    "down": {"block_2": [0.0, scale]},
+                }
+            elif mode == "style+layout":
+                map_scale = {
+                    "down": {"block_2": [0.0, scale]},
+                    "up": {"block_0": [0.0, scale, 0.0]},
+                }
+            else:
+                map_scale = scale
+
+            mode_scales.append(map_scale)
+
+        self.pipe.set_ip_adapter_scale(mode_scales)
+
+    def set_ip_adapter_model(self, ip_weights):
+
+        repo_name = [data[0] for data in ip_weights]
+        sub_folder = [data[1] for data in ip_weights]
+        weight_name = [data[2] for data in ip_weights]
+        vit_model = [data[3] for data in ip_weights]
+        vit_model = list(set(x for x in vit_model if x is not None))
+
+        if len(vit_model) > 1:
+            raise ValueError("Can't combine vit-G with vit-H models")
+
+        all_contain_faceid = all("faceid" in m for m in weight_name)
+        all_not_contain_faceid = all("faceid" not in m for m in weight_name)
+
+        if not (all_contain_faceid or all_not_contain_faceid):
+            raise ValueError("Can't combine ip adapters with faceid adapters")
+
+        if (
+            (vit_model and self.image_encoder_name != vit_model[0])
+            or (
+                vit_model
+                and self.image_encoder_name == vit_model[0]
+                and (getattr(self.pipe, "image_encoder", None) is None)
+            )
+        ):
+            from transformers import CLIPVisionModelWithProjection
+
+            vit_repo = REPO_IMAGE_ENCODER[vit_model[0]]
+
+            self.image_encoder_module = CLIPVisionModelWithProjection.from_pretrained(
+                vit_repo,
+                torch_dtype=self.type_model_precision,
+            ).to(self.device)
+            self.image_encoder_name = vit_model[0]
+            self.pipe.register_modules(image_encoder=self.image_encoder_module)  # automatic change
+
+        # Load ip_adapter
+        self.pipe.load_ip_adapter(
+            repo_name,
+            subfolder=sub_folder,
+            weight_name=weight_name,
+            image_encoder_folder=None
+        )
+
+        self.ip_adapter_config = weight_name  # change to key dict ipmodels
+
+    def get_ip_embeds(
+            self, guidance_scale, ip_images, num_images, ip_masks=None
+    ):
+        do_classifier_free_guidance = guidance_scale > 1
+
+        if "faceid" not in self.ip_adapter_config[0]:
+            with torch.no_grad():
+                image_embeds = self.pipe.prepare_ip_adapter_image_embeds(
+                    ip_images,
+                    None,
+                    self.device,
+                    num_images,
+                    do_classifier_free_guidance,
+                )  # is a list
+        else:
+            from insightface.app import FaceAnalysis
+            from insightface.utils import face_align
+            from IPython.utils.capture import capture_output
+
+            with capture_output() as captured:  # noqa
+                app = FaceAnalysis(  # cache this
+                    name="buffalo_l",
+                    providers=['CUDAExecutionProvider', 'CPUExecutionProvider']
+                )
+                app.prepare(ctx_id=0, det_size=(640, 640))
+
+            image_embeds = []
+            for i, (image, ip_weight) in enumerate(zip(ip_images, self.ip_adapter_config)):
+
+                if "plus" in ip_weight:
+
+                    ref_images_embeds = []
+                    ip_adapter_images = []
+
+                    image = cv2.cvtColor(np.asarray(image), cv2.COLOR_BGR2RGB)
+                    faces = app.get(image)
+                    ip_adapter_images.append(face_align.norm_crop(image, landmark=faces[0].kps, image_size=224))  # if not detected face error
+                    image = torch.from_numpy(faces[0].normed_embedding)
+                    ref_images_embeds.append(image.unsqueeze(0))
+                    ref_images_embeds = torch.stack(ref_images_embeds, dim=0).unsqueeze(0)
+                    neg_ref_images_embeds = torch.zeros_like(ref_images_embeds)
+                    id_embed = torch.cat([neg_ref_images_embeds, ref_images_embeds]).to(dtype=self.type_model_precision, device=self.device)
+                    image_embeds.append(id_embed)
+
+                    clip_embeds = self.pipe.prepare_ip_adapter_image_embeds(
+                        [ip_adapter_images] * len(ip_images),
+                        None,
+                        torch.device(self.device),
+                        num_images,
+                        do_classifier_free_guidance
+                    )[0]
+
+                    self.pipe.unet.encoder_hid_proj.image_projection_layers[i].clip_embeds = clip_embeds.to(dtype=self.type_model_precision)
+                    if "plusv2" in ip_weight:
+                        self.pipe.unet.encoder_hid_proj.image_projection_layers[i].shortcut = True
+                    else:
+                        self.pipe.unet.encoder_hid_proj.image_projection_layers[i].shortcut = False
+                else:
+                    ref_images_embeds = []
+
+                    image = cv2.cvtColor(np.asarray(image), cv2.COLOR_BGR2RGB)
+                    faces = app.get(image)
+                    image = torch.from_numpy(faces[0].normed_embedding)
+                    ref_images_embeds.append(image.unsqueeze(0))
+                    ref_images_embeds = torch.stack(ref_images_embeds, dim=0).unsqueeze(0)
+                    neg_ref_images_embeds = torch.zeros_like(ref_images_embeds)
+                    id_embed = torch.cat([neg_ref_images_embeds, ref_images_embeds]).to(dtype=self.type_model_precision, device=self.device)
+                    image_embeds.append(id_embed)
+
+        processed_masks = []
+        if ip_masks and ip_masks[0] is not None:  # fix this auto generate mask if any have it...
+            from diffusers.image_processor import IPAdapterMaskProcessor
+
+            processor = IPAdapterMaskProcessor()
+            first_mask = ip_masks[0]
+            if isinstance(first_mask, list):
+                first_mask = first_mask[0]
+            width, height = first_mask.size  # aspect ratio based on first mask
+
+            for mask in ip_masks:
+                if not isinstance(mask, list):
+                    mask = [mask]
+                masks_ = processor.preprocess(mask, height=height, width=width)
+
+                if len(mask) > 1:
+                    masks_ = [masks_.reshape(1, masks_.shape[0], masks_.shape[2], masks_.shape[3])]
+
+                processed_masks.append(masks_)
+
+        return image_embeds, processed_masks
+
     def callback_pipe(self, iter, t, latents):
         # convert latents to image
         with torch.no_grad():
@@ -1220,7 +1280,8 @@ class Model_Diffusers:
         ip_adapter_image: Optional[Any] = [],  # str Image
         ip_adapter_mask: Optional[Any] = [],  # str Image
         ip_adapter_model: Optional[Any] = [],  # str
-        ip_adapter_model_scale: Optional[Any] = [],  # float
+        ip_adapter_scale: Optional[Any] = [1.0],  # float
+        ip_adapter_mode: Optional[Any] = ["original"],  # str: original, style, layout, style+layout
 
         loop_generation: int = 1,
         display_images: bool = False,
@@ -1468,6 +1529,9 @@ class Model_Diffusers:
             )
             control_guidance_start, control_guidance_end = 0.0, 1.0
 
+        if (ip_adapter_image and not ip_adapter_model) or (not ip_adapter_image and ip_adapter_model):
+            raise ValueError("Ip adapter require the ip adapter image and the ip adapter model for the task")
+
         self.gui_active = gui_active
         self.image_previews = image_previews
 
@@ -1571,82 +1635,56 @@ class Model_Diffusers:
                 self.flash_config = flash_task_lora
             logger.info(sampler)
 
-        if (ip_adapter_image and not ip_adapter_model) or (not ip_adapter_image and ip_adapter_model):
-            raise ValueError("Ip adapter require the ip adapter image and the ip adapter model for the task")
-
         if not isinstance(ip_adapter_image, list):
             ip_adapter_image = [ip_adapter_image]
         if not isinstance(ip_adapter_mask, list):
             ip_adapter_mask = [ip_adapter_mask]
         if not isinstance(ip_adapter_model, list):
             ip_adapter_model = [ip_adapter_model]
-        if not isinstance(ip_adapter_model_scale, list):
-            ip_adapter_model_scale = [ip_adapter_model_scale]
+        if not isinstance(ip_adapter_scale, list):
+            ip_adapter_scale = [ip_adapter_scale]
+        if not isinstance(ip_adapter_mode, list):
+            ip_adapter_mode = [ip_adapter_mode]
 
         ip_weights = [IP_ADAPTER_MODELS[self.class_name][name] for name in ip_adapter_model]
-        ip_scales = ip_adapter_model_scale  # add instant-style
-        ip_images = [load_image(ip_img) for ip_img in ip_adapter_image]
-        ip_masks = [load_image(ip_mk) for ip_mk in ip_adapter_mask]
+        ip_scales = [float(s) for s in ip_adapter_scale]
+        ip_masks = [
+            [load_image(mask__) if mask__ else None for mask__ in sublist]
+            if isinstance(sublist, list)
+            else load_image(sublist) if sublist
+            else None
+            for sublist in ip_adapter_mask
+        ]
+        ip_images = [
+            load_image(ip_img) if not isinstance(ip_img, list)
+            else [load_image(img__) for img__ in ip_img]
+            for ip_img in ip_adapter_image
+        ]
 
         if self.ip_adapter_config is None and ip_adapter_image:
             # First load
-            logger.info("ip adapter first load")
-            if all("faceid" in m for m in ip_adapter_model):
-                repo_name = IP_ADAPTER_MODELS["ip_faceid"]
-                sub_folder = None
-                image_encoder_folder = None
-            elif all("faceid" not in m for m in ip_adapter_model):
-                repo_name = IP_ADAPTER_MODELS["ip_adapter"]
-                sub_folder = IP_ADAPTER_MODELS[self.class_name]["subfolder"]
-                image_encoder_folder = f"{sub_folder}/image_encoder"
-            else:
-                raise ValueError("Can't combine ip adapters with faceid adapters")
-
-            # load ip_adapter
-            self.pipe.load_ip_adapter(
-                repo_name,
-                subfolder=sub_folder,
-                weight_name=ip_weights,
-                image_encoder_folder=image_encoder_folder,
-            )
-            self.pipe.set_ip_adapter_scale(ip_scales)
-            self.pipe.to(self.device)
-            self.ip_adapter_config = [ip_weights, ip_scales]
+            logger.info("Loading IP adapter")
+            self.set_ip_adapter_model(ip_weights)
 
         elif self.ip_adapter_config is not None and not ip_adapter_image:
-            # unload
-            logger.debug("ip adapter unload all")
+            # Unload
+            logger.debug("IP adapter unload all")
             self.pipe.unload_ip_adapter()
             self.ip_adapter_config = None
         elif self.ip_adapter_config is not None:
-            if self.ip_adapter_config == [ip_weights, ip_scales]:
-                logger.info("ip adapter in cache")
+            if self.ip_adapter_config == [data[2] for data in ip_weights]:
+                logger.info("IP adapter")
             else:
                 # change or retain same
-                logger.debug("ip adapter reload all")
+                logger.debug("IP adapter reload all")
                 self.pipe.unload_ip_adapter()
+                self.ip_adapter_config = None
+                logger.info("Loading IP adapter")
+                self.set_ip_adapter_model(ip_weights)
 
-                if all("faceid" in m for m in ip_adapter_model):
-                    repo_name = IP_ADAPTER_MODELS["ip_faceid"]
-                    sub_folder = None
-                    image_encoder_folder = None
-                elif all("faceid" not in m for m in ip_adapter_model):
-                    repo_name = IP_ADAPTER_MODELS["ip_adapter"]
-                    sub_folder = IP_ADAPTER_MODELS[self.class_name]["subfolder"]
-                    image_encoder_folder = f"{sub_folder}/image_encoder"
-                else:
-                    raise ValueError("Can't combine ip adapters with faceid adapters")
-
-                # load ip_adapter
-                self.pipe.load_ip_adapter(
-                    repo_name,
-                    subfolder=sub_folder,
-                    weight_name=ip_weights,
-                    image_encoder_folder=image_encoder_folder,
-                )
-                self.pipe.set_ip_adapter_scale(ip_scales)
-                self.pipe.to(self.device)
-                self.ip_adapter_config = [ip_weights, ip_scales]
+        if self.ip_adapter_config:
+            self.set_ip_adapter_multimode_scale(ip_scales, ip_adapter_mode)
+            self.pipe.to(self.device)
 
         # FreeU
         if FreeU:
@@ -1787,29 +1825,16 @@ class Model_Diffusers:
                 pipe_params_config["strength"] = strength
 
         if self.ip_adapter_config:
-            # ip_embeds Cache this and if change self.ip_adapter_config changed, guidance scale or num_images or ipimages or ip masks (evaluete if height and width) remake
-            do_classifier_free_guidance = guidance_scale > 1
+            # maybe need cache embeds
+            ip_adapter_embeds, ip_adapter_masks = self.get_ip_embeds(
+                guidance_scale, ip_images, num_images, ip_masks
+            )
 
-            with torch.no_grad():
-                image_embeds = self.pipe.prepare_ip_adapter_image_embeds(
-                    ip_images,
-                    None,
-                    self.device,
-                    num_images,
-                    do_classifier_free_guidance,
-                )
-
-            pipe_params_config["ip_adapter_image_embeds"] = image_embeds
-
-            if ip_masks:
-                from diffusers.image_processor import IPAdapterMaskProcessor
-
-                processor = IPAdapterMaskProcessor()
-                width, height = ip_masks[0]
-                masks = processor.preprocess(ip_masks, height=height, width=width)  # aspect ratio based on first mask
-                masks = [masks.reshape(1, masks.shape[0], masks.shape[2], masks.shape[3])]
-
-                pipe_params_config["cross_attention_kwargs"] = {"ip_adapter_masks": masks}
+            pipe_params_config["ip_adapter_image_embeds"] = ip_adapter_embeds
+            if ip_adapter_masks:
+                pipe_params_config["cross_attention_kwargs"] = {
+                    "ip_adapter_masks": ip_adapter_masks
+                }
 
         # detailfix params and pipe global
         if adetailer_A or adetailer_B:
@@ -1888,6 +1913,13 @@ class Model_Diffusers:
                 "guidance_scale": guidance_scale,
             }
 
+            if self.ip_adapter_config:
+                detailfix_params_A["ip_adapter_image_embeds"] = ip_adapter_embeds
+                if ip_adapter_masks:
+                    detailfix_params_A["cross_attention_kwargs"] = {
+                        "ip_adapter_masks": ip_adapter_masks
+                    }
+
             # clear params yolo
             adetailer_A_params.pop('strength', None)
             adetailer_A_params.pop('prompt', None)
@@ -1964,6 +1996,13 @@ class Model_Diffusers:
                 "guidance_scale": guidance_scale,
             }
 
+            if self.ip_adapter_config:
+                detailfix_params_B["ip_adapter_image_embeds"] = ip_adapter_embeds
+                if ip_adapter_masks:
+                    detailfix_params_B["cross_attention_kwargs"] = {
+                        "ip_adapter_masks": ip_adapter_masks
+                    }
+
             # clear params yolo
             adetailer_B_params.pop('strength', None)
             adetailer_B_params.pop('prompt', None)
@@ -2033,6 +2072,13 @@ class Model_Diffusers:
             }
             if self.class_name == "StableDiffusionPipeline":
                 hires_params_config["eta"] = 1.0
+
+            if self.ip_adapter_config:
+                hires_params_config["ip_adapter_image_embeds"] = ip_adapter_embeds
+                if ip_adapter_masks:
+                    hires_params_config["cross_attention_kwargs"] = {
+                        "ip_adapter_masks": ip_adapter_masks
+                    }
 
             # Verify prompt hires and get valid
             hires_prompt_empty, hires_negative_prompt_empty, prompt_hires_valid, negative_prompt_hires_valid = process_prompts_valid(

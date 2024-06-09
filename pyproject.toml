@@ -11,7 +11,7 @@ torch = {version = "*", source = "pytorch-gpu-src"}
 torchvision = {version = "*", source = "pytorch-gpu-src"}
 torchaudio = {version = "*", source = "pytorch-gpu-src"}
 omegaconf = "2.3.0"
-diffusers = "0.27.2"
+diffusers = "0.28.2"
 compel = "2.0.2"
 invisible-watermark = "^0.2.0"
 transformers = "^4.41.1"
@@ -26,6 +26,8 @@ ultralytics = "^8.0.0"
 huggingface_hub = "^0.23.1"
 peft = "^0.11.1"
 torchsde = "^0.2.6"
+onnxruntime = "^1.18.0"
+insightface = "^0.7.3"
 
 [[tool.poetry.source]]
 name = "pytorch-gpu-src"
