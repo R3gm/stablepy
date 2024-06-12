@@ -51,7 +51,10 @@ from .constants import (
     IP_ADAPTERS_SD,
     IP_ADAPTERS_SDXL,
     REPO_IMAGE_ENCODER,
+    PROMPT_WEIGHT_OPTIONS,
+    OLD_PROMPT_WEIGHT_OPTIONS,
 )
+from .multi_emphasis_prompt import long_prompts_with_weighting
 from diffusers.utils import load_image
 from .prompt_weights import get_embed_new, add_comma_after_pattern_ti
 from .utils import save_pil_image_with_metadata, checkpoint_model_type
@@ -79,7 +82,7 @@ import copy
 import warnings
 import traceback
 logging.getLogger("diffusers").setLevel(logging.ERROR)
-# logging.getLogger("transformers").setLevel(logging.ERROR)
+logging.getLogger("transformers").setLevel(logging.ERROR)
 diffusers.utils.logging.set_verbosity(40)
 warnings.filterwarnings(action="ignore", category=FutureWarning, module="diffusers")
 warnings.filterwarnings(action="ignore", category=FutureWarning, module="transformers")
@@ -837,6 +840,66 @@ class Model_Diffusers:
         else:
             raise ValueError(f"Scheduler with name {name} not found. Valid schedulers: {', '.join(scheduler_names)}")
 
+    def emphasis_prompt(
+        self,
+        pipe,
+        prompt,
+        negative_prompt,
+        clip_skip=2,  # disabled with sdxl
+        emphasis="Original",
+        comma_padding_backtrack=20,
+    ):
+
+        if hasattr(pipe, "text_encoder_2"):
+            # Prompt weights for textual inversion
+            try:
+                prompt_ti = pipe.maybe_convert_prompt(prompt, pipe.tokenizer)
+                negative_prompt_ti = pipe.maybe_convert_prompt(negative_prompt, pipe.tokenizer)
+            except Exception as e:
+                logger.debug(str(e))
+                prompt_ti = prompt
+                negative_prompt_ti = negative_prompt
+                logger.error("FAILED: Convert prompt for textual inversion")
+
+            cond, uncond = long_prompts_with_weighting(
+                pipe,
+                prompt_ti,
+                negative_prompt_ti,
+                clip_skip=clip_skip,  # disabled with sdxl
+                emphasis=emphasis,
+                comma_padding_backtrack=comma_padding_backtrack
+            )
+
+            cond_tensor = [cond[0], uncond[0]]
+            all_cond = torch.cat(cond_tensor)
+
+            pooled_tensor = [cond[1], uncond[1]]
+            all_pooled = torch.cat(pooled_tensor)
+
+            assert torch.equal(all_cond[0:1], cond[0]), "Tensors are not equal"
+
+            return all_cond, all_pooled
+        else:
+            # Prompt weights for textual inversion
+            prompt_ti = self.pipe.maybe_convert_prompt(prompt, self.pipe.tokenizer)
+            negative_prompt_ti = self.pipe.maybe_convert_prompt(
+                negative_prompt, self.pipe.tokenizer
+            )
+
+            # separate the multi-vector textual inversion by comma
+            if self.embed_loaded != []:
+                prompt_ti = add_comma_after_pattern_ti(prompt_ti)
+                negative_prompt_ti = add_comma_after_pattern_ti(negative_prompt_ti)
+
+            return long_prompts_with_weighting(
+                pipe,
+                prompt_ti,
+                negative_prompt_ti,
+                clip_skip=clip_skip,
+                emphasis=emphasis,
+                comma_padding_backtrack=comma_padding_backtrack
+            )
+
     def create_prompt_embeds(
         self,
         prompt,
@@ -872,6 +935,17 @@ class Model_Diffusers:
                             logger.error(exception)
                             logger.error(f"Can't apply embed {name}")
                 self.embed_loaded = textual_inversion
+
+            if syntax_weights not in OLD_PROMPT_WEIGHT_OPTIONS:
+                emphasis = PROMPT_WEIGHT_OPTIONS[syntax_weights]
+                return self.emphasis_prompt(
+                    self.pipe,
+                    prompt,
+                    negative_prompt,
+                    clip_skip=2 if clip_skip else 1,  # disabled with sdxl
+                    emphasis=emphasis,
+                    comma_padding_backtrack=20,
+                )
 
             # Clip skip
             # clip_skip_diffusers = None #clip_skip - 1 # future update
@@ -934,6 +1008,17 @@ class Model_Diffusers:
                             logger.error(exception)
                             logger.error(f"Can't apply embed {name}")
                 self.embed_loaded = textual_inversion
+
+            if syntax_weights not in OLD_PROMPT_WEIGHT_OPTIONS:
+                emphasis = PROMPT_WEIGHT_OPTIONS[syntax_weights]
+                return self.emphasis_prompt(
+                    self.pipe,
+                    prompt,
+                    negative_prompt,
+                    clip_skip=2 if clip_skip else 1,  # disabled with sdxl
+                    emphasis=emphasis,
+                    comma_padding_backtrack=20,
+                )
 
             if not hasattr(self, "compel"):
                 # Clip skip

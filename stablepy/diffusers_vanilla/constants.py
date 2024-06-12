@@ -67,6 +67,18 @@ FLASH_LORA = {
     },
 }
 
+PROMPT_WEIGHT_OPTIONS = {
+    "Compel": "Compel",
+    "Classic": "Classic",
+    "Classic-original": "Original",
+    "Classic-no_norm": "No norm",
+    "Classic-ignore": "Ignore",
+    "None": "None"
+}
+
+ALL_PROMPT_WEIGHT_OPTIONS = list(PROMPT_WEIGHT_OPTIONS.keys())
+OLD_PROMPT_WEIGHT_OPTIONS = ALL_PROMPT_WEIGHT_OPTIONS[0:2]
+
 SCHEDULER_CONFIG_MAP = {
     "DPM++ 2M": (DPMSolverMultistepScheduler, {"use_karras_sigmas": False}),
     "DPM++ 2M Karras": (DPMSolverMultistepScheduler, {"use_karras_sigmas": True}),

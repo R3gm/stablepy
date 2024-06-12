@@ -15,4 +15,5 @@ from .diffusers_vanilla.constants import (
     IP_ADAPTERS_SD,
     IP_ADAPTERS_SDXL,
     REPO_IMAGE_ENCODER,
+    ALL_PROMPT_WEIGHT_OPTIONS,
 )
