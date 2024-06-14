@@ -39,14 +39,23 @@ CONTROLNET_MODEL_IDS = {
     "sdxl_lineart_t2i": "TencentARC/t2i-adapter-lineart-sdxl-1.0",
     "sdxl_depth-midas_t2i": "TencentARC/t2i-adapter-depth-midas-sdxl-1.0",
     "sdxl_openpose_t2i": "TencentARC/t2i-adapter-openpose-sdxl-1.0",
-    # "sdxl_depth-zoe_t2i": "TencentARC/t2i-adapter-depth-zoe-sdxl-1.0",
-    # "sdxl_recolor_t2i": "TencentARC/t2i-adapter-recolor-sdxl-1.0",
     "img2img": "Nothinghere",
     "pattern": ["monster-labs/control_v1p_sd15_qrcode_monster", "r3gm/control_v1p_sdxl_qrcode_monster_fp16"],
     "sdxl_tile_realistic": "Yakonrus/SDXL_Controlnet_Tile_Realistic_v2",
+    # "sdxl_depth-zoe_t2i": "TencentARC/t2i-adapter-depth-zoe-sdxl-1.0",
+    # "sdxl_recolor_t2i": "TencentARC/t2i-adapter-recolor-sdxl-1.0",
 }
 
 VALID_TASKS = list(CONTROLNET_MODEL_IDS.keys())
+SD15_TASKS = [x for x in VALID_TASKS if ("sdxl" not in x.lower())]
+SDXL_TASKS = [
+    y for y in VALID_TASKS
+    if (
+        "sdxl" in y.lower()
+        or isinstance(CONTROLNET_MODEL_IDS[y], list)
+        or y in ["txt2img", "img2img", "inpaint"]
+    )
+]
 
 T2I_PREPROCESSOR_NAME = {
     "sdxl_canny_t2i": "Canny",

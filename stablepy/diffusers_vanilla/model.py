@@ -43,6 +43,8 @@ from diffusers import (
 from .constants import (
     CONTROLNET_MODEL_IDS,
     VALID_TASKS,
+    SD15_TASKS,
+    SDXL_TASKS,
     T2I_PREPROCESSOR_NAME,
     FLASH_LORA,
     SCHEDULER_CONFIG_MAP,
@@ -475,6 +477,11 @@ class Model_Diffusers:
             self.pipe.watermark = None
             return
 
+        # if class_name == "StableDiffusionPipeline" and task_name not in SD15_TASKS:
+        #     logger.error(f"The selected task: {task_name} is not implemented for SD 1.5")
+        # elif class_name == "StableDiffusionXLPipeline" and task_name not in SDXL_TASKS:
+        #     logger.error(f"The selected task: {task_name} is not implemented for SDXL")
+
         # Load task
         model_id = CONTROLNET_MODEL_IDS[task_name]
         if isinstance(model_id, list):
@@ -786,10 +793,14 @@ class Model_Diffusers:
             # Convert control image to draw
             import base64
             import matplotlib.pyplot as plt
-            name_without_extension = os.path.splitext(image.split("/")[-1])[0]
-            image64 = base64.b64encode(open(image, "rb").read())
+
+            Image.fromarray(image).save("inpaint_image.png")
+            image_aux = "./inpaint_image.png"
+
+            name_without_extension = os.path.splitext(image_aux.split("/")[-1])[0]
+            image64 = base64.b64encode(open(image_aux, "rb").read())
             image64 = image64.decode("utf-8")
-            img = np.array(plt.imread(f"{image}")[:, :, :3])
+            img = np.array(plt.imread(f"{image_aux}")[:, :, :3])
 
             # Create mask interactive
             logger.info("Draw the mask on this canvas using the mouse. When you finish, press 'Finish' in the bottom side of the canvas.")
@@ -1077,7 +1088,8 @@ class Model_Diffusers:
                     )
                     logger.info(select_lora)
                 except Exception as e:
-                    traceback.print_exc()
+                    if logger.isEnabledFor(logging.DEBUG):
+                        traceback.print_exc()
                     logger.error(f"ERROR: LoRA not compatible: {select_lora}")
                     logger.debug(f"{str(e)}")
             return self.pipe
@@ -1102,10 +1114,14 @@ class Model_Diffusers:
         if os.path.exists(style_json_file):
             try:
                 file_json_read = get_json_content(style_json_file)
-                self.styles_data = {k["name"]: (k["prompt"], k["negative_prompt"]) for k in file_json_read}
+                self.styles_data = {
+                    k["name"]: (k["prompt"], k["negative_prompt"] if "negative_prompt" in k else "") for k in file_json_read
+                }
                 self.STYLE_NAMES = list(self.styles_data.keys())
                 self.style_json_file = style_json_file
-                logger.info(f"Styles json file loaded with {len(self.STYLE_NAMES)} styles")
+                logger.info(
+                    f"Styles json file loaded with {len(self.STYLE_NAMES)} styles"
+                )
                 logger.debug(str(self.STYLE_NAMES))
             except Exception as e:
                 logger.error(str(e))
@@ -1115,7 +1131,9 @@ class Model_Diffusers:
     def load_beta_styles(self):
         from .constants import BETA_STYLE_LIST
 
-        styles_data = {k["name"]: (k["prompt"], k["negative_prompt"]) for k in BETA_STYLE_LIST}
+        styles_data = {
+            k["name"]: (k["prompt"], k["negative_prompt"] if "negative_prompt" in k else "") for k in BETA_STYLE_LIST
+        }
         STYLE_NAMES = list(styles_data.keys())
         self.styles_data = styles_data
         self.STYLE_NAMES = STYLE_NAMES
@@ -1411,11 +1429,22 @@ class Model_Diffusers:
             seed (int, optional, defaults to -1):
                 A seed for controlling the randomness of the image generation process. -1 design a random seed.
             sampler (str, optional, defaults to "DPM++ 2M"):
-                The sampler used for the generation process. Available samplers: DPM++ 2M, DPM++ 2M Karras, DPM++ 2M SDE,
-                DPM++ 2M SDE Karras, DPM++ SDE, DPM++ SDE Karras, DPM2, DPM2 Karras, Euler, Euler a, Heun, LMS, LMS Karras,
-                DDIM, DEIS, UniPC, DPM2 a, DPM2 a Karras, PNDM, TCD, LCM, DPM++ 2M Lu, DPM++ 2M Ef, DPM++ 2M SDE Lu and DPM++ 2M SDE Ef.
+                The sampler used for the generation process.
+                To see all the valid sampler names, use the following code:
+
+                ```python
+                from stablepy import scheduler_names
+                print(scheduler_names)
+                ```
             syntax_weights (str, optional, defaults to "Classic"):
-                Specifies the type of syntax weights used during generation. "Classic" is (word:weight), "Compel" is (word)weight
+                Specifies the type of syntax weights and emphasis used during generation. 
+                "Classic" is (word:weight), "Compel" is (word)weight.
+                To see all the valid syntax weight options, use the following code:
+
+                ```python
+                from stablepy import ALL_PROMPT_WEIGHT_OPTIONS
+                print(ALL_PROMPT_WEIGHT_OPTIONS)
+                ```
             lora_A (str, optional):
                 Placeholder for lora A parameter.
             lora_scale_A (float, optional, defaults to 1.0):
@@ -1546,6 +1575,28 @@ class Model_Diffusers:
                 The previous adetailer model remains preloaded in memory.
             retain_hires_model_previous_load (bool, optional, defaults to False):
                 The previous hires model remains preloaded in memory.
+            ip_adapter_image (Optional[Any], optional, default=[]):
+                Image path or list of image paths for ip adapter.
+            ip_adapter_mask (Optional[Any], optional, default=[]):
+                Mask image path or list of mask image paths for ip adapter.
+            ip_adapter_model (Optional[Any], optional, default=[]):
+                Adapter model name or list of adapter model names.
+
+                To see all the valid model names for SD1.5:
+                ```python
+                from stablepy import IP_ADAPTERS_SD
+                print(IP_ADAPTERS_SD)
+                ```
+
+                To see all the valid model names for SDXL:
+                ```python
+                from stablepy import IP_ADAPTERS_SDXL
+                print(IP_ADAPTERS_SDXL)
+                ```
+            ip_adapter_scale (Optional[Any], optional, default=[1.0]):
+                Scaling factor or list of scaling factors for the ip adapter models.
+            ip_adapter_mode (Optional[Any], optional, default=['original']):
+                Adapter mode or list of adapter modes. Possible values are 'original', 'style', 'layout', 'style+layout'.
             image_previews (bool, optional, defaults to False):
                 Displaying the image denoising process.
             xformers_memory_efficient_attention (bool, optional, defaults to False):
@@ -1570,7 +1621,7 @@ class Model_Diffusers:
                 - image_resolution
                 - strength
 
-            Additional parameters that will be used in ControlNet for SD 1.5 depending on the task:
+            Additional parameters that will be used in ControlNet for SD 1.5 and SDXL depending on the task:
                 - image
                 - preprocessor_name
                 - preprocess_resolution
@@ -1595,6 +1646,8 @@ class Model_Diffusers:
 
         """
 
+        if not seed:
+            seed = -1
         if self.task_name != "txt2img" and image is None:
             raise ValueError(
                 "You need to specify the <image> for this task."
