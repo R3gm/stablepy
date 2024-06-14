@@ -67,12 +67,12 @@ T2I_PREPROCESSOR_NAME = {
 
 FLASH_LORA = {
     "StableDiffusionPipeline": {
-        "LCM": "latent-consistency/lcm-lora-sdv1-5",
-        "TCD": "h1t/TCD-SD15-LoRA",
+        "LCM Auto-Loader": "latent-consistency/lcm-lora-sdv1-5",
+        "TCD Auto-Loader": "h1t/TCD-SD15-LoRA",
     },
     "StableDiffusionXLPipeline": {
-        "LCM": "latent-consistency/lcm-lora-sdxl",
-        "TCD": "h1t/TCD-SDXL-LoRA",
+        "LCM Auto-Loader": "latent-consistency/lcm-lora-sdxl",
+        "TCD Auto-Loader": "h1t/TCD-SDXL-LoRA",
     },
 }
 
@@ -107,11 +107,14 @@ SCHEDULER_CONFIG_MAP = {
     "KDPM2 a Karras": (KDPM2AncestralDiscreteScheduler, {"use_karras_sigmas": True}),
     "Euler": (EulerDiscreteScheduler, {}),
     "Euler a": (EulerAncestralDiscreteScheduler, {}),
+    "Euler trailing": (EulerDiscreteScheduler, {"timestep_spacing": "trailing", "prediction_type": "sample"}),
+    "Euler a trailing": (EulerAncestralDiscreteScheduler, {"timestep_spacing": "trailing"}),
     "Heun": (HeunDiscreteScheduler, {}),
     "Heun Karras": (HeunDiscreteScheduler, {"use_karras_sigmas": True}),
     "LMS": (LMSDiscreteScheduler, {}),
     "LMS Karras": (LMSDiscreteScheduler, {"use_karras_sigmas": True}),
     "DDIM": (DDIMScheduler, {}),
+    "DDIM trailing": (DDIMScheduler, {"timestep_spacing": "trailing"}),
     "DEIS": (DEISMultistepScheduler, {}),
     "UniPC": (UniPCMultistepScheduler, {}),
     "UniPC Karras": (UniPCMultistepScheduler, {"use_karras_sigmas": True}),
@@ -127,11 +130,16 @@ SCHEDULER_CONFIG_MAP = {
     "DPM++ 2M SDE Lu": (DPMSolverMultistepScheduler, {"use_lu_lambdas": True, "algorithm_type": "sde-dpmsolver++"}),
     "DPM++ 2M SDE Ef": (DPMSolverMultistepScheduler, {"algorithm_type": "sde-dpmsolver++", "euler_at_final": True}),
 
-    "TCD": (TCDScheduler, {}),
     "LCM": (LCMScheduler, {}),
+    "TCD": (TCDScheduler, {}),
+    "LCM trailing": (LCMScheduler, {"timestep_spacing": "trailing"}),
+    "TCD trailing": (TCDScheduler, {"timestep_spacing": "trailing"}),
+    "LCM Auto-Loader": (LCMScheduler, {}),
+    "TCD Auto-Loader": (TCDScheduler, {}),
 }
 
 scheduler_names = list(SCHEDULER_CONFIG_MAP.keys())
+FLASH_AUTO_LOAD_SAMPLER = scheduler_names[-2:]
 
 IP_ADAPTER_MODELS = {
     "StableDiffusionPipeline": {
@@ -718,7 +726,7 @@ BETA_STYLE_LIST = [
         "negative_prompt": "Meticulous craftsmanship, figural realism, premeditated approach"
     },
     {
-        "name": "",
+        "name": "Pure Typography",
         "prompt": "Lettrist artwork {prompt} . Avant-garde letters freed into pure form, visual rhythm and texture of typography as sole communication",
         "negative_prompt": "Readability, coherence, concrete meaning beyond visual experience"
     },

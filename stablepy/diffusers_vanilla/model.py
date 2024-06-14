@@ -55,6 +55,7 @@ from .constants import (
     REPO_IMAGE_ENCODER,
     PROMPT_WEIGHT_OPTIONS,
     OLD_PROMPT_WEIGHT_OPTIONS,
+    FLASH_AUTO_LOAD_SAMPLER,
 )
 from .multi_emphasis_prompt import long_prompts_with_weighting
 from diffusers.utils import load_image
@@ -283,6 +284,7 @@ class Model_Diffusers:
         task_name: str = "txt2img",
         vae_model=None,
         type_model_precision=torch.float16,
+        retain_task_model_in_cache=True,
     ):
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         self.base_model_id = ""
@@ -293,7 +295,11 @@ class Model_Diffusers:
         )  # For SD 1.5
 
         self.load_pipe(
-            base_model_id, task_name, vae_model, type_model_precision
+            base_model_id,
+            task_name,
+            vae_model,
+            type_model_precision,
+            retain_task_model_in_cache,
         )
         self.preprocessor = Preprocessor()
 
@@ -311,7 +317,7 @@ class Model_Diffusers:
         vae_model=None,
         type_model_precision=torch.float16,
         reload=False,
-        retain_model_in_memory=True,
+        retain_task_model_in_cache=True,
     ) -> DiffusionPipeline:
         if (
             base_model_id == self.base_model_id
@@ -633,7 +639,7 @@ class Model_Diffusers:
             self.pipe.enable_vae_tiling()
             self.pipe.watermark = None
 
-        if retain_model_in_memory is True and task_name not in self.model_memory:
+        if retain_task_model_in_cache is True and task_name not in self.model_memory:
             self.model_memory[task_name] = self.pipe
 
         return
@@ -1138,6 +1144,10 @@ class Model_Diffusers:
         self.styles_data = styles_data
         self.STYLE_NAMES = STYLE_NAMES
         self.style_json_file = ""
+
+        logger.info(
+                    f"Beta styles loaded with {len(self.STYLE_NAMES)} styles"
+                )
 
     def set_ip_adapter_multimode_scale(self, ip_scales, ip_adapter_mode):
         mode_scales = []
@@ -1750,13 +1760,13 @@ class Model_Diffusers:
             lora_scale_E,
         ]
 
-        if sampler in ["TCD", "LCM"] and self.flash_config is None:
+        if sampler in FLASH_AUTO_LOAD_SAMPLER and self.flash_config is None:
             # First load
             flash_task_lora = FLASH_LORA[self.class_name][sampler]
             self.process_lora(flash_task_lora, 1.0)
             self.flash_config = flash_task_lora
             logger.info(sampler)
-        elif sampler not in ["TCD", "LCM"] and self.flash_config is not None:
+        elif sampler not in FLASH_AUTO_LOAD_SAMPLER and self.flash_config is not None:
             # Unload
             self.process_lora(self.flash_config, 1.0, unload=True)
             self.flash_config = None
