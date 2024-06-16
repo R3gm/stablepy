@@ -2,6 +2,7 @@ from ..logging.logging_setup import logger
 from typing import Tuple
 import json
 
+
 def get_json_content(file_path):
     try:
         with open(file_path, 'rt', encoding="utf-8") as file:
@@ -10,8 +11,8 @@ def get_json_content(file_path):
     except Exception as e:
         logger.error(f"A Problem occurred: {str(e)}")
 
-# Demo styles
-style_list = [
+
+BASE_STYLE_LIST = [
     {
         "name": "(No style)",
         "prompt": "{prompt}",
@@ -64,7 +65,7 @@ style_list = [
     },
 ]
 
-styles_data = {k["name"]: (k["prompt"], k["negative_prompt"]) for k in style_list}
+styles_data = {k["name"]: (k["prompt"], k["negative_prompt"]) for k in BASE_STYLE_LIST}
 STYLE_NAMES = list(styles_data.keys())
 DEFAULT_STYLE_NAME = "(No style)"
 

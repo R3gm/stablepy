@@ -6,7 +6,7 @@ The goal of this project is to make Stable Diffusion more accessible, simple and
 
 **Installation:**
 ```
-pip install stablepy==0.3.0
+pip install stablepy==0.4.0
 ```
 
 **Usage:**
@@ -15,7 +15,7 @@ To use the project, simply create a new instance of the `Model_Diffusers` class.
 
 Once you have created a new instance of the `Model_Diffusers` class, you can call the `model()` method to generate an image. The `model()` method takes several arguments, including the prompt, the number of steps, the guidance scale, the sampler, the image width, the image height, the path to the upscaler model (if using), etc.
 
-**Demo:**
+**Interactive tutorial:**
 
 See [stablepy_demo.ipynb](https://github.com/R3gm/stablepy/blob/main/stablepy_demo.ipynb)
 
@@ -26,7 +26,7 @@ See [stablepy_demo.ipynb](https://github.com/R3gm/stablepy/blob/main/stablepy_de
 
 **Examples:**
 
-The following code examples show how to use the project to generate a text-to-image and an ControlNet diffusion:
+The following code examples show how to use the project to generate a text-to-image and a ControlNet diffusion:
 
 ```python
 from stablepy import Model_Diffusers
@@ -65,6 +65,7 @@ images, path_images = model(
     prompt='highly detailed portrait of an underwater city, with towering spires and domes rising up from the ocean floor',
     num_steps = 30,
     image_resolution = 768,
+    preprocessor_name = "Canny",
     guidance_scale = 7.5,
     seed = 567,
     FreeU = True,
@@ -77,10 +78,19 @@ images, path_images = model(
 
 images[1]
 ```
+**📖 News:**
 
-**Documentation:**
+🔥 Version 0.4.0: New Update Details
 
-In process
+- IP Adapter with the variants FaceID and Instant-Style
+- New samplers
+- Appropriate support for SDXL safetensors models
+- ControlNet for SDXL: OpenPose, Canny, Scribble, SoftEdge, Depth, LineArt, and SDXL_Tile_Realistic
+- New variant prompt weight with emphasis
+- ControlNet pattern for SD1.5 and SDXL
+- ControlNet Canny now needs the `preprocessor_name="Canny"`
+- Similarly, ControlNet MLSD requires the `preprocessor_name="MLSD"`
+- Task names like "sdxl_canny" have been changed to "sdxl_canny_t2i" to refer to the T2I adapter that uses them.
 
 **Contributing:**
 
