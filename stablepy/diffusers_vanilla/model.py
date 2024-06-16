@@ -1959,6 +1959,8 @@ class Model_Diffusers:
             if self.task_name == "inpaint":
                 pipe_params_config["strength"] = strength
                 pipe_params_config["mask_image"] = control_mask
+                pipe_params_config["height"] = control_image.size[1]
+                pipe_params_config["width"] = control_image.size[0]
             elif self.task_name not in ["txt2img", "inpaint", "img2img"]:
                 if "t2i" not in self.task_name:
                     pipe_params_config[

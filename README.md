@@ -6,7 +6,7 @@ The goal of this project is to make Stable Diffusion more accessible, simple and
 
 **Installation:**
 ```
-pip install stablepy==0.4.0
+pip install stablepy==0.4.1
 ```
 
 **Usage:**
