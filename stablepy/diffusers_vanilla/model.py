@@ -84,6 +84,7 @@ import diffusers
 import copy
 import warnings
 import traceback
+import threading
 logging.getLogger("diffusers").setLevel(logging.ERROR)
 logging.getLogger("transformers").setLevel(logging.ERROR)
 diffusers.utils.logging.set_verbosity(40)
@@ -277,7 +278,75 @@ def convert_image_to_numpy_array(image, gui_active=False):
     return array_rgb
 
 
-class Model_Diffusers:
+def latents_to_rgb(latents):
+    weights = (
+        (60, -60, 25, -70),
+        (60, -5, 15, -50),
+        (60, 10, -5, -35)
+    )
+
+    weights_tensor = torch.tensor(weights, dtype=latents.dtype, device=latents.device).T
+    biases_tensor = torch.tensor((150, 140, 130), dtype=latents.dtype, device=latents.device)
+    rgb_tensor = torch.einsum("...lxy,lr -> ...rxy", latents, weights_tensor) + biases_tensor.view(-1, 1, 1)
+    image_array = rgb_tensor.clamp(0, 255)[0].byte().cpu().numpy()
+    image_array = image_array.transpose(1, 2, 0)  # Change the order of dimensions
+
+    pil_image = Image.fromarray(image_array)
+
+    resized_image = pil_image.resize((pil_image.size[0] * 2, pil_image.size[1] * 2), Image.LANCZOS)  # Resize 128x128 * ...
+    return resized_image
+
+
+class PreviewGenerator:
+    def __init__(self, *args, **kwargs):
+        self.image_step = None
+        self.intermediate_image_concurrency(5)
+
+    def intermediate_image_concurrency(self, concurrency):
+        self.concurrency = concurrency
+
+    def decode_tensors(self, pipe, step, timestep, callback_kwargs):
+        latents = callback_kwargs["latents"]
+        if step % self.concurrency == 0:  # every how many steps
+            logger.debug(step)
+            self.image_step = latents_to_rgb(latents)
+            self.new_image_event.set()  # Signal that a new image is available
+        return callback_kwargs
+
+    def show_images(self):
+        while not self.generation_finished.is_set() or self.new_image_event.is_set():
+            self.new_image_event.wait()  # Wait for a new image
+            self.new_image_event.clear()  # Clear the event flag
+
+            if self.image_step:
+                yield self.image_step  # Yield the new image
+
+    def generate_images(self, pipe_params_config):
+
+        self.final_image = None
+        self.image_step = None
+        self.final_image = self.pipe(
+            **pipe_params_config,
+            callback_on_step_end=self.decode_tensors,
+            callback_on_step_end_tensor_inputs=["latents"],
+        ).images
+
+        self.image_step = self.final_image[0]
+        logger.debug("finish")
+        self.new_image_event.set()  # Result image
+        self.generation_finished.set()  # Signal that generation is finished
+
+    def stream_preview(self, pipe_params_config):
+
+        self.new_image_event = threading.Event()
+        self.generation_finished = threading.Event()
+
+        self.generation_finished.clear()
+        threading.Thread(target=self.generate_images, args=(pipe_params_config,)).start()
+        return self.show_images()
+
+
+class Model_Diffusers(PreviewGenerator):
     def __init__(
         self,
         base_model_id: str = "runwayml/stable-diffusion-v1-5",
@@ -286,6 +355,7 @@ class Model_Diffusers:
         type_model_precision=torch.float16,
         retain_task_model_in_cache=True,
     ):
+        super().__init__()
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         self.base_model_id = ""
         self.task_name = ""
@@ -1408,7 +1478,7 @@ class Model_Diffusers:
         retain_compel_previous_load: bool = False,
         retain_detailfix_model_previous_load: bool = False,
         retain_hires_model_previous_load: bool = False,
-        image_previews: bool = False,
+        image_previews: bool = True,
         xformers_memory_efficient_attention: bool = False,
         gui_active: bool = False,
     ):
@@ -2347,11 +2417,14 @@ class Model_Diffusers:
             seeds = seeds if self.task_name != "img2img" else [seeds[0]] * num_images
 
             try:
-                images = self.pipe(
-                    **pipe_params_config,
-                ).images
-                if self.task_name not in ["txt2img", "inpaint", "img2img"]:
-                    images = [control_image] + images
+                logger.debug("Start stream")
+                self.intermediate_image_concurrency(5)
+                stream = self.stream_preview(pipe_params_config)
+                for img in stream:
+                    if not isinstance(img, list):
+                        img = [img]
+                    yield img, seeds, None
+                images = self.final_image
             except Exception as e:
                 e = str(e)
                 if "Tensor with 2 elements cannot be converted to Scalar" in e:
@@ -2359,17 +2432,23 @@ class Model_Diffusers:
                     logger.error("Error in sampler; trying with DDIM sampler")
                     self.pipe.scheduler = self.default_scheduler
                     self.pipe.scheduler = DDIMScheduler.from_config(self.pipe.scheduler.config)
-                    images = self.pipe(
-                        **pipe_params_config,
-                    ).images
-                    if self.task_name not in ["txt2img", "inpaint", "img2img"]:
-                        images = [control_image] + images
+
+                    self.intermediate_image_concurrency(5)
+                    stream = self.stream_preview(pipe_params_config)
+                    for img in stream:
+                        if not isinstance(img, list):
+                            img = [img]
+                        yield img, seeds, None
+                    images = self.final_image
                 elif "The size of tensor a (0) must match the size of tensor b (3) at non-singleton" in e:
                     raise ValueError(
                         "steps / strength too low for the model to produce a satisfactory response"
                     )
                 else:
                     raise ValueError(e)
+
+            if self.task_name not in ["txt2img", "inpaint", "img2img"]:
+                images = [control_image] + images
 
             torch.cuda.empty_cache()
             gc.collect()
@@ -2479,4 +2558,4 @@ class Model_Diffusers:
         torch.cuda.empty_cache()
         gc.collect()
 
-        return images, image_list
+        yield images, seeds, image_list
