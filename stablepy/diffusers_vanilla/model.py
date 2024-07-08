@@ -66,7 +66,7 @@ from .inpainting_canvas import draw, make_inpaint_condition
 from .adetailer import ad_model_process
 from ..logging.logging_setup import logger
 from .extra_model_loaders import custom_task_model_loader
-from .high_resolution import process_images_high_resolution
+from .high_resolution import process_images_high_resolution, LATENT_UPSCALERS
 from .style_prompt_config import (
     styles_data,
     STYLE_NAMES,
@@ -1662,6 +1662,8 @@ class Model_Diffusers:
             raise ValueError(
                 "You need to specify the <image> for this task."
             )
+        if hires_steps < 2 and upscaler_model_path in LATENT_UPSCALERS:
+            raise ValueError("Latent upscaler requires hires_steps. Use at least 2 steps.")
         if img_height % 8 != 0:
             img_height = img_height + (8 - img_height % 8)
             logger.warning(f"Height must be divisible by 8, changed to {str(img_height)}")
@@ -2059,7 +2061,7 @@ class Model_Diffusers:
                 "prompt": adetailer_A_params["prompt"],
                 "negative_prompt": adetailer_A_params["negative_prompt"],
                 "strength": adetailer_A_params["strength"],
-                "num_inference_steps": num_steps,
+                "num_inference_steps": int(num_steps * 1.5),
                 "guidance_scale": guidance_scale,
             }
 
@@ -2142,7 +2144,7 @@ class Model_Diffusers:
                 "prompt": adetailer_B_params["prompt"],
                 "negative_prompt": adetailer_B_params["negative_prompt"],
                 "strength": adetailer_B_params["strength"],
-                "num_inference_steps": num_steps,
+                "num_inference_steps": int(num_steps * 1.5),
                 "guidance_scale": guidance_scale,
             }
 
@@ -2296,6 +2298,13 @@ class Model_Diffusers:
             hires_pipe.to(self.device)
             torch.cuda.empty_cache()
             gc.collect()
+
+            if (
+                upscaler_model_path in LATENT_UPSCALERS
+                and ((not adetailer_A and not adetailer_B) or hires_before_adetailer)
+            ):
+                pipe_params_config["output_type"] = "latent"
+
         else:
             hires_params_config = {}
             hires_pipe = None
@@ -2350,8 +2359,7 @@ class Model_Diffusers:
                 images = self.pipe(
                     **pipe_params_config,
                 ).images
-                if self.task_name not in ["txt2img", "inpaint", "img2img"]:
-                    images = [control_image] + images
+
             except Exception as e:
                 e = str(e)
                 if "Tensor with 2 elements cannot be converted to Scalar" in e:
@@ -2362,14 +2370,20 @@ class Model_Diffusers:
                     images = self.pipe(
                         **pipe_params_config,
                     ).images
-                    if self.task_name not in ["txt2img", "inpaint", "img2img"]:
-                        images = [control_image] + images
+
                 elif "The size of tensor a (0) must match the size of tensor b (3) at non-singleton" in e:
                     raise ValueError(
                         "steps / strength too low for the model to produce a satisfactory response"
                     )
+
                 else:
                     raise ValueError(e)
+
+            if isinstance(images, torch.Tensor):
+                images = [tl.unsqueeze(0) for tl in torch.unbind(images, dim=0)]
+
+            if self.task_name not in ["txt2img", "inpaint", "img2img"]:
+                images = [control_image] + images
 
             torch.cuda.empty_cache()
             gc.collect()
