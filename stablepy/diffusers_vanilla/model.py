@@ -1690,7 +1690,7 @@ class Model_Diffusers:
                 self.class_name,
                 self.task_name,
                 self.model_id_task,
-                enable_pag=pag_scale,
+                enable_pag=bool(pag_scale),
             )
 
         self.pipe.set_progress_bar_config(leave=leave_progress_bar)
