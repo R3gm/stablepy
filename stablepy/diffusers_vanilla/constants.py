@@ -18,18 +18,68 @@ from diffusers import (
     EDMEulerScheduler,
     TCDScheduler,
 )
+from diffusers import (
+    StableDiffusionControlNetPipeline,
+    StableDiffusionControlNetInpaintPipeline,
+    StableDiffusionPipeline,
+    StableDiffusionXLInpaintPipeline,
+    StableDiffusionXLAdapterPipeline,
+    StableDiffusionXLPipeline,
+    StableDiffusionXLControlNetPipeline,
+    StableDiffusionPAGPipeline,
+    # StableDiffusionControlNetPAGInpaintPipeline,
+    StableDiffusionControlNetPAGPipeline,
+    # StableDiffusionControlNetImg2ImgPAGPipeline,
+    StableDiffusionXLPAGPipeline,
+    StableDiffusionXLPAGInpaintPipeline,
+    StableDiffusionXLControlNetPAGPipeline,
+    # StableDiffusionXLAdapterPAGPipeline,
+    # StableDiffusionXLControlNetImg2ImgPAGPipeline,
+)
+
+CLASS_DIFFUSERS_TASK = {
+    "StableDiffusionPipeline": {
+        "base": StableDiffusionPipeline,
+        "inpaint": StableDiffusionControlNetInpaintPipeline,
+        "controlnet": StableDiffusionControlNetPipeline,
+        # "controlnet_img2img": StableDiffusionControlNetImg2ImgPipeline,
+    },
+    "StableDiffusionXLPipeline": {
+        "base": StableDiffusionXLPipeline,
+        "inpaint": StableDiffusionXLInpaintPipeline,
+        "controlnet": StableDiffusionXLControlNetPipeline,
+        "adapter": StableDiffusionXLAdapterPipeline,
+        # "controlnet_img2img": StableDiffusionXLControlNetImg2ImgPipeline,
+    },
+}
+
+CLASS_PAG_DIFFUSERS_TASK = {
+    "StableDiffusionPipeline": {
+        "base": StableDiffusionPAGPipeline,
+        # "inpaint": StableDiffusionControlNetPAGInpaintPipeline,
+        "controlnet": StableDiffusionControlNetPAGPipeline,
+        # "controlnet_img2img": StableDiffusionControlNetImg2ImgPAGPipeline,
+    },
+    "StableDiffusionXLPipeline": {
+        "base": StableDiffusionXLPAGPipeline,
+        "inpaint": StableDiffusionXLPAGInpaintPipeline,
+        "controlnet": StableDiffusionXLControlNetPAGPipeline,
+        # "adapter": StableDiffusionXLAdapterPAGPipeline,
+        # "controlnet_img2img": StableDiffusionXLControlNetImg2ImgPAGPipeline,
+    },
+}
 
 CONTROLNET_MODEL_IDS = {
     "openpose": ["lllyasviel/control_v11p_sd15_openpose", "r3gm/controlnet-openpose-sdxl-1.0-fp16"],
     "canny": ["lllyasviel/control_v11p_sd15_canny", "r3gm/controlnet-canny-scribble-integrated-sdxl-v2-fp16"],
-    "mlsd": "lllyasviel/control_v11p_sd15_mlsd",
+    "mlsd": ["lllyasviel/control_v11p_sd15_mlsd", "r3gm/controlnet-union-sdxl-1.0-fp16"],
     "scribble": ["lllyasviel/control_v11p_sd15_scribble", "r3gm/controlnet-canny-scribble-integrated-sdxl-v2-fp16"],
-    "softedge": ["lllyasviel/control_v11p_sd15_softedge", "r3gm/controlnet-canny-scribble-integrated-sdxl-v2-fp16"],
-    "segmentation": "lllyasviel/control_v11p_sd15_seg",
-    "depth": ["lllyasviel/control_v11f1p_sd15_depth", "diffusers/controlnet-depth-sdxl-1.0-mid"],
-    "normalbae": "lllyasviel/control_v11p_sd15_normalbae",
-    "lineart": ["lllyasviel/control_v11p_sd15_lineart", "r3gm/controlnet-lineart-anime-sdxl-fp16"],
-    "lineart_anime": "lllyasviel/control_v11p_sd15s2_lineart_anime",
+    "softedge": ["lllyasviel/control_v11p_sd15_softedge", "r3gm/controlnet-union-sdxl-1.0-fp16"],
+    "segmentation": ["lllyasviel/control_v11p_sd15_seg", "r3gm/controlnet-union-sdxl-1.0-fp16"],
+    "depth": ["lllyasviel/control_v11f1p_sd15_depth", "r3gm/controlnet-union-sdxl-1.0-fp16"],
+    "normalbae": ["lllyasviel/control_v11p_sd15_normalbae", "r3gm/controlnet-union-sdxl-1.0-fp16"],
+    "lineart": ["lllyasviel/control_v11p_sd15_lineart", "r3gm/controlnet-union-sdxl-1.0-fp16"],
+    "lineart_anime": ["lllyasviel/control_v11p_sd15s2_lineart_anime", "r3gm/controlnet-lineart-anime-sdxl-fp16"],
     "shuffle": "lllyasviel/control_v11e_sd15_shuffle",
     "ip2p": "lllyasviel/control_v11e_sd15_ip2p",
     "inpaint": "lllyasviel/control_v11p_sd15_inpaint",
@@ -41,7 +91,8 @@ CONTROLNET_MODEL_IDS = {
     "sdxl_openpose_t2i": "TencentARC/t2i-adapter-openpose-sdxl-1.0",
     "img2img": "Nothinghere",
     "pattern": ["monster-labs/control_v1p_sd15_qrcode_monster", "r3gm/control_v1p_sdxl_qrcode_monster_fp16"],
-    "sdxl_tile_realistic": "Yakonrus/SDXL_Controlnet_Tile_Realistic_v2",
+    "tile": ["lllyasviel/control_v11f1e_sd15_tile", "r3gm/controlnet-tile-sdxl-1.0-fp16"],  # "sdxl_tile_realistic": "Yakonrus/SDXL_Controlnet_Tile_Realistic_v2",
+    "recolor": ["latentcat/control_v1p_sd15_brightness", "r3gm/controlnet-recolor-sdxl-fp16"],
     # "sdxl_depth-zoe_t2i": "TencentARC/t2i-adapter-depth-zoe-sdxl-1.0",
     # "sdxl_recolor_t2i": "TencentARC/t2i-adapter-recolor-sdxl-1.0",
 }
