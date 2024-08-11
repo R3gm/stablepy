@@ -56,7 +56,7 @@ CLASS_DIFFUSERS_TASK = {
 CLASS_PAG_DIFFUSERS_TASK = {
     "StableDiffusionPipeline": {
         "base": StableDiffusionPAGPipeline,
-        # "inpaint": StableDiffusionControlNetPAGInpaintPipeline,
+        "inpaint": StableDiffusionControlNetInpaintPipeline,
         "controlnet": StableDiffusionControlNetPAGPipeline,
         # "controlnet_img2img": StableDiffusionControlNetImg2ImgPAGPipeline,
     },
@@ -204,9 +204,9 @@ IP_ADAPTER_MODELS = {
         "base_light_v2": ["h94/IP-Adapter", "models", "ip-adapter_sd15_light_v11.bin", "H"],
         "faceid_plus": ["h94/IP-Adapter-FaceID", "", "ip-adapter-faceid-plus_sd15.bin", "H"],
         "faceid_plus_v2": ["h94/IP-Adapter-FaceID", "", "ip-adapter-faceid-plusv2_sd15.bin", "H"],
-        "faceid": ["h94/IP-Adapter-FaceID", "", "ip-adapter-faceid_sd15.bin", None],
-        "faceid_portrait_v2": ["h94/IP-Adapter-FaceID", "", "ip-adapter-faceid-portrait-v11_sd15.bin", None],  # last portrait
-        "faceid_portrait": ["h94/IP-Adapter-FaceID", "", "ip-adapter-faceid-portrait_sd15.bin", None],
+        "faceid": ["h94/IP-Adapter-FaceID", "", "ip-adapter-faceid_sd15.bin", "H"],  # None
+        "faceid_portrait_v2": ["h94/IP-Adapter-FaceID", "", "ip-adapter-faceid-portrait-v11_sd15.bin", "H"],  # None
+        "faceid_portrait": ["h94/IP-Adapter-FaceID", "", "ip-adapter-faceid-portrait_sd15.bin", "H"],  # None
         "composition_plus": ["ostris/ip-composition-adapter", "", "ip_plus_composition_sd15.safetensors", "H"]
     },
     "StableDiffusionXLPipeline": {
@@ -216,9 +216,9 @@ IP_ADAPTER_MODELS = {
         "base_vit_G": ["h94/IP-Adapter", "sdxl_models", "ip-adapter_sdxl.safetensors", "G"],
         "base": ["h94/IP-Adapter", "sdxl_models", "ip-adapter_sdxl_vit-h.safetensors", "H"],
         "faceid_plus_v2": ["h94/IP-Adapter-FaceID", "", "ip-adapter-faceid-plusv2_sdxl.bin", "H"],
-        "faceid": ["h94/IP-Adapter-FaceID", "", "ip-adapter-faceid_sdxl.bin", None],
-        "faceid_portrait": ["h94/IP-Adapter-FaceID", "", "ip-adapter-faceid-portrait_sdxl.bin", None],
-        "faceid_portrait_v2": ["h94/IP-Adapter-FaceID", "", "ip-adapter-faceid-portrait_sdxl_unnorm.bin", None],
+        "faceid": ["h94/IP-Adapter-FaceID", "", "ip-adapter-faceid_sdxl.bin", "H"],  # None
+        "faceid_portrait": ["h94/IP-Adapter-FaceID", "", "ip-adapter-faceid-portrait_sdxl.bin", "H"],  # None
+        "faceid_portrait_v2": ["h94/IP-Adapter-FaceID", "", "ip-adapter-faceid-portrait_sdxl_unnorm.bin", "H"],  # None
         "composition_plus": ["ostris/ip-composition-adapter", "", "ip_plus_composition_sdxl.safetensors", "H"]
     }
 }  # no suffix lora

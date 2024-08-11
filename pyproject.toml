@@ -28,6 +28,7 @@ peft = "^0.11.1"
 torchsde = "^0.2.6"
 onnxruntime = "^1.18.0"
 insightface = "^0.7.3"
+opencv-contrib-python = "^4.8.0.76"
 
 [[tool.poetry.source]]
 name = "pytorch-gpu-src"

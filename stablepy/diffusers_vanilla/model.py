@@ -1235,45 +1235,58 @@ class Model_Diffusers:
             image_embeds = []
             for i, (image, ip_weight) in enumerate(zip(ip_images, self.ip_adapter_config)):
 
-                if "plus" in ip_weight:
+                if not isinstance(image, list):
+                    image = [image]
 
+                image_embeds_single = []
+                image_projection = []
+                for j, single_image in enumerate(image):
+
+                    single_image = cv2.cvtColor(np.asarray(single_image), cv2.COLOR_BGR2RGB)
+                    faces = app.get(single_image)
+
+                    if len(faces) == 0:
+                        num_batch_image = "" if len(image) == 1 else f", subimage {j+1}"
+                        raise ValueError(f"No face detected in image number {i+1}{num_batch_image}")
+
+                    if "plus" in ip_weight:
+                        face_crop_align = face_align.norm_crop(single_image, landmark=faces[0].kps, image_size=224)
+                        image_projection.append(face_crop_align)
+
+                    single_image = torch.from_numpy(faces[0].normed_embedding)
                     ref_images_embeds = []
-                    ip_adapter_images = []
-
-                    image = cv2.cvtColor(np.asarray(image), cv2.COLOR_BGR2RGB)
-                    faces = app.get(image)
-                    ip_adapter_images.append(face_align.norm_crop(image, landmark=faces[0].kps, image_size=224))  # if not detected face error
-                    image = torch.from_numpy(faces[0].normed_embedding)
-                    ref_images_embeds.append(image.unsqueeze(0))
+                    ref_images_embeds.append(single_image.unsqueeze(0))
                     ref_images_embeds = torch.stack(ref_images_embeds, dim=0).unsqueeze(0)
-                    neg_ref_images_embeds = torch.zeros_like(ref_images_embeds)
-                    id_embed = torch.cat([neg_ref_images_embeds, ref_images_embeds]).to(dtype=self.type_model_precision, device=self.device)
-                    image_embeds.append(id_embed)
 
+                    neg_ref_images_embeds = torch.zeros_like(ref_images_embeds)
+
+                    id_embed = torch.cat([neg_ref_images_embeds, ref_images_embeds]).to(dtype=self.type_model_precision, device=self.device)
+                    image_embeds_single.append(id_embed)
+
+                image_embeds.append(torch.cat(image_embeds_single, dim=1))
+
+                if image_projection:
                     clip_embeds = self.pipe.prepare_ip_adapter_image_embeds(
-                        [ip_adapter_images] * len(ip_images),
+                        [image_projection] * len(ip_images),
                         None,
                         torch.device(self.device),
                         num_images,
                         do_classifier_free_guidance
                     )[0]
 
+                    gc.collect()
+                    torch.cuda.empty_cache()
+
                     self.pipe.unet.encoder_hid_proj.image_projection_layers[i].clip_embeds = clip_embeds.to(dtype=self.type_model_precision)
                     if "plusv2" in ip_weight:
                         self.pipe.unet.encoder_hid_proj.image_projection_layers[i].shortcut = True
                     else:
                         self.pipe.unet.encoder_hid_proj.image_projection_layers[i].shortcut = False
-                else:
-                    ref_images_embeds = []
 
-                    image = cv2.cvtColor(np.asarray(image), cv2.COLOR_BGR2RGB)
-                    faces = app.get(image)
-                    image = torch.from_numpy(faces[0].normed_embedding)
-                    ref_images_embeds.append(image.unsqueeze(0))
-                    ref_images_embeds = torch.stack(ref_images_embeds, dim=0).unsqueeze(0)
-                    neg_ref_images_embeds = torch.zeros_like(ref_images_embeds)
-                    id_embed = torch.cat([neg_ref_images_embeds, ref_images_embeds]).to(dtype=self.type_model_precision, device=self.device)
-                    image_embeds.append(id_embed)
+                gc.collect()
+                torch.cuda.empty_cache()
+
+            # average_embedding = torch.mean(torch.stack(faceid_all_embeds, dim=0), dim=0)
 
         processed_masks = []
         if ip_masks and ip_masks[0] is not None:  # fix this auto generate mask if any have it...
@@ -1922,8 +1935,8 @@ class Model_Diffusers:
                 "num_images_per_prompt": num_images,
         }
 
-        if pag_scale_is_true:
-            pipe_params_config["pag_scale"] = pag_scale
+        if hasattr(self.pipe, "set_pag_applied_layers"):
+            pipe_params_config["pag_scale"] = float(pag_scale)
 
         if self.task_name == "txt2img":
             pipe_params_config["height"] = img_height
