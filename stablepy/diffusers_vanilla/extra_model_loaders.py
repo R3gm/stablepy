@@ -91,9 +91,9 @@ def custom_task_model_loader(
                     image_encoder=pipe.image_encoder,
                 )
 
-            hires_pipe = AutoPipelineForImage2Image.from_pipe(hires_pipe)
+            hires_pipe = AutoPipelineForImage2Image.from_pipe(hires_pipe, enable_pag=False)
         else:
-            hires_pipe = AutoPipelineForImage2Image.from_pipe(pipe)
+            hires_pipe = AutoPipelineForImage2Image.from_pipe(pipe, enable_pag=False)
 
         if hasattr(hires_pipe, "text_encoder_2"):
             hires_pipe.enable_vae_slicing()
