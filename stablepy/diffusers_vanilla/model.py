@@ -382,6 +382,16 @@ class Model_Diffusers:
         if task_name == "inpaint":
             tk = "inpaint"
 
+        if (
+            tk == "adapter" or
+            (tk in ["inpaint", "img2img"] and "XL" not in class_name)
+        ):
+            logger.warning(
+                f"PAG is not enabled for {tk} {class_name}"
+            )
+            enable_pag = False
+
+        # Load Pipeline
         if enable_pag:
             model_components["pag_applied_layers"] = "mid"
             self.pipe = CLASS_PAG_DIFFUSERS_TASK[class_name][tk](**model_components).to(self.device)
@@ -389,9 +399,6 @@ class Model_Diffusers:
             self.pipe = CLASS_DIFFUSERS_TASK[class_name][tk](**model_components).to(self.device)
 
         if task_name == "img2img":
-            if "XL" not in self.pipe.__class__.__name__:
-                enable_pag = False
-
             self.pipe = AutoPipelineForImage2Image.from_pipe(self.pipe, enable_pag=enable_pag)
 
         # Create new base values
