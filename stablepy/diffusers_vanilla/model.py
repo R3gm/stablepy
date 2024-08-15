@@ -389,6 +389,9 @@ class Model_Diffusers:
             self.pipe = CLASS_DIFFUSERS_TASK[class_name][tk](**model_components).to(self.device)
 
         if task_name == "img2img":
+            if "XL" not in self.pipe.__class__.__name__:
+                enable_pag = False
+
             self.pipe = AutoPipelineForImage2Image.from_pipe(self.pipe, enable_pag=enable_pag)
 
         # Create new base values
