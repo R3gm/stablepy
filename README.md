@@ -6,7 +6,7 @@ The goal of this project is to make Stable Diffusion more accessible, simple and
 
 **Installation:**
 ```
-pip install stablepy==0.4.1
+pip install stablepy==0.5.0
 ```
 
 **Usage:**
@@ -79,6 +79,16 @@ images, path_images = model(
 images[1]
 ```
 **📖 News:**
+
+🔥 Version 0.5.0: New Update Details
+
+- Fix LoRA SDXL compatibility.
+- Latent upscaler and variants.
+- Perturbed Attention Guidance (PAG) enhances image generation quality without the need for training.
+- Multiple images for one FaceID adapter.
+- ControlNet for SDXL: MLSD, Segmentation, Normalbae.
+- ControlNet "lineart_anime" task accessible and able to load a model different from the "lineart" task.
+- ControlNet Tile and Recolor for SD1.5 and SDXL ("tile" replaces the previous task called "sdxl_tile_realistic").
 
 🔥 Version 0.4.0: New Update Details
 

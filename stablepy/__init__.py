@@ -4,6 +4,7 @@ from .diffusers_vanilla.adetailer import ad_model_process
 from .diffusers_vanilla import utils
 from .upscalers.esrgan import UpscalerESRGAN, UpscalerLanczos, UpscalerNearest
 from .logging.logging_setup import logger
+from .diffusers_vanilla.high_resolution import LATENT_UPSCALERS
 from .diffusers_vanilla.constants import (
     CONTROLNET_MODEL_IDS,
     VALID_TASKS,

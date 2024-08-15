@@ -1511,8 +1511,18 @@ class Model_Diffusers:
                 If a style that is in STYLE_NAMES is specified, it will be added to the original prompt and negative prompt.
             style_json_file (str, optional):
                 JSON with styles to be applied and used in style_prompt.
+            pag_scale (float, optional):
+                Perturbed Attention Guidance (PAG) enhances image generation quality without the need for training.
+                If it is used, it is recommended to use values close to 3.0 for good results.
             upscaler_model_path (str, optional):
-                Placeholder for upscaler model path.
+                This is the path of the ESRGAN model that will be used for the upscale; on the other hand,
+                you can also use simply 'Lanczos', 'Nearest,' or 'Latent,' the latter of which has variants
+                that can be consulted in the following code:
+
+                ```python
+                from stablepy import LATENT_UPSCALERS
+                print(LATENT_UPSCALERS)
+                ```
             upscaler_increases_size (float, optional, defaults to 1.5):
                 Placeholder for upscaler increases size parameter.
             esrgan_tile (int, optional, defaults to 100):
