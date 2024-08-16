@@ -382,14 +382,15 @@ class Model_Diffusers:
         if task_name == "inpaint":
             tk = "inpaint"
 
-        if (
-            tk == "adapter" or
-            (tk in ["inpaint", "img2img"] and "XL" not in class_name)
-        ):
-            logger.warning(
-                f"PAG is not enabled for {tk} {class_name}"
-            )
-            enable_pag = False
+        if enable_pag:
+            if (
+                tk == "adapter" or
+                (task_name in ["inpaint", "img2img"] and "XL" not in class_name)
+            ):
+                logger.warning(
+                    f"PAG is not enabled for {class_name} with {task_name}."
+                )
+                enable_pag = False
 
         # Load Pipeline
         if enable_pag:
