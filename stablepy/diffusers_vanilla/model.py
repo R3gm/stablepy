@@ -308,8 +308,13 @@ class Model_Diffusers:
         vae_model=None,
         type_model_precision=torch.float16,
         retain_task_model_in_cache=True,
+        device=None,
     ):
-        self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        self.device = (
+            torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+            if device is None
+            else torch.device(device)
+        )
         self.base_model_id = ""
         self.task_name = ""
         self.vae_model = None
