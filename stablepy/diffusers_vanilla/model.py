@@ -303,7 +303,7 @@ def convert_image_to_numpy_array(image, gui_active=False):
 class Model_Diffusers:
     def __init__(
         self,
-        base_model_id: str = "runwayml/stable-diffusion-v1-5",
+        base_model_id: str = "Lykon/dreamshaper-8",
         task_name: str = "txt2img",
         vae_model=None,
         type_model_precision=torch.float16,

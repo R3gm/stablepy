@@ -960,13 +960,13 @@ files = [
 
 [[package]]
 name = "diffusers"
-version = "0.30.0"
+version = "0.30.2"
 description = "State-of-the-art diffusion in PyTorch and JAX."
 optional = false
 python-versions = ">=3.8.0"
 files = [
-    {file = "diffusers-0.30.0-py3-none-any.whl", hash = "sha256:114194eb61498aff06243ade750fca6fbc179ca9df68923bb175b70030bed495"},
-    {file = "diffusers-0.30.0.tar.gz", hash = "sha256:57acd59cab035f62bde1108fc4c93e76e6988a5b3f8ae9f06051146c1cecb2aa"},
+    {file = "diffusers-0.30.2-py3-none-any.whl", hash = "sha256:739826043147c2b59560944591dfdea5d24cd4fb15e751abbe20679a289bece8"},
+    {file = "diffusers-0.30.2.tar.gz", hash = "sha256:641875f78f36bdfa4b9af752b124d1fd6d431eadd5547fe0a3f354ae0af2636c"},
 ]
 
 [package.dependencies]
@@ -4961,4 +4961,4 @@ testing = ["big-O", "jaraco.functools", "jaraco.itertools", "more-itertools", "p
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.10"
-content-hash = "45bdaab8a6164cc1c38fd55e46147c0ee8d75b943576d7027a2d34082778448f"
+content-hash = "229667b0f529f65314c6f98a9b8cadee9bb40d03b2545f5ddec9b839eb803e94"
