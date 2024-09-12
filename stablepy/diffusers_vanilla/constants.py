@@ -140,16 +140,17 @@ ALL_PROMPT_WEIGHT_OPTIONS = list(PROMPT_WEIGHT_OPTIONS.keys())
 OLD_PROMPT_WEIGHT_OPTIONS = ALL_PROMPT_WEIGHT_OPTIONS[0:2]
 
 SCHEDULER_CONFIG_MAP = {
-    "DPM++ 2M": (DPMSolverMultistepScheduler, {"use_karras_sigmas": False}),
-    "DPM++ 2M Karras": (DPMSolverMultistepScheduler, {"use_karras_sigmas": True}),
+    "DPM++ 2M": (DPMSolverMultistepScheduler, {"algorithm_type": "dpmsolver++", "use_karras_sigmas": False}),
+    "DPM++ 2M Karras": (DPMSolverMultistepScheduler, {"algorithm_type": "dpmsolver++", "use_karras_sigmas": True}),
     "DPM++ 2M SDE": (DPMSolverMultistepScheduler, {"use_karras_sigmas": False, "algorithm_type": "sde-dpmsolver++"}),
     "DPM++ 2M SDE Karras": (DPMSolverMultistepScheduler, {"use_karras_sigmas": True, "algorithm_type": "sde-dpmsolver++"}),
-    "DPM++ 2S": (DPMSolverSinglestepScheduler, {"use_karras_sigmas": False}),
-    "DPM++ 2S Karras": (DPMSolverSinglestepScheduler, {"use_karras_sigmas": True}),
-    "DPM++ 1S": (DPMSolverMultistepScheduler, {"solver_order": 1}),
-    "DPM++ 1S Karras": (DPMSolverMultistepScheduler, {"solver_order": 1, "use_karras_sigmas": True}),
-    "DPM++ 3M": (DPMSolverMultistepScheduler, {"solver_order": 3}),
-    "DPM++ 3M Karras": (DPMSolverMultistepScheduler, {"solver_order": 3, "use_karras_sigmas": True}),
+    "DPM++ 2S": (DPMSolverSinglestepScheduler, {"algorithm_type": "dpmsolver++", "use_karras_sigmas": False}),
+    "DPM++ 2S Karras": (DPMSolverSinglestepScheduler, {"algorithm_type": "dpmsolver++", "use_karras_sigmas": True}),
+    "DPM++ 1S": (DPMSolverMultistepScheduler, {"algorithm_type": "dpmsolver++", "solver_order": 1}),
+    "DPM++ 1S Karras": (DPMSolverMultistepScheduler, {"algorithm_type": "dpmsolver++", "solver_order": 1, "use_karras_sigmas": True}),
+    "DPM++ 3M": (DPMSolverMultistepScheduler, {"algorithm_type": "dpmsolver++", "solver_order": 3}),
+    "DPM++ 3M Karras": (DPMSolverMultistepScheduler, {"algorithm_type": "dpmsolver++", "solver_order": 3, "use_karras_sigmas": True}),
+    "DPM 3M": (DPMSolverMultistepScheduler, {"algorithm_type": "dpmsolver", "final_sigmas_type": "sigma_min", "solver_order": 3}),
     "DPM++ SDE": (DPMSolverSDEScheduler, {"use_karras_sigmas": False}),
     "DPM++ SDE Karras": (DPMSolverSDEScheduler, {"use_karras_sigmas": True}),
     "DPM2": (KDPM2DiscreteScheduler, {}),
@@ -176,8 +177,8 @@ SCHEDULER_CONFIG_MAP = {
     "DPM++ 2M EDM Karras": (EDMDPMSolverMultistepScheduler, {"use_karras_sigmas": True, "solver_order": 2, "solver_type": "midpoint", "final_sigmas_type": "zero", "algorithm_type": "dpmsolver++"}),
     "DDPM": (DDPMScheduler, {}),
 
-    "DPM++ 2M Lu": (DPMSolverMultistepScheduler, {"use_lu_lambdas": True}),
-    "DPM++ 2M Ef": (DPMSolverMultistepScheduler, {"euler_at_final": True}),
+    "DPM++ 2M Lu": (DPMSolverMultistepScheduler, {"algorithm_type": "dpmsolver++", "use_lu_lambdas": True}),
+    "DPM++ 2M Ef": (DPMSolverMultistepScheduler, {"algorithm_type": "dpmsolver++", "euler_at_final": True}),
     "DPM++ 2M SDE Lu": (DPMSolverMultistepScheduler, {"use_lu_lambdas": True, "algorithm_type": "sde-dpmsolver++"}),
     "DPM++ 2M SDE Ef": (DPMSolverMultistepScheduler, {"algorithm_type": "sde-dpmsolver++", "euler_at_final": True}),
 
