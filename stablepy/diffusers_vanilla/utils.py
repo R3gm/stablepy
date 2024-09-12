@@ -2,7 +2,7 @@ import os
 from PIL import Image
 from PIL.PngImagePlugin import PngInfo
 from ..logging.logging_setup import logger
-import torch
+
 
 def save_pil_image_with_metadata(image, folder_path, metadata_list):
     if not os.path.exists(folder_path):
@@ -29,7 +29,7 @@ def save_pil_image_with_metadata(image, folder_path, metadata_list):
         # metadata.add_text("Seed", str(metadata_list[7]))
 
         image.save(image_path, pnginfo=metadata)
-    except:
+    except Exception:
         logger.info("Saving image without metadata")
         image.save(image_path)
 
@@ -61,7 +61,8 @@ def checkpoint_model_type(checkpoint_path):
     elif key_name_sd_xl_refiner in checkpoint:
         # only refiner xl has embedder and one text embedders
         model_type = "refiner"
-      
+
     del checkpoint
 
     return model_type
+    

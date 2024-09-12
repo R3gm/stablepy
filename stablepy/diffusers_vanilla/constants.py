@@ -18,18 +18,68 @@ from diffusers import (
     EDMEulerScheduler,
     TCDScheduler,
 )
+from diffusers import (
+    StableDiffusionControlNetPipeline,
+    StableDiffusionControlNetInpaintPipeline,
+    StableDiffusionPipeline,
+    StableDiffusionXLInpaintPipeline,
+    StableDiffusionXLAdapterPipeline,
+    StableDiffusionXLPipeline,
+    StableDiffusionXLControlNetPipeline,
+    StableDiffusionPAGPipeline,
+    # StableDiffusionControlNetPAGInpaintPipeline,
+    StableDiffusionControlNetPAGPipeline,
+    # StableDiffusionControlNetImg2ImgPAGPipeline,
+    StableDiffusionXLPAGPipeline,
+    StableDiffusionXLPAGInpaintPipeline,
+    StableDiffusionXLControlNetPAGPipeline,
+    # StableDiffusionXLAdapterPAGPipeline,
+    # StableDiffusionXLControlNetImg2ImgPAGPipeline,
+)
+
+CLASS_DIFFUSERS_TASK = {
+    "StableDiffusionPipeline": {
+        "base": StableDiffusionPipeline,
+        "inpaint": StableDiffusionControlNetInpaintPipeline,
+        "controlnet": StableDiffusionControlNetPipeline,
+        # "controlnet_img2img": StableDiffusionControlNetImg2ImgPipeline,
+    },
+    "StableDiffusionXLPipeline": {
+        "base": StableDiffusionXLPipeline,
+        "inpaint": StableDiffusionXLInpaintPipeline,
+        "controlnet": StableDiffusionXLControlNetPipeline,
+        "adapter": StableDiffusionXLAdapterPipeline,
+        # "controlnet_img2img": StableDiffusionXLControlNetImg2ImgPipeline,
+    },
+}
+
+CLASS_PAG_DIFFUSERS_TASK = {
+    "StableDiffusionPipeline": {
+        "base": StableDiffusionPAGPipeline,
+        "inpaint": StableDiffusionControlNetInpaintPipeline,
+        "controlnet": StableDiffusionControlNetPAGPipeline,
+        # "controlnet_img2img": StableDiffusionControlNetImg2ImgPAGPipeline,
+    },
+    "StableDiffusionXLPipeline": {
+        "base": StableDiffusionXLPAGPipeline,
+        "inpaint": StableDiffusionXLPAGInpaintPipeline,
+        "controlnet": StableDiffusionXLControlNetPAGPipeline,
+        # "adapter": StableDiffusionXLAdapterPAGPipeline,
+        # "controlnet_img2img": StableDiffusionXLControlNetImg2ImgPAGPipeline,
+    },
+}
 
 CONTROLNET_MODEL_IDS = {
     "openpose": ["lllyasviel/control_v11p_sd15_openpose", "r3gm/controlnet-openpose-sdxl-1.0-fp16"],
     "canny": ["lllyasviel/control_v11p_sd15_canny", "r3gm/controlnet-canny-scribble-integrated-sdxl-v2-fp16"],
-    "mlsd": "lllyasviel/control_v11p_sd15_mlsd",
+    "mlsd": ["lllyasviel/control_v11p_sd15_mlsd", "r3gm/controlnet-union-sdxl-1.0-fp16"],
     "scribble": ["lllyasviel/control_v11p_sd15_scribble", "r3gm/controlnet-canny-scribble-integrated-sdxl-v2-fp16"],
-    "softedge": ["lllyasviel/control_v11p_sd15_softedge", "r3gm/controlnet-canny-scribble-integrated-sdxl-v2-fp16"],
-    "segmentation": "lllyasviel/control_v11p_sd15_seg",
-    "depth": ["lllyasviel/control_v11f1p_sd15_depth", "diffusers/controlnet-depth-sdxl-1.0-mid"],
-    "normalbae": "lllyasviel/control_v11p_sd15_normalbae",
-    "lineart": ["lllyasviel/control_v11p_sd15_lineart", "r3gm/controlnet-lineart-anime-sdxl-fp16"],
-    "lineart_anime": "lllyasviel/control_v11p_sd15s2_lineart_anime",
+    "softedge": ["lllyasviel/control_v11p_sd15_softedge", "r3gm/controlnet-union-sdxl-1.0-fp16"],
+    "segmentation": ["lllyasviel/control_v11p_sd15_seg", "r3gm/controlnet-union-sdxl-1.0-fp16"],
+    "depth": ["lllyasviel/control_v11f1p_sd15_depth", "r3gm/controlnet-union-sdxl-1.0-fp16"],
+    "normalbae": ["lllyasviel/control_v11p_sd15_normalbae", "r3gm/controlnet-union-sdxl-1.0-fp16"],
+    "lineart": ["lllyasviel/control_v11p_sd15_lineart", "r3gm/controlnet-union-sdxl-1.0-fp16"],
+    "lineart_anime": ["lllyasviel/control_v11p_sd15s2_lineart_anime", "r3gm/controlnet-lineart-anime-sdxl-fp16"],
     "shuffle": "lllyasviel/control_v11e_sd15_shuffle",
     "ip2p": "lllyasviel/control_v11e_sd15_ip2p",
     "inpaint": "lllyasviel/control_v11p_sd15_inpaint",
@@ -41,7 +91,8 @@ CONTROLNET_MODEL_IDS = {
     "sdxl_openpose_t2i": "TencentARC/t2i-adapter-openpose-sdxl-1.0",
     "img2img": "Nothinghere",
     "pattern": ["monster-labs/control_v1p_sd15_qrcode_monster", "r3gm/control_v1p_sdxl_qrcode_monster_fp16"],
-    "sdxl_tile_realistic": "Yakonrus/SDXL_Controlnet_Tile_Realistic_v2",
+    "tile": ["lllyasviel/control_v11f1e_sd15_tile", "r3gm/controlnet-tile-sdxl-1.0-fp16"],  # "sdxl_tile_realistic": "Yakonrus/SDXL_Controlnet_Tile_Realistic_v2",
+    "recolor": ["latentcat/control_v1p_sd15_brightness", "r3gm/controlnet-recolor-sdxl-fp16"],
     # "sdxl_depth-zoe_t2i": "TencentARC/t2i-adapter-depth-zoe-sdxl-1.0",
     # "sdxl_recolor_t2i": "TencentARC/t2i-adapter-recolor-sdxl-1.0",
 }
@@ -89,16 +140,17 @@ ALL_PROMPT_WEIGHT_OPTIONS = list(PROMPT_WEIGHT_OPTIONS.keys())
 OLD_PROMPT_WEIGHT_OPTIONS = ALL_PROMPT_WEIGHT_OPTIONS[0:2]
 
 SCHEDULER_CONFIG_MAP = {
-    "DPM++ 2M": (DPMSolverMultistepScheduler, {"use_karras_sigmas": False}),
-    "DPM++ 2M Karras": (DPMSolverMultistepScheduler, {"use_karras_sigmas": True}),
+    "DPM++ 2M": (DPMSolverMultistepScheduler, {"algorithm_type": "dpmsolver++", "use_karras_sigmas": False}),
+    "DPM++ 2M Karras": (DPMSolverMultistepScheduler, {"algorithm_type": "dpmsolver++", "use_karras_sigmas": True}),
     "DPM++ 2M SDE": (DPMSolverMultistepScheduler, {"use_karras_sigmas": False, "algorithm_type": "sde-dpmsolver++"}),
     "DPM++ 2M SDE Karras": (DPMSolverMultistepScheduler, {"use_karras_sigmas": True, "algorithm_type": "sde-dpmsolver++"}),
-    "DPM++ 2S": (DPMSolverSinglestepScheduler, {"use_karras_sigmas": False}),
-    "DPM++ 2S Karras": (DPMSolverSinglestepScheduler, {"use_karras_sigmas": True}),
-    "DPM++ 1S": (DPMSolverMultistepScheduler, {"solver_order": 1}),
-    "DPM++ 1S Karras": (DPMSolverMultistepScheduler, {"solver_order": 1, "use_karras_sigmas": True}),
-    "DPM++ 3M": (DPMSolverMultistepScheduler, {"solver_order": 3}),
-    "DPM++ 3M Karras": (DPMSolverMultistepScheduler, {"solver_order": 3, "use_karras_sigmas": True}),
+    "DPM++ 2S": (DPMSolverSinglestepScheduler, {"algorithm_type": "dpmsolver++", "use_karras_sigmas": False}),
+    "DPM++ 2S Karras": (DPMSolverSinglestepScheduler, {"algorithm_type": "dpmsolver++", "use_karras_sigmas": True}),
+    "DPM++ 1S": (DPMSolverMultistepScheduler, {"algorithm_type": "dpmsolver++", "solver_order": 1}),
+    "DPM++ 1S Karras": (DPMSolverMultistepScheduler, {"algorithm_type": "dpmsolver++", "solver_order": 1, "use_karras_sigmas": True}),
+    "DPM++ 3M": (DPMSolverMultistepScheduler, {"algorithm_type": "dpmsolver++", "solver_order": 3}),
+    "DPM++ 3M Karras": (DPMSolverMultistepScheduler, {"algorithm_type": "dpmsolver++", "solver_order": 3, "use_karras_sigmas": True}),
+    "DPM 3M": (DPMSolverMultistepScheduler, {"algorithm_type": "dpmsolver", "final_sigmas_type": "sigma_min", "solver_order": 3}),
     "DPM++ SDE": (DPMSolverSDEScheduler, {"use_karras_sigmas": False}),
     "DPM++ SDE Karras": (DPMSolverSDEScheduler, {"use_karras_sigmas": True}),
     "DPM2": (KDPM2DiscreteScheduler, {}),
@@ -125,8 +177,8 @@ SCHEDULER_CONFIG_MAP = {
     "DPM++ 2M EDM Karras": (EDMDPMSolverMultistepScheduler, {"use_karras_sigmas": True, "solver_order": 2, "solver_type": "midpoint", "final_sigmas_type": "zero", "algorithm_type": "dpmsolver++"}),
     "DDPM": (DDPMScheduler, {}),
 
-    "DPM++ 2M Lu": (DPMSolverMultistepScheduler, {"use_lu_lambdas": True}),
-    "DPM++ 2M Ef": (DPMSolverMultistepScheduler, {"euler_at_final": True}),
+    "DPM++ 2M Lu": (DPMSolverMultistepScheduler, {"algorithm_type": "dpmsolver++", "use_lu_lambdas": True}),
+    "DPM++ 2M Ef": (DPMSolverMultistepScheduler, {"algorithm_type": "dpmsolver++", "euler_at_final": True}),
     "DPM++ 2M SDE Lu": (DPMSolverMultistepScheduler, {"use_lu_lambdas": True, "algorithm_type": "sde-dpmsolver++"}),
     "DPM++ 2M SDE Ef": (DPMSolverMultistepScheduler, {"algorithm_type": "sde-dpmsolver++", "euler_at_final": True}),
 
@@ -153,9 +205,9 @@ IP_ADAPTER_MODELS = {
         "base_light_v2": ["h94/IP-Adapter", "models", "ip-adapter_sd15_light_v11.bin", "H"],
         "faceid_plus": ["h94/IP-Adapter-FaceID", "", "ip-adapter-faceid-plus_sd15.bin", "H"],
         "faceid_plus_v2": ["h94/IP-Adapter-FaceID", "", "ip-adapter-faceid-plusv2_sd15.bin", "H"],
-        "faceid": ["h94/IP-Adapter-FaceID", "", "ip-adapter-faceid_sd15.bin", None],
-        "faceid_portrait_v2": ["h94/IP-Adapter-FaceID", "", "ip-adapter-faceid-portrait-v11_sd15.bin", None],  # last portrait
-        "faceid_portrait": ["h94/IP-Adapter-FaceID", "", "ip-adapter-faceid-portrait_sd15.bin", None],
+        "faceid": ["h94/IP-Adapter-FaceID", "", "ip-adapter-faceid_sd15.bin", "H"],  # None
+        "faceid_portrait_v2": ["h94/IP-Adapter-FaceID", "", "ip-adapter-faceid-portrait-v11_sd15.bin", "H"],  # None
+        "faceid_portrait": ["h94/IP-Adapter-FaceID", "", "ip-adapter-faceid-portrait_sd15.bin", "H"],  # None
         "composition_plus": ["ostris/ip-composition-adapter", "", "ip_plus_composition_sd15.safetensors", "H"]
     },
     "StableDiffusionXLPipeline": {
@@ -165,9 +217,9 @@ IP_ADAPTER_MODELS = {
         "base_vit_G": ["h94/IP-Adapter", "sdxl_models", "ip-adapter_sdxl.safetensors", "G"],
         "base": ["h94/IP-Adapter", "sdxl_models", "ip-adapter_sdxl_vit-h.safetensors", "H"],
         "faceid_plus_v2": ["h94/IP-Adapter-FaceID", "", "ip-adapter-faceid-plusv2_sdxl.bin", "H"],
-        "faceid": ["h94/IP-Adapter-FaceID", "", "ip-adapter-faceid_sdxl.bin", None],
-        "faceid_portrait": ["h94/IP-Adapter-FaceID", "", "ip-adapter-faceid-portrait_sdxl.bin", None],
-        "faceid_portrait_v2": ["h94/IP-Adapter-FaceID", "", "ip-adapter-faceid-portrait_sdxl_unnorm.bin", None],
+        "faceid": ["h94/IP-Adapter-FaceID", "", "ip-adapter-faceid_sdxl.bin", "H"],  # None
+        "faceid_portrait": ["h94/IP-Adapter-FaceID", "", "ip-adapter-faceid-portrait_sdxl.bin", "H"],  # None
+        "faceid_portrait_v2": ["h94/IP-Adapter-FaceID", "", "ip-adapter-faceid-portrait_sdxl_unnorm.bin", "H"],  # None
         "composition_plus": ["ostris/ip-composition-adapter", "", "ip_plus_composition_sdxl.safetensors", "H"]
     }
 }  # no suffix lora

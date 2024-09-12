@@ -5,6 +5,31 @@ import torch
 from safetensors.torch import load_file
 from collections import defaultdict
 from ..logging.logging_setup import logger
+import safetensors
+
+valid_layers = [
+    "input_blocks",
+    "middle_block",
+    "output_blocks",
+    "text_model",
+    ".down_blocks",
+    ".mid_block",
+    ".up_blocks",
+    # "text_projection",  # text encoder 2 layer
+    # "conv_in",  # unet extra layers
+    # "time_proj",
+    # "time_embedding",
+    # "time_embedding.linear_1",
+    # "time_embedding.act",
+    # "time_embedding.linear_2",
+    # "add_time_proj",
+    # "add_embedding",
+    # "add_embedding.linear_1",
+    # "add_embedding.linear_2",
+    # "conv_norm_out",
+    # "conv_out"
+]
+
 
 def load_lora_weights(pipeline, checkpoint_path, multiplier, device, dtype):
     LORA_PREFIX_UNET = "lora_unet"
@@ -83,9 +108,28 @@ def load_lora_weights(pipeline, checkpoint_path, multiplier, device, dtype):
 def lora_mix_load(pipe, lora_path, alpha_scale=1.0, device="cuda", dtype=torch.float16):
     if hasattr(pipe, "text_encoder_2"):
         # sdxl lora
-        pipe.load_lora_weights(lora_path)
-        pipe.fuse_lora(lora_scale=alpha_scale)
-        pipe.unload_lora_weights()
+        try:
+            pipe.load_lora_weights(lora_path)
+            pipe.fuse_lora(lora_scale=alpha_scale)
+            pipe.unload_lora_weights()
+        except Exception as e:
+            if "size mismatch for" in str(e):
+                raise e
+
+            logger.debug(str(e))
+
+            state_dict = safetensors.torch.load_file(lora_path, device="cpu")
+            state_dict = {
+                k: w for k, w in state_dict.items()
+                if any(ly in k for ly in valid_layers)
+            }
+
+            if not state_dict:
+                raise ValueError("No valid layers were found.")
+
+            pipe.load_lora_weights(state_dict)
+            pipe.fuse_lora(lora_scale=alpha_scale)
+            pipe.unload_lora_weights()
     else:
         # sd lora
         try:

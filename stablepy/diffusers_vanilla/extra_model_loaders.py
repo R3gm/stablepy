@@ -64,7 +64,7 @@ def custom_task_model_loader(
 
     elif model_category in ["hires", "detailfix_img2img"]:
         # Pipe hires detailfix_pipe img2img
-        if task_name != "txt2img":
+        if task_name != "txt2img" or hasattr(pipe, "set_pag_applied_layers"):
             if not hasattr(pipe, "text_encoder_2"):
                 hires_pipe = StableDiffusionPipeline(
                     vae=pipe.vae,
@@ -91,9 +91,9 @@ def custom_task_model_loader(
                     image_encoder=pipe.image_encoder,
                 )
 
-            hires_pipe = AutoPipelineForImage2Image.from_pipe(hires_pipe)
+            hires_pipe = AutoPipelineForImage2Image.from_pipe(hires_pipe, enable_pag=False)
         else:
-            hires_pipe = AutoPipelineForImage2Image.from_pipe(pipe)
+            hires_pipe = AutoPipelineForImage2Image.from_pipe(pipe, enable_pag=False)
 
         if hasattr(hires_pipe, "text_encoder_2"):
             hires_pipe.enable_vae_slicing()
