@@ -14,6 +14,7 @@ from diffusers import (
 from huggingface_hub import hf_hub_download
 import torch
 import random
+import threading
 import json
 from controlnet_aux import (
     CannyDetector,
@@ -300,7 +301,85 @@ def convert_image_to_numpy_array(image, gui_active=False):
     return array_rgb
 
 
-class Model_Diffusers:
+def latents_to_rgb(latents, latent_resize, vae_decoding, pipe):
+    weights = (
+        (60, -60, 25, -70),
+        (60, -5, 15, -50),
+        (60, 10, -5, -35)
+    )
+    if vae_decoding:
+        with torch.no_grad():
+            latents = [tl.unsqueeze(0) for tl in torch.unbind(latents, dim=0)][0]
+            image = pipe.vae.decode(latents / pipe.vae.config.scaling_factor, return_dict=False)[0]
+
+        resized_image = pipe.image_processor.postprocess(image, output_type="pil")
+    else:
+        weights_tensor = torch.tensor(weights, dtype=latents.dtype, device=latents.device).T
+        biases_tensor = torch.tensor((150, 140, 130), dtype=latents.dtype, device=latents.device)
+        rgb_tensor = torch.einsum("...lxy,lr -> ...rxy", latents, weights_tensor) + biases_tensor.view(-1, 1, 1)
+        image_array = rgb_tensor.clamp(0, 255)[0].byte().cpu().numpy()
+        image_array = image_array.transpose(1, 2, 0)  # Change the order of dimensions
+
+        pil_image = Image.fromarray(image_array)
+
+        resized_image = pil_image.resize((pil_image.size[0] * latent_resize, pil_image.size[1] * latent_resize), Image.LANCZOS)  # Resize 128x128 * ...
+
+    return resized_image
+
+
+class PreviewGenerator:
+    def __init__(self, *args, **kwargs):
+        self.image_step = None
+        self.stream_config(5, 8, False)
+
+    def stream_config(self, concurrency, latent_resize_by, vae_decoding):
+        self.concurrency = concurrency
+        self.latent_resize_by = latent_resize_by
+        self.vae_decoding = vae_decoding
+
+    def decode_tensors(self, pipe, step, timestep, callback_kwargs):
+        latents = callback_kwargs["latents"]
+        if step % self.concurrency == 0:  # every how many steps
+            logger.debug(step)
+            self.image_step = latents_to_rgb(latents, self.latent_resize_by, self.vae_decoding, self.pipe)
+            self.new_image_event.set()  # Signal that a new image is available
+        return callback_kwargs
+
+    def show_images(self):
+        while not self.generation_finished.is_set() or self.new_image_event.is_set():
+            self.new_image_event.wait()  # Wait for a new image
+            self.new_image_event.clear()  # Clear the event flag
+
+            if self.image_step:
+                yield self.image_step  # Yield the new image
+
+    def generate_images(self, pipe_params_config):
+
+        self.final_image = None
+        self.image_step = None
+        self.final_image = self.pipe(
+            **pipe_params_config,
+            callback_on_step_end=self.decode_tensors,
+            callback_on_step_end_tensor_inputs=["latents"],
+        ).images
+
+        if not isinstance(self.final_image, torch.Tensor):
+            self.image_step = self.final_image[0]
+        logger.debug("finish")
+        self.new_image_event.set()  # Result image
+        self.generation_finished.set()  # Signal that generation is finished
+
+    def stream_preview(self, pipe_params_config):
+
+        self.new_image_event = threading.Event()
+        self.generation_finished = threading.Event()
+
+        self.generation_finished.clear()
+        threading.Thread(target=self.generate_images, args=(pipe_params_config,)).start()
+        return self.show_images()
+
+
+class Model_Diffusers(PreviewGenerator):
     def __init__(
         self,
         base_model_id: str = "Lykon/dreamshaper-8",
@@ -310,6 +389,7 @@ class Model_Diffusers:
         retain_task_model_in_cache=True,
         device=None,
     ):
+        super().__init__()
         self.device = (
             torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
             if device is None
@@ -1927,6 +2007,8 @@ class Model_Diffusers:
         if self.task_name != "txt2img":
             array_rgb = convert_image_to_numpy_array(image, gui_active)
 
+        control_image = None
+
         # Run preprocess
         if self.task_name == "inpaint":
             # Get mask for Inpaint
@@ -2031,6 +2113,10 @@ class Model_Diffusers:
                     "ip_adapter_masks": ip_adapter_masks
                 }
 
+        post_processing_params = dict(
+            display_images=display_images
+        )
+
         # detailfix params and pipe global
         if adetailer_A or adetailer_B:
 
@@ -2091,6 +2177,8 @@ class Model_Diffusers:
             detailfix_pipe.to(self.device)
             torch.cuda.empty_cache()
             gc.collect()
+
+            post_processing_params["detailfix_pipe"] = detailfix_pipe
 
         if adetailer_A:
             for key_param, default_value in default_params_detailfix.items():
@@ -2175,6 +2263,8 @@ class Model_Diffusers:
             logger.debug(f"Pipe params detailfix A \n{detailfix_params_A}")
             logger.debug(f"Params detailfix A \n{adetailer_A_params}")
 
+            post_processing_params["detailfix_params_A"] = detailfix_params_A
+
         if adetailer_B:
             for key_param, default_value in default_params_detailfix.items():
                 if key_param not in adetailer_B_params:
@@ -2254,6 +2344,8 @@ class Model_Diffusers:
                 logger.debug(f"Prompts detailfix B {prompt_df_B, negative_prompt_df_B}")
             logger.debug(f"Pipe params detailfix B \n{detailfix_params_B}")
             logger.debug(f"Params detailfix B \n{adetailer_B_params}")
+
+            post_processing_params["detailfix_params_B"] = detailfix_params_B
 
         if hires_steps > 1 and upscaler_model_path is not None:
             # Hires params BASE
@@ -2367,9 +2459,204 @@ class Model_Diffusers:
         except Exception as e:
             logger.debug(f"{str(e)}")
 
-        # === RUN PIPE === #
-        for i in range(loop_generation):
+        metadata = [
+            prompt,
+            negative_prompt,
+            self.base_model_id,
+            self.vae_model,
+            num_steps,
+            guidance_scale,
+            sampler,
+            0000000000,  # calculate_seed,
+            img_width,
+            img_height,
+            clip_skip,
+        ]
 
+        # === RUN PIPE === #
+        handle_task = self.start_work if not image_previews else self.start_stream
+
+        return handle_task(
+            num_images,
+            seed,
+            adetailer_A,
+            adetailer_A_params,
+            adetailer_B,
+            adetailer_B_params,
+            upscaler_model_path,
+            upscaler_increases_size,
+            esrgan_tile,
+            esrgan_tile_overlap,
+            hires_steps,
+            loop_generation,
+            display_images,
+            save_generated_images,
+            image_storage_location,
+            generator_in_cpu,
+            hires_before_adetailer,
+            hires_after_adetailer,
+            retain_compel_previous_load,
+            control_image,
+            pipe_params_config,
+            post_processing_params,
+            hires_params_config,
+            hires_pipe,
+            metadata,
+        )
+
+    def post_processing(
+        self,
+        adetailer_A,
+        adetailer_A_params,
+        adetailer_B,
+        adetailer_B_params,
+        upscaler_model_path,
+        upscaler_increases_size,
+        esrgan_tile,
+        esrgan_tile_overlap,
+        hires_steps,
+        loop_generation,
+        display_images,
+        save_generated_images,
+        image_storage_location,
+        hires_before_adetailer,
+        hires_after_adetailer,
+        control_image,
+        post_processing_params,
+        hires_params_config,
+        hires_pipe,
+        seeds,
+        generators,
+        images,
+        metadata,
+    ):
+        if isinstance(images, torch.Tensor):
+            images = [tl.unsqueeze(0) for tl in torch.unbind(images, dim=0)]
+
+        if self.task_name not in ["txt2img", "inpaint", "img2img"]:
+            images = [control_image] + images
+
+        torch.cuda.empty_cache()
+        gc.collect()
+
+        if hires_before_adetailer and upscaler_model_path is not None:
+            logger.debug(
+                    "Hires before; same seed for each image (no batch)"
+                )
+            images = process_images_high_resolution(
+                    images,
+                    upscaler_model_path,
+                    upscaler_increases_size,
+                    esrgan_tile, esrgan_tile_overlap,
+                    hires_steps, hires_params_config,
+                    self.task_name,
+                    generators[0],  # pipe_params_config["generator"][0], # no generator
+                    hires_pipe,
+                )
+
+            # Adetailer stuff
+        if adetailer_A or adetailer_B:
+            # image_pil_list = []
+            # for img_single in images:
+            # image_ad = img_single.convert("RGB")
+            # image_pil_list.append(image_ad)
+            if self.task_name not in ["txt2img", "inpaint", "img2img"]:
+                images = images[1:]
+
+            if adetailer_A:
+                images = ad_model_process(
+                        pipe_params_df=post_processing_params["detailfix_params_A"],
+                        detailfix_pipe=post_processing_params["detailfix_pipe"],
+                        image_list_task=images,
+                        **adetailer_A_params,
+                    )
+            if adetailer_B:
+                images = ad_model_process(
+                        pipe_params_df=post_processing_params["detailfix_params_B"],
+                        detailfix_pipe=post_processing_params["detailfix_pipe"],
+                        image_list_task=images,
+                        **adetailer_B_params,
+                    )
+
+            if self.task_name not in ["txt2img", "inpaint", "img2img"]:
+                images = [control_image] + images
+                # del detailfix_pipe
+            torch.cuda.empty_cache()
+            gc.collect()
+
+        if hires_after_adetailer and upscaler_model_path is not None:
+            logger.debug(
+                    "Hires after; same seed for each image (no batch)"
+                )
+            images = process_images_high_resolution(
+                    images,
+                    upscaler_model_path,
+                    upscaler_increases_size,
+                    esrgan_tile, esrgan_tile_overlap,
+                    hires_steps, hires_params_config,
+                    self.task_name,
+                    generators[0],  # pipe_params_config["generator"][0], # no generator
+                    hires_pipe,
+                )
+
+        logger.info(f"Seeds: {seeds}")
+
+        # Show images if loop
+        if display_images:
+            mediapy.show_images(images)
+            # logger.info(image_list)
+            # del images
+            if loop_generation > 1:
+                time.sleep(0.5)
+
+            # List images and save
+        image_list = []
+
+        valid_seeds = [0] + seeds if self.task_name not in ["txt2img", "inpaint", "img2img"] else seeds
+        for image_, seed_ in zip(images, valid_seeds):
+            image_path = "not saved in storage"
+            if save_generated_images:
+                metadata[7] = seed_
+                image_path = save_pil_image_with_metadata(image_, image_storage_location, metadata)
+            image_list.append(image_path)
+
+        torch.cuda.empty_cache()
+        gc.collect()
+
+        if image_list[0] != "not saved in storage":
+            logger.info(image_list)
+
+        return images, image_list
+
+    def start_work(
+        self,
+        num_images,
+        seed,
+        adetailer_A,
+        adetailer_A_params,
+        adetailer_B,
+        adetailer_B_params,
+        upscaler_model_path,
+        upscaler_increases_size,
+        esrgan_tile,
+        esrgan_tile_overlap,
+        hires_steps,
+        loop_generation,
+        display_images,
+        save_generated_images,
+        image_storage_location,
+        generator_in_cpu,
+        hires_before_adetailer,
+        hires_after_adetailer,
+        retain_compel_previous_load,
+        control_image,
+        pipe_params_config,
+        post_processing_params,
+        hires_params_config,
+        hires_pipe,
+        metadata,
+    ):
+        for i in range(loop_generation):
             # number seed
             if seed == -1:
                 seeds = [random.randint(0, 2147483647) for _ in range(num_images)]
@@ -2422,118 +2709,158 @@ class Model_Diffusers:
                 else:
                     raise ValueError(e)
 
-            if isinstance(images, torch.Tensor):
-                images = [tl.unsqueeze(0) for tl in torch.unbind(images, dim=0)]
+            images, image_list = self.post_processing(
+                adetailer_A,
+                adetailer_A_params,
+                adetailer_B,
+                adetailer_B_params,
+                upscaler_model_path,
+                upscaler_increases_size,
+                esrgan_tile,
+                esrgan_tile_overlap,
+                hires_steps,
+                loop_generation,
+                display_images,
+                save_generated_images,
+                image_storage_location,
+                hires_before_adetailer,
+                hires_after_adetailer,
+                control_image,
+                post_processing_params,
+                hires_params_config,
+                hires_pipe,
+                seeds,
+                generators,
+                images,
+                metadata,
+            )
 
-            if self.task_name not in ["txt2img", "inpaint", "img2img"]:
-                images = [control_image] + images
+        if hasattr(self, "compel") and not retain_compel_previous_load:
+            del self.compel
+        torch.cuda.empty_cache()
+        gc.collect()
+        return images, [seeds, image_list]
 
-            torch.cuda.empty_cache()
-            gc.collect()
+    def start_stream(
+        self,
+        num_images,
+        seed,
+        adetailer_A,
+        adetailer_A_params,
+        adetailer_B,
+        adetailer_B_params,
+        upscaler_model_path,
+        upscaler_increases_size,
+        esrgan_tile,
+        esrgan_tile_overlap,
+        hires_steps,
+        loop_generation,
+        display_images,
+        save_generated_images,
+        image_storage_location,
+        generator_in_cpu,
+        hires_before_adetailer,
+        hires_after_adetailer,
+        retain_compel_previous_load,
+        control_image,
+        pipe_params_config,
+        post_processing_params,
+        hires_params_config,
+        hires_pipe,
+        metadata,
+    ):
+        for i in range(loop_generation):
+            # number seed
+            if seed == -1:
+                seeds = [random.randint(0, 2147483647) for _ in range(num_images)]
+            else:
+                if num_images == 1:
+                    seeds = [seed]
+                else:
+                    seeds = [seed] + [random.randint(0, 2147483647) for _ in range(num_images-1)]
 
-            if hires_before_adetailer and upscaler_model_path is not None:
-                logger.debug(
-                    "Hires before; same seed for each image (no batch)"
-                )
-                images = process_images_high_resolution(
-                    images,
-                    upscaler_model_path,
-                    upscaler_increases_size,
-                    esrgan_tile, esrgan_tile_overlap,
-                    hires_steps, hires_params_config,
-                    self.task_name,
-                    generators[0],  # pipe_params_config["generator"][0], # no generator
-                    hires_pipe,
-                )
+            # generators
+            generators = []  # List to store all the generators
+            for calculate_seed in seeds:
+                if generator_in_cpu or self.device.type == "cpu":
+                    generator = torch.Generator().manual_seed(calculate_seed)
+                else:
+                    try:
+                        generator = torch.Generator("cuda").manual_seed(calculate_seed)
+                    except Exception as e:
+                        logger.debug(str(e))
+                        logger.warning("Generator in CPU")
+                        generator = torch.Generator().manual_seed(calculate_seed)
 
-            # Adetailer stuff
-            if adetailer_A or adetailer_B:
-                # image_pil_list = []
-                # for img_single in images:
-                # image_ad = img_single.convert("RGB")
-                # image_pil_list.append(image_ad)
-                if self.task_name not in ["txt2img", "inpaint", "img2img"]:
-                    images = images[1:]
+                generators.append(generator)
 
-                if adetailer_A:
-                    images = ad_model_process(
-                        pipe_params_df=detailfix_params_A,
-                        detailfix_pipe=detailfix_pipe,
-                        image_list_task=images,
-                        **adetailer_A_params,
+            # fix img2img bug need concat tensor prompts with generator same number (only in batch inference)
+            pipe_params_config["generator"] = generators if self.task_name != "img2img" else generators[0]  # no list
+            seeds = seeds if self.task_name != "img2img" else [seeds[0]] * num_images
+
+            try:
+                logger.debug("Start stream")
+                # self.stream_config(5)
+                stream = self.stream_preview(pipe_params_config)
+                for img in stream:
+                    if not isinstance(img, list):
+                        img = [img]
+                    yield img, seeds, None
+
+                images = self.final_image
+
+            except Exception as e:
+                e = str(e)
+                if "Tensor with 2 elements cannot be converted to Scalar" in e:
+                    logger.debug(e)
+                    logger.error("Error in sampler; trying with DDIM sampler")
+                    self.pipe.scheduler = self.default_scheduler
+                    self.pipe.scheduler = DDIMScheduler.from_config(self.pipe.scheduler.config)
+                    stream = self.stream_preview(pipe_params_config)
+                    for img in stream:
+                        if not isinstance(img, list):
+                            img = [img]
+                        yield img, seeds, None
+
+                    images = self.final_image
+
+                elif "The size of tensor a (0) must match the size of tensor b (3) at non-singleton" in e:
+                    raise ValueError(
+                        "steps / strength too low for the model to produce a satisfactory response"
                     )
-                if adetailer_B:
-                    images = ad_model_process(
-                        pipe_params_df=detailfix_params_B,
-                        detailfix_pipe=detailfix_pipe,
-                        image_list_task=images,
-                        **adetailer_B_params,
-                    )
 
-                if self.task_name not in ["txt2img", "inpaint", "img2img"]:
-                    images = [control_image] + images
-                # del detailfix_pipe
-                torch.cuda.empty_cache()
-                gc.collect()
+                else:
+                    raise ValueError(e)
 
-            if hires_after_adetailer and upscaler_model_path is not None:
-                logger.debug(
-                    "Hires after; same seed for each image (no batch)"
-                )
-                images = process_images_high_resolution(
-                    images,
-                    upscaler_model_path,
-                    upscaler_increases_size,
-                    esrgan_tile, esrgan_tile_overlap,
-                    hires_steps, hires_params_config,
-                    self.task_name,
-                    generators[0],  # pipe_params_config["generator"][0], # no generator
-                    hires_pipe,
-                )
-
-            logger.info(f"Seeds: {seeds}")
-
-            # Show images if loop
-            if display_images:
-                mediapy.show_images(images)
-                # logger.info(image_list)
-                # del images
-                if loop_generation > 1:
-                    time.sleep(0.5)
-
-            # List images and save
-            image_list = []
-            metadata = [
-                prompt,
-                negative_prompt,
-                self.base_model_id,
-                self.vae_model,
-                num_steps,
-                guidance_scale,
-                sampler,
-                0000000000,  # calculate_seed,
-                img_width,
-                img_height,
-                clip_skip,
-            ]
-
-            valid_seeds = [0] + seeds if self.task_name not in ["txt2img", "inpaint", "img2img"] else seeds
-            for image_, seed_ in zip(images, valid_seeds):
-                image_path = "not saved in storage"
-                if save_generated_images:
-                    metadata[7] = seed_
-                    image_path = save_pil_image_with_metadata(image_, image_storage_location, metadata)
-                image_list.append(image_path)
-
-            torch.cuda.empty_cache()
-            gc.collect()
-
-            if image_list[0] != "not saved in storage":
-                logger.info(image_list)
+            images, image_list = self.post_processing(
+                adetailer_A,
+                adetailer_A_params,
+                adetailer_B,
+                adetailer_B_params,
+                upscaler_model_path,
+                upscaler_increases_size,
+                esrgan_tile,
+                esrgan_tile_overlap,
+                hires_steps,
+                loop_generation,
+                display_images,
+                save_generated_images,
+                image_storage_location,
+                hires_before_adetailer,
+                hires_after_adetailer,
+                control_image,
+                post_processing_params,
+                hires_params_config,
+                hires_pipe,
+                seeds,
+                generators,
+                images,
+                metadata,
+            )
 
         if hasattr(self, "compel") and not retain_compel_previous_load:
             del self.compel
         torch.cuda.empty_cache()
         gc.collect()
 
-        return images, image_list
+        yield images, seeds, image_list
