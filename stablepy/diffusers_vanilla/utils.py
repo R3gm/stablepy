@@ -4,7 +4,26 @@ from PIL.PngImagePlugin import PngInfo
 from ..logging.logging_setup import logger
 
 
-def save_pil_image_with_metadata(image, folder_path, metadata_list):
+def get_string_metadata(metadata_list):
+    string_parameters = ""
+    try:
+        string_parameters = (
+            f"{str(metadata_list[0])}\n"
+            f"Negative prompt: {str(metadata_list[1])}\n"
+            f"Steps: {str(metadata_list[4])}, Sampler: {str(metadata_list[6])}, "
+            f"CFG scale: {str(metadata_list[5])}, Seed: {str(metadata_list[7])}, "
+            f"Size: {str(metadata_list[8])}x{str(metadata_list[9])}, "
+            f"Model: {os.path.splitext(str(metadata_list[2]).split('/')[-1])[0]}, "
+            f"Clip skip: {2 if metadata_list[10] else 1}"
+        )
+    except Exception as e:
+        logger.debug(str(e))
+        logger.info("Error generating image metadata")
+
+    return string_parameters
+
+
+def save_pil_image_with_metadata(image, folder_path, string_parameters):
     if not os.path.exists(folder_path):
         os.makedirs(folder_path)
 
@@ -15,22 +34,12 @@ def save_pil_image_with_metadata(image, folder_path, metadata_list):
     image_path = os.path.join(folder_path, image_name)
 
     try:
-        # metadata
         metadata = PngInfo()
-        string_parameters = f"{str(metadata_list[0])}, Negative prompt: {str(metadata_list[1])} Steps: {str(metadata_list[4])}, Sampler: {str(metadata_list[6])}, CFG scale: {str(metadata_list[5])}, Seed: {str(metadata_list[7])}, Size: {str(metadata_list[8])}x{str(metadata_list[9])}, Model: {os.path.splitext(str(metadata_list[2]).split('/')[-1])[0]}, Clip skip: {2 if metadata_list[10] else 1},"
         metadata.add_text("parameters", string_parameters)
-        # metadata.add_text("Prompt", str(metadata_list[0]))
-        # metadata.add_text("Negative prompt", str(metadata_list[1]))
-        # metadata.add_text("Model", str(metadata_list[2]))
-        # metadata.add_text("VAE", str(metadata_list[3]))
-        # metadata.add_text("Steps", str(metadata_list[4]))
-        # metadata.add_text("CFG", str(metadata_list[5]))
-        # metadata.add_text("Scheduler", str(metadata_list[6]))
-        # metadata.add_text("Seed", str(metadata_list[7]))
-
         image.save(image_path, pnginfo=metadata)
-    except Exception:
-        logger.info("Saving image without metadata")
+    except Exception as e:
+        logger.debug(str(e))
+        logger.info("Error saving image with metadata")
         image.save(image_path)
 
     return image_path
@@ -65,4 +74,3 @@ def checkpoint_model_type(checkpoint_path):
     del checkpoint
 
     return model_type
-    

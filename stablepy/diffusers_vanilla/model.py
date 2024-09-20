@@ -57,7 +57,7 @@ from .constants import (
 from .multi_emphasis_prompt import long_prompts_with_weighting
 from diffusers.utils import load_image
 from .prompt_weights import get_embed_new, add_comma_after_pattern_ti
-from .utils import save_pil_image_with_metadata, checkpoint_model_type
+from .utils import save_pil_image_with_metadata, checkpoint_model_type, get_string_metadata
 from .lora_loader import lora_mix_load
 from .inpainting_canvas import draw, make_inpaint_condition
 from .adetailer import ad_model_process
@@ -2611,14 +2611,22 @@ class Model_Diffusers(PreviewGenerator):
 
             # List images and save
         image_list = []
+        image_metadata = []
 
         valid_seeds = [0] + seeds if self.task_name not in ["txt2img", "inpaint", "img2img"] else seeds
         for image_, seed_ in zip(images, valid_seeds):
+
+            metadata[7] = seed_
+            image_generation_data = get_string_metadata(metadata)
+
             image_path = "not saved in storage"
             if save_generated_images:
-                metadata[7] = seed_
-                image_path = save_pil_image_with_metadata(image_, image_storage_location, metadata)
+                image_path = save_pil_image_with_metadata(
+                    image_, image_storage_location, image_generation_data
+                )
+
             image_list.append(image_path)
+            image_metadata.append(image_generation_data)
 
         torch.cuda.empty_cache()
         gc.collect()
@@ -2626,7 +2634,7 @@ class Model_Diffusers(PreviewGenerator):
         if image_list[0] != "not saved in storage":
             logger.info(image_list)
 
-        return images, image_list
+        return images, image_list, image_metadata
 
     def start_work(
         self,
@@ -2709,7 +2717,7 @@ class Model_Diffusers(PreviewGenerator):
                 else:
                     raise ValueError(e)
 
-            images, image_list = self.post_processing(
+            images, image_list, image_metadata = self.post_processing(
                 adetailer_A,
                 adetailer_A_params,
                 adetailer_B,
@@ -2739,7 +2747,7 @@ class Model_Diffusers(PreviewGenerator):
             del self.compel
         torch.cuda.empty_cache()
         gc.collect()
-        return images, [seeds, image_list]
+        return images, seeds, image_list, image_metadata
 
     def start_stream(
         self,
@@ -2805,7 +2813,7 @@ class Model_Diffusers(PreviewGenerator):
                 for img in stream:
                     if not isinstance(img, list):
                         img = [img]
-                    yield img, seeds, None
+                    yield img, seeds, None, None
 
                 images = self.final_image
 
@@ -2832,7 +2840,7 @@ class Model_Diffusers(PreviewGenerator):
                 else:
                     raise ValueError(e)
 
-            images, image_list = self.post_processing(
+            images, image_list, image_metadata = self.post_processing(
                 adetailer_A,
                 adetailer_A_params,
                 adetailer_B,
@@ -2863,4 +2871,4 @@ class Model_Diffusers(PreviewGenerator):
         torch.cuda.empty_cache()
         gc.collect()
 
-        yield images, seeds, image_list
+        yield images, seeds, image_list, image_metadata
