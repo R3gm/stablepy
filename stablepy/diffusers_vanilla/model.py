@@ -1166,8 +1166,10 @@ class Model_Diffusers(PreviewGenerator):
 
     def process_lora(self, select_lora, lora_weights_scale, unload=False):
         device = "cuda" if torch.cuda.is_available() else "cpu"
+        status_lora = None
         if not unload:
             if select_lora is not None:
+                status_lora = True
                 try:
                     self.pipe = lora_mix_load(
                         self.pipe,
@@ -1182,7 +1184,7 @@ class Model_Diffusers(PreviewGenerator):
                         traceback.print_exc()
                     logger.error(f"ERROR: LoRA not compatible: {select_lora}")
                     logger.debug(f"{str(e)}")
-            return self.pipe
+                    status_lora = False
         else:
             # Unload numerically unstable but fast and need less memory
             if select_lora is not None:
@@ -1198,7 +1200,8 @@ class Model_Diffusers(PreviewGenerator):
                 except Exception as e:
                     logger.debug(str(e))
                     pass
-            return self.pipe
+
+        return status_lora
 
     def load_style_file(self, style_json_file):
         if os.path.exists(style_json_file):
@@ -1406,26 +1409,70 @@ class Model_Diffusers(PreviewGenerator):
 
         return image_embeds, processed_masks
 
-    def callback_pipe(self, iter, t, latents):
-        # convert latents to image
-        with torch.no_grad():
-            latents = 1 / 0.18215 * latents
-            image = self.pipe.vae.decode(latents).sample
+    def lora_merge(
+        self,
+        lora_A=None, lora_scale_A=1.0,
+        lora_B=None, lora_scale_B=1.0,
+        lora_C=None, lora_scale_C=1.0,
+        lora_D=None, lora_scale_D=1.0,
+        lora_E=None, lora_scale_E=1.0,
+    ):
 
-            image = (image / 2 + 0.5).clamp(0, 1)
+        lora_status = [None] * 5
 
-            # we always cast to float32 as this does not cause significant overhead and is compatible with bfloa16
-            image = image.cpu().permute(0, 2, 3, 1).float().numpy()
+        if self.lora_memory == [
+            lora_A,
+            lora_B,
+            lora_C,
+            lora_D,
+            lora_E,
+        ] and self.lora_scale_memory == [
+            lora_scale_A,
+            lora_scale_B,
+            lora_scale_C,
+            lora_scale_D,
+            lora_scale_E,
+        ]:
+            for single_lora in self.lora_memory:
+                if single_lora is not None:
+                    logger.info(f"LoRA in memory: {single_lora}")
+            pass
 
-            # convert to PIL Images
-            image = self.pipe.numpy_to_pil(image)
+        else:
+            logger.debug("_un, re and load_ lora")
 
-            # show one image
-            # global preview_handle
-            if self.preview_handle is None:
-                self.preview_handle = display(image[0], display_id=True)
-            else:
-                self.preview_handle.update(image[0])
+            self.process_lora(
+                self.lora_memory[0], self.lora_scale_memory[0], unload=True
+            )
+            self.process_lora(
+                self.lora_memory[1], self.lora_scale_memory[1], unload=True
+            )
+            self.process_lora(
+                self.lora_memory[2], self.lora_scale_memory[2], unload=True
+            )
+            self.process_lora(
+                self.lora_memory[3], self.lora_scale_memory[3], unload=True
+            )
+            self.process_lora(
+                self.lora_memory[4], self.lora_scale_memory[4], unload=True
+            )
+
+            lora_status[0] = self.process_lora(lora_A, lora_scale_A)
+            lora_status[1] = self.process_lora(lora_B, lora_scale_B)
+            lora_status[2] = self.process_lora(lora_C, lora_scale_C)
+            lora_status[3] = self.process_lora(lora_D, lora_scale_D)
+            lora_status[4] = self.process_lora(lora_E, lora_scale_E)
+
+        self.lora_memory = [lora_A, lora_B, lora_C, lora_D, lora_E]
+        self.lora_scale_memory = [
+            lora_scale_A,
+            lora_scale_B,
+            lora_scale_C,
+            lora_scale_D,
+            lora_scale_E,
+        ]
+
+        return lora_status
 
     def __call__(
         self,
@@ -1784,12 +1831,17 @@ class Model_Diffusers(PreviewGenerator):
             logger.warning(f"Image resolution must be divisible by 8, changed to {str(image_resolution)}")
         if control_guidance_start >= control_guidance_end:
             logger.error(
-                "Control guidance start (ControlNet Start Threshold) cannot be larger or equal to control guidance end (ControlNet Stop Threshold). The default values 0.0 and 1.0 will be used."
+                "Control guidance start (ControlNet Start Threshold) "
+                "cannot be larger or equal to control guidance end ("
+                "ControlNet Stop Threshold). The default values 0.0 and "
+                "1.0 will be used."
             )
             control_guidance_start, control_guidance_end = 0.0, 1.0
 
         if (ip_adapter_image and not ip_adapter_model) or (not ip_adapter_image and ip_adapter_model):
-            raise ValueError("Ip adapter require the ip adapter image and the ip adapter model for the task")
+            raise ValueError(
+                "Ip adapter require the ip adapter image and the ip adapter model for the task"
+            )
 
         self.gui_active = gui_active
         self.image_previews = image_previews
@@ -1827,59 +1879,18 @@ class Model_Diffusers(PreviewGenerator):
         if isinstance(style_prompt, str):
             style_prompt = [style_prompt]
         if style_prompt != [""]:
-            prompt, negative_prompt = apply_style(style_prompt, prompt, negative_prompt, self.styles_data, self.STYLE_NAMES)
+            prompt, negative_prompt = apply_style(
+                style_prompt, prompt, negative_prompt, self.styles_data, self.STYLE_NAMES
+            )
 
         # LoRA load
-        if self.lora_memory == [
-            lora_A,
-            lora_B,
-            lora_C,
-            lora_D,
-            lora_E,
-        ] and self.lora_scale_memory == [
-            lora_scale_A,
-            lora_scale_B,
-            lora_scale_C,
-            lora_scale_D,
-            lora_scale_E,
-        ]:
-            for single_lora in self.lora_memory:
-                if single_lora is not None:
-                    logger.info(f"LoRA in memory: {single_lora}")
-            pass
-
-        else:
-            logger.debug("_un, re and load_ lora")
-            self.pipe = self.process_lora(
-                self.lora_memory[0], self.lora_scale_memory[0], unload=True
-            )
-            self.pipe = self.process_lora(
-                self.lora_memory[1], self.lora_scale_memory[1], unload=True
-            )
-            self.pipe = self.process_lora(
-                self.lora_memory[2], self.lora_scale_memory[2], unload=True
-            )
-            self.pipe = self.process_lora(
-                self.lora_memory[3], self.lora_scale_memory[3], unload=True
-            )
-            self.pipe = self.process_lora(
-                self.lora_memory[4], self.lora_scale_memory[4], unload=True
-            )
-
-            self.pipe = self.process_lora(lora_A, lora_scale_A)
-            self.pipe = self.process_lora(lora_B, lora_scale_B)
-            self.pipe = self.process_lora(lora_C, lora_scale_C)
-            self.pipe = self.process_lora(lora_D, lora_scale_D)
-            self.pipe = self.process_lora(lora_E, lora_scale_E)
-
-        self.lora_memory = [lora_A, lora_B, lora_C, lora_D, lora_E]
-        self.lora_scale_memory = [
-            lora_scale_A,
-            lora_scale_B,
-            lora_scale_C,
-            lora_scale_D,
-            lora_scale_E,
-        ]
+        self.lora_merge(
+            lora_A, lora_scale_A,
+            lora_B, lora_scale_B,
+            lora_C, lora_scale_C,
+            lora_D, lora_scale_D,
+            lora_E, lora_scale_E,
+        )
 
         if sampler in FLASH_AUTO_LOAD_SAMPLER and self.flash_config is None:
             # First load
