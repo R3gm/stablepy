@@ -56,6 +56,10 @@ def process_images_high_resolution(
                 control_image_up = images[0]
                 images = images[1:]
 
+            if str(hires_pipe.__class__.__name__) in ["FluxImg2ImgPipeline", "FluxInpaintPipeline"]:
+                hires_params_config["height"] = images[0].size[1]
+                hires_params_config["width"] = images[0].size[0]
+
             result_hires = []
             for img_pre_hires in images:
                 try:

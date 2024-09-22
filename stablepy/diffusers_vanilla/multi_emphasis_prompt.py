@@ -354,7 +354,9 @@ class FrozenCLIPEmbedderWithCustomWordsBase(torch.nn.Module):
                 index = remade_batch_tokens[batch_pos].index(self.id_end)
                 tokens[batch_pos, index+1:tokens.shape[1]] = self.id_pad
 
-        if hasattr(self.wrapped, "text_encoder_2"):
+        if hasattr(self.wrapped, "transformer"):
+            z, pooled = self.encode_with_transformers_flux(tokens)
+        elif hasattr(self.wrapped, "text_encoder_2"):
             z, pooled = self.encode_with_transformers_xl(tokens)
         else:
             z, pooled = self.encode_with_transformers(tokens)
@@ -377,7 +379,10 @@ class FrozenCLIPEmbedderWithCustomWordsBase(torch.nn.Module):
 class StableDiffusionLongPromptProcessor(FrozenCLIPEmbedderWithCustomWordsBase):
     def __init__(self, wrapped, tokenizer_1, text_encoder_1, clip_skip=2, emphasis="Original", comma_padding_backtrack=20):
         super().__init__(wrapped)
-        self.device = wrapped.device
+        if not hasattr(wrapped, "transformer"):
+            self.device = wrapped.device
+        else:
+            self.device = wrapped.text_encoder.device
         self.tokenizer = tokenizer_1
         self.text_encoder = text_encoder_1
         self.get_pooled = False
@@ -443,6 +448,28 @@ class StableDiffusionLongPromptProcessor(FrozenCLIPEmbedderWithCustomWordsBase):
             z = outputs.last_hidden_state
         else:
             z = outputs.hidden_states[self.layer_idx]
+
+        return z, pooled
+
+    def encode_with_transformers_flux(self, tokens):
+        outputs = self.text_encoder(input_ids=tokens.to(self.text_encoder.device), output_hidden_states=self.layer == "hidden")
+
+        # outputs.to("cpu")
+
+        pooled = None
+        if outputs[0].shape[-1] == 768:
+            pooled = outputs[0]
+
+        # if self.layer == "last":
+        #     z = outputs.last_hidden_state
+        # else:
+        #     z = outputs.hidden_states[self.layer_idx]
+
+        if self.CLIP_stop_at_last_layers > 1:
+            z = outputs.hidden_states[-self.CLIP_stop_at_last_layers]
+            z = self.text_encoder.text_model.final_layer_norm(z)
+        else:
+            z = outputs.last_hidden_state
 
         return z, pooled
 

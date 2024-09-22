@@ -11,7 +11,7 @@ torch = {version = "*", source = "pytorch-gpu-src"}
 torchvision = {version = "*", source = "pytorch-gpu-src"}
 torchaudio = {version = "*", source = "pytorch-gpu-src"}
 omegaconf = "2.3.0"
-diffusers = "0.30.2"
+diffusers = { git = "https://github.com/huggingface/diffusers.git", rev = "8cdcdd9" }
 compel = "2.0.2"
 invisible-watermark = "^0.2.0"
 transformers = "^4.41.2"
@@ -29,10 +29,11 @@ torchsde = "^0.2.6"
 onnxruntime = "^1.18.0"
 insightface = "^0.7.3"
 opencv-contrib-python = "^4.8.0.76"
+sentencepiece = "*"
 
 [[tool.poetry.source]]
 name = "pytorch-gpu-src"
-url = "https://download.pytorch.org/whl/cu118"
+url = "https://download.pytorch.org/whl/cu121"
 priority = "explicit"
 
 [build-system]

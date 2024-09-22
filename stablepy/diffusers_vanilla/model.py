@@ -39,6 +39,7 @@ from .constants import (
     CLASS_DIFFUSERS_TASK,
     CLASS_PAG_DIFFUSERS_TASK,
     CONTROLNET_MODEL_IDS,
+    FLUX_CN_UNION_MODES,
     VALID_TASKS,
     SD15_TASKS,
     SDXL_TASKS,
@@ -81,6 +82,11 @@ import diffusers
 import copy
 import warnings
 import traceback
+from .main_prompt_embeds import (
+    Promt_Embedder_SD1,
+    Promt_Embedder_SDXL,
+    Promt_Embedder_FLUX,
+)
 logging.getLogger("diffusers").setLevel(logging.ERROR)
 logging.getLogger("transformers").setLevel(logging.ERROR)
 diffusers.utils.logging.set_verbosity(40)
@@ -431,11 +437,49 @@ class Model_Diffusers(PreviewGenerator):
             vae=self.pipe.vae,
             text_encoder=self.pipe.text_encoder,
             tokenizer=self.pipe.tokenizer,
-            unet=self.pipe.unet,
             scheduler=self.pipe.scheduler,
-            feature_extractor=self.pipe.feature_extractor,
-            image_encoder=self.pipe.image_encoder,
         )
+
+        if class_name == "FluxPipeline":
+            model_components["text_encoder_2"] = self.pipe.text_encoder_2
+            model_components["tokenizer_2"] = self.pipe.tokenizer_2
+            model_components["transformer"] = self.pipe.transformer
+
+            cpu_device = "cpu"
+
+            if task_name == "txt2img":
+                from diffusers import FluxPipeline
+                self.pipe = FluxPipeline(**model_components).to(cpu_device)
+            elif task_name == "inpaint":
+                from .extra_pipe.flux.pipeline_flux_inpaint import FluxInpaintPipeline
+                self.pipe = FluxInpaintPipeline(**model_components).to(cpu_device)
+            elif task_name == "img2img":
+                from .extra_pipe.flux.pipeline_flux_img2img import FluxImg2ImgPipeline
+                self.pipe = FluxImg2ImgPipeline(**model_components).to(cpu_device)
+            else:
+                from .extra_pipe.flux.pipeline_flux_controlnet import FluxControlNetPipeline
+                from .extra_pipe.flux.controlnet_flux import FluxControlNetModel
+
+                controlnet_model = "InstantX/FLUX.1-dev-Controlnet-Union-alpha"
+
+                if hasattr(self.pipe, "controlnet"):
+                    model_components["controlnet"] = self.pipe.controlnet
+                else:
+                    model_components["controlnet"] = FluxControlNetModel.from_pretrained(
+                        controlnet_model,
+                        torch_dtype=torch.bfloat16
+                    ).to(cpu_device)
+
+                self.pipe = FluxControlNetPipeline(
+                    **model_components
+                ).to(cpu_device)
+            return None
+
+        else:
+            model_components["unet"] = self.pipe.unet
+            model_components["feature_extractor"] = self.pipe.feature_extractor
+            model_components["image_encoder"] = self.pipe.image_encoder
+
         if class_name == "StableDiffusionPipeline":
             model_components["safety_checker"] = self.pipe.safety_checker
             model_components["requires_safety_checker"] = self.pipe.config.requires_safety_checker
@@ -583,7 +627,15 @@ class Model_Diffusers(PreviewGenerator):
                 else:
                     raise ValueError(f"Model type {model_type} not supported.")
             else:
-                file_config = hf_hub_download(repo_id=base_model_id, filename="model_index.json")
+                try:
+                    file_config = hf_hub_download(repo_id=base_model_id, filename="model_index.json")
+                except Exception as e:
+                    logger.error(
+                        "Unable to obtain the configuration file. Make sure "
+                        "you have access to the repository and that it is in"
+                        " the diffusers format."
+                    )
+                    raise e
 
                 # Reading data from the JSON file
                 with open(file_config, 'r') as json_config:
@@ -594,6 +646,13 @@ class Model_Diffusers(PreviewGenerator):
                     class_name = data_config['_class_name']
 
                 match class_name:
+
+                    case "FluxPipeline":
+                        self.pipe = DiffusionPipeline.from_pretrained(
+                            base_model_id,
+                            torch_dtype=self.type_model_precision
+                        )
+
                     case "StableDiffusionPipeline":
                         self.pipe = StableDiffusionPipeline.from_pretrained(
                             base_model_id,
@@ -653,6 +712,13 @@ class Model_Diffusers(PreviewGenerator):
             self.default_scheduler = copy.deepcopy(self.pipe.scheduler)
             logger.debug(f"Base sampler: {self.default_scheduler}")
 
+        if class_name == "StableDiffusionPipeline":
+            self.prompt_embedder = Promt_Embedder_SD1()
+        elif class_name == "StableDiffusionXLPipeline":
+            self.prompt_embedder = Promt_Embedder_SDXL()
+        elif class_name == "FluxPipeline":
+            self.prompt_embedder = Promt_Embedder_FLUX()
+
         if task_name in self.model_memory:
             self.pipe = self.model_memory[task_name]
             # Create new base values
@@ -676,6 +742,8 @@ class Model_Diffusers(PreviewGenerator):
         if isinstance(model_id, list):
             if "XL" in class_name:
                 model_id = model_id[1]
+            # if "Flux" in class_name:
+            #     model_id = model_id[2]
             else:
                 model_id = model_id[0]
 
@@ -941,66 +1009,6 @@ class Model_Diffusers(PreviewGenerator):
         else:
             raise ValueError(f"Scheduler with name {name} not found. Valid schedulers: {', '.join(scheduler_names)}")
 
-    def emphasis_prompt(
-        self,
-        pipe,
-        prompt,
-        negative_prompt,
-        clip_skip=2,  # disabled with sdxl
-        emphasis="Original",
-        comma_padding_backtrack=20,
-    ):
-
-        if hasattr(pipe, "text_encoder_2"):
-            # Prompt weights for textual inversion
-            try:
-                prompt_ti = pipe.maybe_convert_prompt(prompt, pipe.tokenizer)
-                negative_prompt_ti = pipe.maybe_convert_prompt(negative_prompt, pipe.tokenizer)
-            except Exception as e:
-                logger.debug(str(e))
-                prompt_ti = prompt
-                negative_prompt_ti = negative_prompt
-                logger.error("FAILED: Convert prompt for textual inversion")
-
-            cond, uncond = long_prompts_with_weighting(
-                pipe,
-                prompt_ti,
-                negative_prompt_ti,
-                clip_skip=clip_skip,  # disabled with sdxl
-                emphasis=emphasis,
-                comma_padding_backtrack=comma_padding_backtrack
-            )
-
-            cond_tensor = [cond[0], uncond[0]]
-            all_cond = torch.cat(cond_tensor)
-
-            pooled_tensor = [cond[1], uncond[1]]
-            all_pooled = torch.cat(pooled_tensor)
-
-            assert torch.equal(all_cond[0:1], cond[0]), "Tensors are not equal"
-
-            return all_cond, all_pooled
-        else:
-            # Prompt weights for textual inversion
-            prompt_ti = self.pipe.maybe_convert_prompt(prompt, self.pipe.tokenizer)
-            negative_prompt_ti = self.pipe.maybe_convert_prompt(
-                negative_prompt, self.pipe.tokenizer
-            )
-
-            # separate the multi-vector textual inversion by comma
-            if self.embed_loaded != []:
-                prompt_ti = add_comma_after_pattern_ti(prompt_ti)
-                negative_prompt_ti = add_comma_after_pattern_ti(negative_prompt_ti)
-
-            return long_prompts_with_weighting(
-                pipe,
-                prompt_ti,
-                negative_prompt_ti,
-                clip_skip=clip_skip,
-                emphasis=emphasis,
-                comma_padding_backtrack=comma_padding_backtrack
-            )
-
     def create_prompt_embeds(
         self,
         prompt,
@@ -1009,160 +1017,41 @@ class Model_Diffusers(PreviewGenerator):
         clip_skip,
         syntax_weights,
     ):
-        if self.class_name == "StableDiffusionPipeline":
-            if self.embed_loaded != textual_inversion and textual_inversion != []:
-                # Textual Inversion
-                for name, directory_name in textual_inversion:
-                    try:
-                        if directory_name.endswith(".pt"):
-                            model = torch.load(directory_name, map_location=self.device)
-                            model_tensors = model.get("string_to_param").get("*")
-                            s_model = {"emb_params": model_tensors}
-                            # save_file(s_model, directory_name[:-3] + '.safetensors')
-                            self.pipe.load_textual_inversion(s_model, token=name)
+        if self.embed_loaded != textual_inversion and textual_inversion != []:
+            self.prompt_embedder.apply_ti(
+                self.class_name,
+                textual_inversion,
+                self.pipe,
+                self.device,
+                self.gui_active
+            )
+            self.embed_loaded = textual_inversion
 
-                        else:
-                            # self.pipe.text_encoder.resize_token_embeddings(len(self.pipe.tokenizer),pad_to_multiple_of=128)
-                            # self.pipe.load_textual_inversion("./bad_prompt.pt", token="baddd")
-                            self.pipe.load_textual_inversion(directory_name, token=name)
-                        if not self.gui_active:
-                            logger.info(f"Applied : {name}")
-
-                    except Exception as e:
-                        exception = str(e)
-                        if name in exception:
-                            logger.debug(f"Previous loaded embed {name}")
-                        else:
-                            logger.error(exception)
-                            logger.error(f"Can't apply embed {name}")
-                self.embed_loaded = textual_inversion
-
-            if syntax_weights not in OLD_PROMPT_WEIGHT_OPTIONS:
-                emphasis = PROMPT_WEIGHT_OPTIONS[syntax_weights]
-                return self.emphasis_prompt(
-                    self.pipe,
-                    prompt,
-                    negative_prompt,
-                    clip_skip=2 if clip_skip else 1,  # disabled with sdxl
-                    emphasis=emphasis,
-                    comma_padding_backtrack=20,
-                )
-
-            # Clip skip
-            # clip_skip_diffusers = None #clip_skip - 1 # future update
-            if not hasattr(self, "compel"):
-                self.compel = Compel(
-                    tokenizer=self.pipe.tokenizer,
-                    text_encoder=self.pipe.text_encoder,
-                    truncate_long_prompts=False,
-                    returned_embeddings_type=ReturnedEmbeddingsType.PENULTIMATE_HIDDEN_STATES_NORMALIZED if clip_skip else ReturnedEmbeddingsType.LAST_HIDDEN_STATES_NORMALIZED,
-                )
-
-            # Prompt weights for textual inversion
+        # Prompt weights for textual inversion
+        if hasattr(self.pipe, "maybe_convert_prompt"):
             prompt_ti = self.pipe.maybe_convert_prompt(prompt, self.pipe.tokenizer)
             negative_prompt_ti = self.pipe.maybe_convert_prompt(
                 negative_prompt, self.pipe.tokenizer
             )
-
-            # separate the multi-vector textual inversion by comma
-            if self.embed_loaded != []:
-                prompt_ti = add_comma_after_pattern_ti(prompt_ti)
-                negative_prompt_ti = add_comma_after_pattern_ti(negative_prompt_ti)
-
-            # Syntax weights
-            self.pipe.to(self.device)
-            if syntax_weights == "Classic":
-                prompt_emb = get_embed_new(prompt_ti, self.pipe, self.compel)
-                negative_prompt_emb = get_embed_new(negative_prompt_ti, self.pipe, self.compel)
-            else:
-                prompt_emb = get_embed_new(prompt_ti, self.pipe, self.compel, compel_process_sd=True)
-                negative_prompt_emb = get_embed_new(negative_prompt_ti, self.pipe, self.compel, compel_process_sd=True)
-
-            # Fix error shape
-            if prompt_emb.shape != negative_prompt_emb.shape:
-                (
-                    prompt_emb,
-                    negative_prompt_emb,
-                ) = self.compel.pad_conditioning_tensors_to_same_length(
-                    [prompt_emb, negative_prompt_emb]
-                )
-
-            return prompt_emb, negative_prompt_emb
-
         else:
-            # SDXL embed
-            if self.embed_loaded != textual_inversion and textual_inversion != []:
-                # Textual Inversion
-                for name, directory_name in textual_inversion:
-                    try:
-                        from safetensors.torch import load_file
-                        state_dict = load_file(directory_name)
-                        self.pipe.load_textual_inversion(state_dict["clip_g"], token=name, text_encoder=self.pipe.text_encoder_2, tokenizer=self.pipe.tokenizer_2)
-                        self.pipe.load_textual_inversion(state_dict["clip_l"], token=name, text_encoder=self.pipe.text_encoder, tokenizer=self.pipe.tokenizer)
-                        if not self.gui_active:
-                            logger.info(f"Applied : {name}")
-                    except Exception as e:
-                        exception = str(e)
-                        if name in exception:
-                            logger.debug(f"Previous loaded embed {name}")
-                        else:
-                            logger.error(exception)
-                            logger.error(f"Can't apply embed {name}")
-                self.embed_loaded = textual_inversion
+            prompt_ti = prompt
+            negative_prompt_ti = negative_prompt
 
-            if syntax_weights not in OLD_PROMPT_WEIGHT_OPTIONS:
-                emphasis = PROMPT_WEIGHT_OPTIONS[syntax_weights]
-                return self.emphasis_prompt(
-                    self.pipe,
-                    prompt,
-                    negative_prompt,
-                    clip_skip=2 if clip_skip else 1,  # disabled with sdxl
-                    emphasis=emphasis,
-                    comma_padding_backtrack=20,
-                )
+        # separate the multi-vector textual inversion by comma
+        if self.embed_loaded != []:
+            prompt_ti = add_comma_after_pattern_ti(prompt_ti)
+            negative_prompt_ti = add_comma_after_pattern_ti(negative_prompt_ti)
 
-            if not hasattr(self, "compel"):
-                # Clip skip
-                if clip_skip:
-                    # clip_skip_diffusers = None #clip_skip - 1 # future update
-                    self.compel = Compel(
-                        tokenizer=[self.pipe.tokenizer, self.pipe.tokenizer_2],
-                        text_encoder=[self.pipe.text_encoder, self.pipe.text_encoder_2],
-                        returned_embeddings_type=ReturnedEmbeddingsType.PENULTIMATE_HIDDEN_STATES_NON_NORMALIZED,
-                        requires_pooled=[False, True],
-                        truncate_long_prompts=False,
-                    )
-                else:
-                    # clip_skip_diffusers = None # clip_skip = None # future update
-                    self.compel = Compel(
-                        tokenizer=[self.pipe.tokenizer, self.pipe.tokenizer_2],
-                        text_encoder=[self.pipe.text_encoder, self.pipe.text_encoder_2],
-                        requires_pooled=[False, True],
-                        truncate_long_prompts=False,
-                    )
+        prompt_emb, negative_prompt_emb, compel = self.prompt_embedder(
+            prompt_ti,
+            negative_prompt_ti,
+            syntax_weights,
+            self.pipe,
+            clip_skip,
+            self.compel if hasattr(self, "compel") else None,
+        )
 
-            # Prompt weights for textual inversion
-            try:
-                prompt_ti = self.pipe.maybe_convert_prompt(prompt, self.pipe.tokenizer)
-                negative_prompt_ti = self.pipe.maybe_convert_prompt(negative_prompt, self.pipe.tokenizer)
-            except Exception as e:
-                logger.debug(str(e))
-                prompt_ti = prompt
-                negative_prompt_ti = negative_prompt
-                logger.error("FAILED: Convert prompt for textual inversion")
-
-            # prompt syntax style a1...
-            if syntax_weights == "Classic":
-                self.pipe.to("cuda")
-                prompt_ti = get_embed_new(prompt_ti, self.pipe, self.compel, only_convert_string=True)
-                negative_prompt_ti = get_embed_new(negative_prompt_ti, self.pipe, self.compel, only_convert_string=True)
-            else:
-                prompt_ti = prompt
-                negative_prompt_ti = negative_prompt
-
-            conditioning, pooled = self.compel([prompt_ti, negative_prompt_ti])
-
-            return conditioning, pooled
+        return prompt_emb, negative_prompt_emb
 
     def process_lora(self, select_lora, lora_weights_scale, unload=False):
         device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -1853,6 +1742,20 @@ class Model_Diffusers(PreviewGenerator):
                 vae_model=self.vae_model,
                 reload=True,
             )
+        elif (
+            self.class_name == "FluxPipeline"
+            and (self.pipe.text_encoder is None or self.pipe.transformer is None)
+        ):
+            logger.info("Realoading flux pipeline")
+            original_device = self.device
+            self.device = torch.device("cpu")
+            self.load_pipe(
+                self.base_model_id,
+                task_name=self.task_name,
+                vae_model=self.vae_model,
+                reload=True,
+            )
+            self.device = original_device
 
         pag_scale_is_true = bool(pag_scale)
         hasattr_pipe_pag = hasattr(self.pipe, "set_pag_applied_layers")
@@ -1870,7 +1773,22 @@ class Model_Diffusers(PreviewGenerator):
         xformers_memory_efficient_attention = False  # disabled
         if xformers_memory_efficient_attention and torch.cuda.is_available():
             self.pipe.disable_xformers_memory_efficient_attention()
-        self.pipe.to(self.device)
+
+        if self.class_name != "FluxPipeline":
+            self.pipe.to(self.device)
+        else:
+            self.pipe.text_encoder.to(self.device)
+            self.pipe.text_encoder_2.to(self.device)
+            logger.debug(str(self.pipe._execution_device)) # alternative patch to secuential_cpu_offload()
+
+            origin_device = self.device
+
+            def _execution_device(self):
+                logger.debug(f"patch device is {origin_device}")
+                return origin_device
+
+            self.pipe.__class__._execution_device = property(_execution_device)
+            logger.debug(str(self.pipe._execution_device))
 
         # Load style prompt file
         if style_json_file != "" and style_json_file != self.style_json_file:
@@ -1967,7 +1885,7 @@ class Model_Diffusers(PreviewGenerator):
             self.pipe.to(self.device)
 
         # FreeU
-        if FreeU:
+        if FreeU and self.class_name != "FluxPipeline":
             logger.info("FreeU active")
             if self.class_name == "StableDiffusionPipeline":
                 # sd
@@ -1992,20 +1910,18 @@ class Model_Diffusers(PreviewGenerator):
             syntax_weights=syntax_weights,
         )
 
-        if self.class_name != "StableDiffusionPipeline":
+        if self.class_name == "StableDiffusionXLPipeline":
             # Additional prompt for SDXL
             conditioning, pooled = prompt_emb.clone(), negative_prompt_emb.clone()
             prompt_emb = negative_prompt_emb = None
-
-        if torch.cuda.is_available() and xformers_memory_efficient_attention:
-            if xformers_memory_efficient_attention:
-                self.pipe.enable_xformers_memory_efficient_attention()
-            else:
-                self.pipe.disable_xformers_memory_efficient_attention()
+        elif self.class_name == "FluxPipeline":
+            conditioning, pooled = prompt_emb.clone(), negative_prompt_emb.clone()
+            prompt_emb = negative_prompt_emb = None
 
         try:
-            # self.pipe.scheduler = DPMSolverSinglestepScheduler() # fix default params by random scheduler, not recomn
-            self.pipe.scheduler = self.get_scheduler(sampler)
+            if self.class_name != "FluxPipeline":
+                # self.pipe.scheduler = DPMSolverSinglestepScheduler() # fix default params by random scheduler, not recomn
+                self.pipe.scheduler = self.get_scheduler(sampler)
         except Exception as e:
             logger.debug(f"{e}")
             torch.cuda.empty_cache()
@@ -2112,6 +2028,38 @@ class Model_Diffusers(PreviewGenerator):
             elif self.task_name == "img2img":
                 pipe_params_config["strength"] = strength
 
+        elif self.class_name == "FluxPipeline":
+            pipe_params_config.pop("negative_prompt", None)
+            pipe_params_config.pop("clip_skip", None)
+            pipe_params_config["prompt_embeds"] = conditioning
+            pipe_params_config["pooled_prompt_embeds"] = pooled
+
+            if self.task_name != "txt2img":
+                pipe_params_config["height"] = img_height = control_image.size[1]
+                pipe_params_config["width"] = img_width = control_image.size[0]
+
+            if self.task_name == "inpaint":
+                pipe_params_config["strength"] = strength
+                pipe_params_config["mask_image"] = control_mask
+            elif self.task_name not in ["txt2img", "inpaint", "img2img"]:
+                pipe_params_config["control_image"] = pipe_params_config.pop("image")
+
+                cn_mode = FLUX_CN_UNION_MODES[self.task_name]
+                if isinstance(cn_mode, list):
+                    if preprocessor_name is None or "None" in preprocessor_name:
+                        cn_mode = random.choice(cn_mode)
+                    else:
+                        cn_mode = cn_mode[1]
+                pipe_params_config["control_mode"] = cn_mode
+
+                pipe_params_config[
+                    "controlnet_conditioning_scale"
+                ] = float(controlnet_conditioning_scale)
+                # pipe_params_config["control_guidance_start"] = float(control_guidance_start)
+                # pipe_params_config["control_guidance_end"] = float(control_guidance_end)
+            elif self.task_name == "img2img":
+                pipe_params_config["strength"] = strength
+
         if self.ip_adapter_config:
             # maybe need cache embeds
             ip_adapter_embeds, ip_adapter_masks = self.get_ip_embeds(
@@ -2185,7 +2133,10 @@ class Model_Diffusers(PreviewGenerator):
 
             detailfix_pipe.set_progress_bar_config(leave=leave_progress_bar)
             detailfix_pipe.set_progress_bar_config(disable=disable_progress_bar)
-            detailfix_pipe.to(self.device)
+            if self.class_name != "FluxPipeline":
+                detailfix_pipe.to(self.device)
+            else:
+                detailfix_pipe.__class__._execution_device = property(_execution_device)
             torch.cuda.empty_cache()
             gc.collect()
 
@@ -2248,7 +2199,7 @@ class Model_Diffusers(PreviewGenerator):
                 detailfix_params_A["prompt"] = None
                 detailfix_params_A["negative_prompt"] = None
 
-            else:
+            elif self.class_name == "StableDiffusionXLPipeline":
                 # SDXL detailfix
                 if prompt_empty_detailfix_A and negative_prompt_empty_detailfix_A:
                     conditioning_detailfix_A, pooled_detailfix_A = conditioning, pooled
@@ -2267,6 +2218,24 @@ class Model_Diffusers(PreviewGenerator):
                 detailfix_params_A["pooled_prompt_embeds"] = pooled_detailfix_A[0:1]
                 detailfix_params_A["negative_prompt_embeds"] = conditioning_detailfix_A[1:2]
                 detailfix_params_A["negative_pooled_prompt_embeds"] = pooled_detailfix_A[1:2]
+
+            elif self.class_name == "FluxPipeline":
+                # Flux detailfix
+                if prompt_empty_detailfix_A and negative_prompt_empty_detailfix_A:
+                    conditioning_detailfix_A, pooled_detailfix_A = conditioning, pooled
+                else:
+                    conditioning_detailfix_A, pooled_detailfix_A = self.create_prompt_embeds(
+                        prompt=prompt_df_A,
+                        negative_prompt=negative_prompt_df_A,
+                        textual_inversion=textual_inversion,
+                        clip_skip=clip_skip,
+                        syntax_weights=syntax_weights,
+                    )
+
+                detailfix_params_A.pop('prompt', None)
+                detailfix_params_A.pop('negative_prompt', None)
+                detailfix_params_A["prompt_embeds"] = conditioning_detailfix_A
+                detailfix_params_A["pooled_prompt_embeds"] = pooled_detailfix_A
 
             logger.debug(f"detailfix A prompt empty {prompt_empty_detailfix_A, negative_prompt_empty_detailfix_A}")
             if not prompt_empty_detailfix_A or not negative_prompt_empty_detailfix_A:
@@ -2331,7 +2300,8 @@ class Model_Diffusers(PreviewGenerator):
                     detailfix_params_B["negative_prompt_embeds"] = negative_prompt_emb_ad_b
                 detailfix_params_B["prompt"] = None
                 detailfix_params_B["negative_prompt"] = None
-            else:
+
+            elif self.class_name == "StableDiffusionXLPipeline":
                 # SDXL detailfix
                 if prompt_empty_detailfix_B and negative_prompt_empty_detailfix_B:
                     conditioning_detailfix_B, pooled_detailfix_B = conditioning, pooled
@@ -2349,6 +2319,23 @@ class Model_Diffusers(PreviewGenerator):
                 detailfix_params_B["pooled_prompt_embeds"] = pooled_detailfix_B[0:1]
                 detailfix_params_B["negative_prompt_embeds"] = conditioning_detailfix_B[1:2]
                 detailfix_params_B["negative_pooled_prompt_embeds"] = pooled_detailfix_B[1:2]
+
+            elif self.class_name == "FluxPipeline":
+                # Flux detailfix
+                if prompt_empty_detailfix_B and negative_prompt_empty_detailfix_B:
+                    conditioning_detailfix_B, pooled_detailfix_B = conditioning, pooled
+                else:
+                    conditioning_detailfix_B, pooled_detailfix_B = self.create_prompt_embeds(
+                        prompt=prompt_df_B,
+                        negative_prompt=negative_prompt_df_B,
+                        textual_inversion=textual_inversion,
+                        clip_skip=clip_skip,
+                        syntax_weights=syntax_weights,
+                    )
+                detailfix_params_B.pop("prompt", None)
+                detailfix_params_B.pop("negative_prompt", None)
+                detailfix_params_B["prompt_embeds"] = conditioning_detailfix_B
+                detailfix_params_B["pooled_prompt_embeds"] = pooled_detailfix_B
 
             logger.debug(f"detailfix B prompt empty {prompt_empty_detailfix_B, negative_prompt_empty_detailfix_B}")
             if not prompt_empty_detailfix_B or not negative_prompt_empty_detailfix_B:
@@ -2399,7 +2386,7 @@ class Model_Diffusers(PreviewGenerator):
 
                     hires_params_config["prompt_embeds"] = prompt_emb_hires
                     hires_params_config["negative_prompt_embeds"] = negative_prompt_emb_hires
-            else:
+            elif self.class_name == "StableDiffusionXLPipeline":
                 if hires_prompt_empty and hires_negative_prompt_empty:
                     hires_conditioning, hires_pooled = conditioning, pooled
                 else:
@@ -2417,6 +2404,24 @@ class Model_Diffusers(PreviewGenerator):
                 hires_params_config["pooled_prompt_embeds"] = hires_pooled[0:1]
                 hires_params_config["negative_prompt_embeds"] = hires_conditioning[1:2]
                 hires_params_config["negative_pooled_prompt_embeds"] = hires_pooled[1:2]
+
+            elif self.class_name == "FluxPipeline":
+                if hires_prompt_empty and hires_negative_prompt_empty:
+                    hires_conditioning, hires_pooled = conditioning, pooled
+                else:
+                    hires_conditioning, hires_pooled = self.create_prompt_embeds(
+                        prompt=prompt_hires_valid,
+                        negative_prompt=negative_prompt_hires_valid,
+                        textual_inversion=textual_inversion,
+                        clip_skip=clip_skip,
+                        syntax_weights=syntax_weights,
+                    )
+
+                hires_params_config.pop("clip_skip", None)
+                hires_params_config.pop('prompt', None)
+                hires_params_config.pop('negative_prompt', None)
+                hires_params_config["prompt_embeds"] = hires_conditioning
+                hires_params_config["pooled_prompt_embeds"] = hires_pooled
 
             # Hires pipe
             if not hasattr(self, "hires_pipe") or not retain_hires_model_previous_load:
@@ -2441,7 +2446,10 @@ class Model_Diffusers(PreviewGenerator):
 
             hires_pipe.set_progress_bar_config(leave=leave_progress_bar)
             hires_pipe.set_progress_bar_config(disable=disable_progress_bar)
-            hires_pipe.to(self.device)
+            if self.class_name != "FluxPipeline":
+                hires_pipe.to(self.device)
+            else:
+                hires_pipe.__class__._execution_device = property(_execution_device)
             torch.cuda.empty_cache()
             gc.collect()
 
@@ -2459,7 +2467,10 @@ class Model_Diffusers(PreviewGenerator):
         try:
             logger.debug(f"INFO PIPE: {self.pipe.__class__.__name__}")
             logger.debug(f"text_encoder_type: {self.pipe.text_encoder.dtype}")
-            logger.debug(f"unet_type: {self.pipe.unet.dtype}")
+            if hasattr(self.pipe, "unet"):
+                logger.debug(f"unet_type: {self.pipe.unet.dtype}")
+            else:
+                logger.debug(f"transformer_type: {self.pipe.transformer.dtype}")
             logger.debug(f"vae_type: {self.pipe.vae.dtype}")
             logger.debug(f"pipe_type: {self.pipe.dtype}")
             logger.debug(f"scheduler_main_pipe: {self.pipe.scheduler}")
@@ -2541,6 +2552,25 @@ class Model_Diffusers(PreviewGenerator):
         images,
         metadata,
     ):
+
+        if self.class_name == "FluxPipeline":
+            if upscaler_model_path is None and not adetailer_A and not adetailer_B and loop_generation == 1:
+                self.pipe.transformer = None
+            if hasattr(self.pipe, "controlnet") and loop_generation == 1:
+                self.pipe.controlnet = None
+
+            images.to(self.device)
+
+            if upscaler_model_path not in LATENT_UPSCALERS:
+                self.pipe.vae.to(self.device)
+                torch.cuda.empty_cache()
+                gc.collect()
+                latents = self.pipe._unpack_latents(images, metadata[9], metadata[8], self.pipe.vae_scale_factor)
+                latents = (latents / self.pipe.vae.config.scaling_factor) + self.pipe.vae.config.shift_factor
+                image = self.pipe.vae.decode(latents, return_dict=False)[0]
+                images = self.pipe.image_processor.postprocess(image, output_type="pil")
+                # self.pipe.vae.to("cpu")
+
         if isinstance(images, torch.Tensor):
             images = [tl.unsqueeze(0) for tl in torch.unbind(images, dim=0)]
 
@@ -2704,6 +2734,18 @@ class Model_Diffusers(PreviewGenerator):
             pipe_params_config["generator"] = generators if self.task_name != "img2img" else generators[0]  # no list
             seeds = seeds if self.task_name != "img2img" else [seeds[0]] * num_images
 
+            if self.class_name == "FluxPipeline":
+                self.pipe.text_encoder = None
+                self.pipe.text_encoder_2 = None
+                torch.cuda.empty_cache()
+                gc.collect()
+                if self.task_name == "txt2img":
+                    self.pipe.transformer.to(self.device)
+                torch.cuda.empty_cache()
+                gc.collect()
+                pipe_params_config["output_type"] = "latent"
+                # self.pipe.__class__._execution_device = property(_execution_device)
+
             try:
                 images = self.pipe(
                     **pipe_params_config,
@@ -2816,6 +2858,18 @@ class Model_Diffusers(PreviewGenerator):
             # fix img2img bug need concat tensor prompts with generator same number (only in batch inference)
             pipe_params_config["generator"] = generators if self.task_name != "img2img" else generators[0]  # no list
             seeds = seeds if self.task_name != "img2img" else [seeds[0]] * num_images
+
+            if self.class_name == "FluxPipeline":
+                self.pipe.text_encoder = None
+                self.pipe.text_encoder_2 = None
+                torch.cuda.empty_cache()
+                gc.collect()
+                if self.task_name == "txt2img":
+                    self.pipe.transformer.to(self.device)
+                torch.cuda.empty_cache()
+                gc.collect()
+                pipe_params_config["output_type"] = "latent"
+                # self.pipe.__class__._execution_device = property(_execution_device)
 
             try:
                 logger.debug("Start stream")
