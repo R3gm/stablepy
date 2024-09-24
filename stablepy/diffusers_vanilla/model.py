@@ -321,6 +321,7 @@ def latents_to_rgb(latents, latent_resize, vae_decoding, pipe):
         resized_image = pipe.image_processor.postprocess(image, output_type="pil")
     else:
         weights_tensor = torch.tensor(weights, dtype=latents.dtype, device=latents.device).T
+
         biases_tensor = torch.tensor((150, 140, 130), dtype=latents.dtype, device=latents.device)
         rgb_tensor = torch.einsum("...lxy,lr -> ...rxy", latents, weights_tensor) + biases_tensor.view(-1, 1, 1)
         image_array = rgb_tensor.clamp(0, 255)[0].byte().cpu().numpy()
@@ -336,6 +337,7 @@ def latents_to_rgb(latents, latent_resize, vae_decoding, pipe):
 class PreviewGenerator:
     def __init__(self, *args, **kwargs):
         self.image_step = None
+        self.fail_work = None
         self.stream_config(5, 8, False)
 
     def stream_config(self, concurrency, latent_resize_by, vae_decoding):
@@ -347,6 +349,14 @@ class PreviewGenerator:
         latents = callback_kwargs["latents"]
         if step % self.concurrency == 0:  # every how many steps
             logger.debug(step)
+            if self.class_name == "FluxPipeline":
+                latents = self.pipe._unpack_latents(latents, self.metadata[9], self.metadata[8], self.pipe.vae_scale_factor)
+                latents = (latents / self.pipe.vae.config.scaling_factor) + self.pipe.vae.config.shift_factor
+                batch_size, channels, height, width = latents.shape
+                target_channels = 4
+                group_size = channels // target_channels
+                latents = latents.view(batch_size, target_channels, group_size, height, width).mean(dim=2)
+
             self.image_step = latents_to_rgb(latents, self.latent_resize_by, self.vae_decoding, self.pipe)
             self.new_image_event.set()  # Signal that a new image is available
         return callback_kwargs
@@ -359,20 +369,32 @@ class PreviewGenerator:
             if self.image_step:
                 yield self.image_step  # Yield the new image
 
+            if self.fail_work:
+                logger.debug(f"Stream failed")
+                raise Exception(self.fail_work)
+
     def generate_images(self, pipe_params_config):
 
         self.final_image = None
         self.image_step = None
-        self.final_image = self.pipe(
-            **pipe_params_config,
-            callback_on_step_end=self.decode_tensors,
-            callback_on_step_end_tensor_inputs=["latents"],
-        ).images
+        self.fail_work = None
+        try:
+            self.final_image = self.pipe(
+                **pipe_params_config,
+                callback_on_step_end=self.decode_tensors,
+                callback_on_step_end_tensor_inputs=["latents"],
+            ).images
 
-        if not isinstance(self.final_image, torch.Tensor):
-            self.image_step = self.final_image[0]
-        logger.debug("finish")
-        self.new_image_event.set()  # Result image
+            if not isinstance(self.final_image, torch.Tensor):
+                self.image_step = self.final_image[0]
+
+            logger.debug("finish")
+            self.new_image_event.set()  # Result image
+
+        except Exception as e:
+            traceback.print_exc()
+            self.fail_work = str(e)
+
         self.generation_finished.set()  # Signal that generation is finished
 
     def stream_preview(self, pipe_params_config):
@@ -460,7 +482,7 @@ class Model_Diffusers(PreviewGenerator):
                 from .extra_pipe.flux.pipeline_flux_controlnet import FluxControlNetPipeline
                 from .extra_pipe.flux.controlnet_flux import FluxControlNetModel
 
-                controlnet_model = "InstantX/FLUX.1-dev-Controlnet-Union-alpha"
+                controlnet_model = "Shakker-Labs/FLUX.1-dev-ControlNet-Union-Pro"
 
                 if hasattr(self.pipe, "controlnet"):
                     model_components["controlnet"] = self.pipe.controlnet
@@ -2559,17 +2581,18 @@ class Model_Diffusers(PreviewGenerator):
             if hasattr(self.pipe, "controlnet") and loop_generation == 1:
                 self.pipe.controlnet = None
 
-            images.to(self.device)
-
             if upscaler_model_path not in LATENT_UPSCALERS:
                 self.pipe.vae.to(self.device)
                 torch.cuda.empty_cache()
                 gc.collect()
-                latents = self.pipe._unpack_latents(images, metadata[9], metadata[8], self.pipe.vae_scale_factor)
-                latents = (latents / self.pipe.vae.config.scaling_factor) + self.pipe.vae.config.shift_factor
-                image = self.pipe.vae.decode(latents, return_dict=False)[0]
-                images = self.pipe.image_processor.postprocess(image, output_type="pil")
-                # self.pipe.vae.to("cpu")
+                images.to(self.device)
+
+                with torch.no_grad():
+                    latents = self.pipe._unpack_latents(images, metadata[9], metadata[8], self.pipe.vae_scale_factor)
+                    latents = (latents / self.pipe.vae.config.scaling_factor) + self.pipe.vae.config.shift_factor
+                    image = self.pipe.vae.decode(latents, return_dict=False)[0]
+                    images = self.pipe.image_processor.postprocess(image, output_type="pil")
+                    # self.pipe.vae.to("cpu")
 
         if isinstance(images, torch.Tensor):
             images = [tl.unsqueeze(0) for tl in torch.unbind(images, dim=0)]
@@ -2870,6 +2893,7 @@ class Model_Diffusers(PreviewGenerator):
                 gc.collect()
                 pipe_params_config["output_type"] = "latent"
                 # self.pipe.__class__._execution_device = property(_execution_device)
+                self.metadata = metadata
 
             try:
                 logger.debug("Start stream")
