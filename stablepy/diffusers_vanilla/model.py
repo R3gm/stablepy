@@ -377,7 +377,6 @@ class PreviewGenerator:
 
         self.final_image = None
         self.image_step = None
-        self.fail_work = None
         try:
             self.final_image = self.pipe(
                 **pipe_params_config,
@@ -399,6 +398,7 @@ class PreviewGenerator:
 
     def stream_preview(self, pipe_params_config):
 
+        self.fail_work = None
         self.new_image_event = threading.Event()
         self.generation_finished = threading.Event()
 
