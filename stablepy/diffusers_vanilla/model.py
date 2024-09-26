@@ -1076,7 +1076,7 @@ class Model_Diffusers(PreviewGenerator):
         return prompt_emb, negative_prompt_emb
 
     def process_lora(self, select_lora, lora_weights_scale, unload=False):
-        device = "cuda" if torch.cuda.is_available() else "cpu"
+        device = "cuda" if self.device.type != "cpu" else "cpu"
         status_lora = None
         if not unload:
             if select_lora is not None:
