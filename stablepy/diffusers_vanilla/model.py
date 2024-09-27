@@ -609,6 +609,7 @@ class Model_Diffusers(PreviewGenerator):
             self.model_memory = {}
             self.lora_memory = [None, None, None, None, None]
             self.lora_scale_memory = [1.0, 1.0, 1.0, 1.0, 1.0]
+            self.lora_status = [None] * 5
             self.flash_config = None
             self.ip_adapter_config = None
             self.embed_loaded = []
@@ -1824,7 +1825,7 @@ class Model_Diffusers(PreviewGenerator):
             )
 
         # LoRA load
-        self.lora_merge(
+        self.lora_status = self.lora_merge(
             lora_A, lora_scale_A,
             lora_B, lora_scale_B,
             lora_C, lora_scale_C,
