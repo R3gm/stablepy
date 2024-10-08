@@ -393,6 +393,7 @@ class PreviewGenerator:
         except Exception as e:
             traceback.print_exc()
             self.fail_work = str(e)
+            self.new_image_event.set()
 
         self.generation_finished.set()  # Signal that generation is finished
 
