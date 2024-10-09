@@ -355,7 +355,7 @@ class PreviewGenerator:
                 yield self.image_step  # Yield the new image
 
             if self.fail_work:
-                logger.debug(f"Stream failed")
+                logger.debug("Stream failed")
                 raise Exception(self.fail_work)
 
     def generate_images(self, pipe_params_config):
@@ -1898,7 +1898,7 @@ class Model_Diffusers(PreviewGenerator):
             )
 
         # LoRA load
-         self.lora_status = self.lora_merge(
+        self.lora_status = self.lora_merge(
             lora_A, lora_scale_A,
             lora_B, lora_scale_B,
             lora_C, lora_scale_C,
