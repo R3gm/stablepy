@@ -330,6 +330,7 @@ def latents_to_rgb(latents, latent_resize, vae_decoding, pipe):
 class PreviewGenerator:
     def __init__(self, *args, **kwargs):
         self.image_step = None
+        self.fail_work = None
         self.stream_config(5, 8, False)
 
     def stream_config(self, concurrency, latent_resize_by, vae_decoding):
@@ -353,24 +354,36 @@ class PreviewGenerator:
             if self.image_step:
                 yield self.image_step  # Yield the new image
 
+            if self.fail_work:
+                logger.debug(f"Stream failed")
+                raise Exception(self.fail_work)
+
     def generate_images(self, pipe_params_config):
 
         self.final_image = None
         self.image_step = None
-        self.final_image = self.pipe(
-            **pipe_params_config,
-            callback_on_step_end=self.decode_tensors,
-            callback_on_step_end_tensor_inputs=["latents"],
-        ).images
+        try:
+            self.final_image = self.pipe(
+                **pipe_params_config,
+                callback_on_step_end=self.decode_tensors,
+                callback_on_step_end_tensor_inputs=["latents"],
+            ).images
 
-        if not isinstance(self.final_image, torch.Tensor):
-            self.image_step = self.final_image[0]
-        logger.debug("finish")
-        self.new_image_event.set()  # Result image
+            if not isinstance(self.final_image, torch.Tensor):
+                self.image_step = self.final_image[0]
+
+            logger.debug("finish")
+            self.new_image_event.set()  # Result image
+        except Exception as e:
+            traceback.print_exc()
+            self.fail_work = str(e)
+            self.new_image_event.set()
+
         self.generation_finished.set()  # Signal that generation is finished
 
     def stream_preview(self, pipe_params_config):
 
+        self.fail_work = None
         self.new_image_event = threading.Event()
         self.generation_finished = threading.Event()
 
@@ -543,6 +556,7 @@ class Model_Diffusers(PreviewGenerator):
             self.model_memory = {}
             self.lora_memory = [None, None, None, None, None]
             self.lora_scale_memory = [1.0, 1.0, 1.0, 1.0, 1.0]
+            self.lora_status = [None] * 5
             self.flash_config = None
             self.ip_adapter_config = None
             self.embed_loaded = []
@@ -1153,7 +1167,7 @@ class Model_Diffusers(PreviewGenerator):
 
             # prompt syntax style a1...
             if syntax_weights == "Classic":
-                self.pipe.to("cuda")
+                # self.pipe.to("cuda")
                 prompt_ti = get_embed_new(prompt_ti, self.pipe, self.compel, only_convert_string=True)
                 negative_prompt_ti = get_embed_new(negative_prompt_ti, self.pipe, self.compel, only_convert_string=True)
             else:
@@ -1165,7 +1179,7 @@ class Model_Diffusers(PreviewGenerator):
             return conditioning, pooled
 
     def process_lora(self, select_lora, lora_weights_scale, unload=False):
-        device = "cuda" if torch.cuda.is_available() else "cpu"
+        device = "cuda" if self.device.type != "cpu" else "cpu"
         status_lora = None
         if not unload:
             if select_lora is not None:
@@ -1884,7 +1898,7 @@ class Model_Diffusers(PreviewGenerator):
             )
 
         # LoRA load
-        self.lora_merge(
+         self.lora_status = self.lora_merge(
             lora_A, lora_scale_A,
             lora_B, lora_scale_B,
             lora_C, lora_scale_C,
