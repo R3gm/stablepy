@@ -2772,7 +2772,7 @@ class Model_Diffusers(PreviewGenerator):
             del self.compel
         torch.cuda.empty_cache()
         gc.collect()
-        return images, seeds, image_list, image_metadata
+        return images, [seeds, image_list, image_metadata]
 
     def start_stream(
         self,
@@ -2896,4 +2896,4 @@ class Model_Diffusers(PreviewGenerator):
         torch.cuda.empty_cache()
         gc.collect()
 
-        yield images, seeds, image_list, image_metadata
+        yield images, [seeds, image_list, image_metadata]
