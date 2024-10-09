@@ -2838,7 +2838,7 @@ class Model_Diffusers(PreviewGenerator):
                 for img in stream:
                     if not isinstance(img, list):
                         img = [img]
-                    yield img, seeds, None, None
+                    yield img, [seeds, None, None]
 
                 images = self.final_image
 
@@ -2853,7 +2853,7 @@ class Model_Diffusers(PreviewGenerator):
                     for img in stream:
                         if not isinstance(img, list):
                             img = [img]
-                        yield img, seeds, None
+                        yield img, [seeds, None, None]
 
                     images = self.final_image
 
