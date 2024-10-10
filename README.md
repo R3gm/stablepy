@@ -6,7 +6,7 @@ The goal of this project is to make Stable Diffusion more accessible, simple and
 
 **Installation:**
 ```
-pip install stablepy==0.5.0
+pip install stablepy==0.5.1
 ```
 
 **Usage:**
@@ -37,7 +37,7 @@ model = Model_Diffusers(
     task_name= 'txt2img',
 )
 
-image, path_image = model(
+image, info_image = model(
     prompt='highly detailed portrait of an underwater city, with towering spires and domes rising up from the ocean floor',
     num_steps = 30,
     guidance_scale = 7.5,
@@ -61,7 +61,7 @@ model = Model_Diffusers(
     task_name= 'canny',
 )
 
-images, path_images = model(
+images, info_image = model(
     prompt='highly detailed portrait of an underwater city, with towering spires and domes rising up from the ocean floor',
     num_steps = 30,
     image_resolution = 768,
@@ -78,9 +78,14 @@ images, path_images = model(
 
 images[1]
 ```
-**📖 News:**
+**📖 New Update Details:**
 
-🔥 Version 0.5.0: New Update Details
+🔥 Version 0.5.1:
+
+- After generation, PIL images are now returned along with sublists containing the seeds, image paths, and metadata with the parameters used in generation. `[pil_image], [seed, image_path, metadata]`
+- The use of `image_previews=True` has been improved, and now preview images can be obtained during the generation steps using a generator. For more details, refer to the Colab notebook.
+
+🔥 Version 0.5.0:
 
 - Fix LoRA SDXL compatibility.
 - Latent upscaler and variants.
@@ -90,7 +95,7 @@ images[1]
 - ControlNet "lineart_anime" task accessible and able to load a model different from the "lineart" task.
 - ControlNet Tile and Recolor for SD1.5 and SDXL ("tile" replaces the previous task called "sdxl_tile_realistic").
 
-🔥 Version 0.4.0: New Update Details
+🔥 Version 0.4.0:
 
 - IP Adapter with the variants FaceID and Instant-Style
 - New samplers
