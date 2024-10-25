@@ -42,8 +42,8 @@ class Prompt_Embedder_Base:
                     pipe.load_textual_inversion(state_dict["clip_l"], token=name, text_encoder=pipe.text_encoder, tokenizer=pipe.tokenizer)
                 else:
                     logger.error("Textual Inversion not combatible")
-                if not gui_active:
-                    logger.info(f"Applied : {name}")
+
+                logger.info(f"Applied: {name}")
             except Exception as e:
                 exception = str(e)
                 if name in exception:
