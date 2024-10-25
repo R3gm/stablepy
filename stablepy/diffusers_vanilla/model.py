@@ -447,6 +447,8 @@ class Model_Diffusers(PreviewGenerator):
         self.image_encoder_name = None
         self.image_encoder_module = None
 
+        self.last_lora_error = ""
+
     def switch_pipe_class(
         self,
         class_name,
@@ -1097,6 +1099,7 @@ class Model_Diffusers(PreviewGenerator):
                         traceback.print_exc()
                     logger.error(f"ERROR: LoRA not compatible: {select_lora}")
                     logger.debug(f"{str(e)}")
+                    self.last_lora_error = str(e)
                     status_lora = False
         else:
             # Unload numerically unstable but fast and need less memory
@@ -1727,6 +1730,11 @@ class Model_Diffusers(PreviewGenerator):
 
         if not seed:
             seed = -1
+        if self.task_name == "":
+            raise RuntimeError(
+                "Some components of the model did not "
+                "load correctly. Please reload the model"
+            )
         if self.task_name != "txt2img" and image is None:
             raise ValueError(
                 "You need to specify the <image> for this task."
