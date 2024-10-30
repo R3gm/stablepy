@@ -1,5 +1,8 @@
+from .extra_scheduler.scheduling_dpmsolver_multistep import (
+    DPMSolverMultistepScheduler
+)
 from diffusers import (
-    DPMSolverMultistepScheduler,
+    # DPMSolverMultistepScheduler,
     DPMSolverSinglestepScheduler,
     KDPM2DiscreteScheduler,
     EulerDiscreteScheduler,
@@ -17,6 +20,7 @@ from diffusers import (
     DDPMScheduler,
     EDMEulerScheduler,
     TCDScheduler,
+    SASolverScheduler,
 )
 from diffusers import (
     StableDiffusionControlNetPipeline,
@@ -156,45 +160,47 @@ PROMPT_WEIGHT_OPTIONS = {
 ALL_PROMPT_WEIGHT_OPTIONS = list(PROMPT_WEIGHT_OPTIONS.keys())
 OLD_PROMPT_WEIGHT_OPTIONS = ALL_PROMPT_WEIGHT_OPTIONS[0:2]
 
+# Sampler: DPM++ 2M, Schedule type: Exponential
 SCHEDULER_CONFIG_MAP = {
     "DPM++ 2M": (DPMSolverMultistepScheduler, {"algorithm_type": "dpmsolver++", "use_karras_sigmas": False}),
-    "DPM++ 2M Karras": (DPMSolverMultistepScheduler, {"algorithm_type": "dpmsolver++", "use_karras_sigmas": True}),
+    # "DPM++ 2M Karras": (DPMSolverMultistepScheduler, {"algorithm_type": "dpmsolver++", "use_karras_sigmas": True}),
     "DPM++ 2M SDE": (DPMSolverMultistepScheduler, {"use_karras_sigmas": False, "algorithm_type": "sde-dpmsolver++"}),
-    "DPM++ 2M SDE Karras": (DPMSolverMultistepScheduler, {"use_karras_sigmas": True, "algorithm_type": "sde-dpmsolver++"}),
+    # "DPM++ 2M SDE Karras": (DPMSolverMultistepScheduler, {"use_karras_sigmas": True, "algorithm_type": "sde-dpmsolver++"}),
     "DPM++ 2S": (DPMSolverSinglestepScheduler, {"algorithm_type": "dpmsolver++", "use_karras_sigmas": False}),
-    "DPM++ 2S Karras": (DPMSolverSinglestepScheduler, {"algorithm_type": "dpmsolver++", "use_karras_sigmas": True}),
+    # "DPM++ 2S Karras": (DPMSolverSinglestepScheduler, {"algorithm_type": "dpmsolver++", "use_karras_sigmas": True}),
     "DPM++ 1S": (DPMSolverMultistepScheduler, {"algorithm_type": "dpmsolver++", "solver_order": 1}),
-    "DPM++ 1S Karras": (DPMSolverMultistepScheduler, {"algorithm_type": "dpmsolver++", "solver_order": 1, "use_karras_sigmas": True}),
-    "DPM++ 3M": (DPMSolverMultistepScheduler, {"algorithm_type": "dpmsolver++", "solver_order": 3}),
-    "DPM++ 3M Karras": (DPMSolverMultistepScheduler, {"algorithm_type": "dpmsolver++", "solver_order": 3, "use_karras_sigmas": True}),
+    # "DPM++ 1S Karras": (DPMSolverMultistepScheduler, {"algorithm_type": "dpmsolver++", "solver_order": 1, "use_karras_sigmas": True}),
     "DPM 3M": (DPMSolverMultistepScheduler, {"algorithm_type": "dpmsolver", "final_sigmas_type": "sigma_min", "solver_order": 3}),
+    "DPM++ 3M": (DPMSolverMultistepScheduler, {"algorithm_type": "dpmsolver++", "solver_order": 3}),
+    # "DPM++ 3M Karras": (DPMSolverMultistepScheduler, {"algorithm_type": "dpmsolver++", "solver_order": 3, "use_karras_sigmas": True}),
+    "DPM++ 3M SDE": (DPMSolverMultistepScheduler, {"solver_order": 3, "algorithm_type": "sde-dpmsolver++"}),
     "DPM++ SDE": (DPMSolverSDEScheduler, {"use_karras_sigmas": False}),
-    "DPM++ SDE Karras": (DPMSolverSDEScheduler, {"use_karras_sigmas": True}),
+    # "DPM++ SDE Karras": (DPMSolverSDEScheduler, {"use_karras_sigmas": True}),
     "DPM2": (KDPM2DiscreteScheduler, {}),
-    "DPM2 Karras": (KDPM2DiscreteScheduler, {"use_karras_sigmas": True}),
+    # "DPM2 Karras": (KDPM2DiscreteScheduler, {"use_karras_sigmas": True}),
     "DPM2 a": (KDPM2AncestralDiscreteScheduler, {}),
-    "DPM2 a Karras": (KDPM2AncestralDiscreteScheduler, {"use_karras_sigmas": True}),
+    # "DPM2 a Karras": (KDPM2AncestralDiscreteScheduler, {"use_karras_sigmas": True}),
     "Euler": (EulerDiscreteScheduler, {}),
     "Euler a": (EulerAncestralDiscreteScheduler, {}),
-    "Euler trailing": (EulerDiscreteScheduler, {"timestep_spacing": "trailing"}),
-    "Euler trailing sample": (EulerDiscreteScheduler, {"timestep_spacing": "trailing", "prediction_type": "sample"}),
-    "Euler a trailing": (EulerAncestralDiscreteScheduler, {"timestep_spacing": "trailing"}),
+    # "Euler trailing": (EulerDiscreteScheduler, {"timestep_spacing": "trailing"}),
+    # "Euler a trailing": (EulerAncestralDiscreteScheduler, {"timestep_spacing": "trailing"}),
     "Heun": (HeunDiscreteScheduler, {}),
-    "Heun Karras": (HeunDiscreteScheduler, {"use_karras_sigmas": True}),
+    # "Heun Karras": (HeunDiscreteScheduler, {"use_karras_sigmas": True}),
     "LMS": (LMSDiscreteScheduler, {}),
-    "LMS Karras": (LMSDiscreteScheduler, {"use_karras_sigmas": True}),
+    # "LMS Karras": (LMSDiscreteScheduler, {"use_karras_sigmas": True}),
     "DDIM": (DDIMScheduler, {}),
-    "DDIM trailing": (DDIMScheduler, {"timestep_spacing": "trailing"}),
+    # "DDIM trailing": (DDIMScheduler, {"timestep_spacing": "trailing", "rescale_betas_zero_snr": True}),
     "DEIS": (DEISMultistepScheduler, {}),
     "UniPC": (UniPCMultistepScheduler, {}),
-    "UniPC Karras": (UniPCMultistepScheduler, {"use_karras_sigmas": True}),
+    # "UniPC Karras": (UniPCMultistepScheduler, {"use_karras_sigmas": True}),
     "PNDM": (PNDMScheduler, {}),
     "Euler EDM": (EDMEulerScheduler, {}),
-    "Euler EDM Karras": (EDMEulerScheduler, {"use_karras_sigmas": True}),
+    # "Euler EDM Karras": (EDMEulerScheduler, {"use_karras_sigmas": True}),
     "DPM++ 2M EDM": (EDMDPMSolverMultistepScheduler, {"solver_order": 2, "solver_type": "midpoint", "final_sigmas_type": "zero", "algorithm_type": "dpmsolver++"}),
-    "DPM++ 2M EDM Karras": (EDMDPMSolverMultistepScheduler, {"use_karras_sigmas": True, "solver_order": 2, "solver_type": "midpoint", "final_sigmas_type": "zero", "algorithm_type": "dpmsolver++"}),
+    # "DPM++ 2M EDM Karras": (EDMDPMSolverMultistepScheduler, {"use_karras_sigmas": True, "solver_order": 2, "solver_type": "midpoint", "final_sigmas_type": "zero", "algorithm_type": "dpmsolver++"}),
     "DDPM": (DDPMScheduler, {}),
-
+    "SA Solver": (SASolverScheduler, {"use_karras_sigmas": False, "timestep_spacing": "linspace"}),
+    # "SA Solver Karras": (SASolverScheduler, {"use_karras_sigmas": True, "timestep_spacing": "linspace"}),
     "DPM++ 2M Lu": (DPMSolverMultistepScheduler, {"algorithm_type": "dpmsolver++", "use_lu_lambdas": True}),
     "DPM++ 2M Ef": (DPMSolverMultistepScheduler, {"algorithm_type": "dpmsolver++", "euler_at_final": True}),
     "DPM++ 2M SDE Lu": (DPMSolverMultistepScheduler, {"use_lu_lambdas": True, "algorithm_type": "sde-dpmsolver++"}),
@@ -202,14 +208,81 @@ SCHEDULER_CONFIG_MAP = {
 
     "LCM": (LCMScheduler, {}),
     "TCD": (TCDScheduler, {}),
-    "LCM trailing": (LCMScheduler, {"timestep_spacing": "trailing"}),
-    "TCD trailing": (TCDScheduler, {"timestep_spacing": "trailing"}),
+    # "LCM trailing": (LCMScheduler, {"timestep_spacing": "trailing"}),
+    # "TCD trailing": (TCDScheduler, {"timestep_spacing": "trailing"}),
     "LCM Auto-Loader": (LCMScheduler, {}),
     "TCD Auto-Loader": (TCDScheduler, {}),
 }
 
 scheduler_names = list(SCHEDULER_CONFIG_MAP.keys())
 FLASH_AUTO_LOAD_SAMPLER = scheduler_names[-2:]
+
+SCHEDULE_TYPES = {
+    "Automatic": "",
+    "Karras": {"use_karras_sigmas": True},
+    "Exponential": {"timestep_spacing": "linspace", "use_exponential_sigmas": True},
+    "Beta": {"timestep_spacing": "linspace", "use_beta_sigmas": True},
+    "SGM Uniform": {"timestep_spacing": "trailing"},
+    "Normal": {"use_karras_sigmas": False},  # check
+    "Simple": {"timestep_spacing": "trailing", "use_karras_sigmas": False},
+}
+
+SCHEDULE_TYPE_OPTIONS = list(SCHEDULE_TYPES.keys())
+
+SCHEDULE_PREDICTION_TYPE = {
+    "Automatic": "",
+    "Epsilon": {"prediction_type": "epsilon"},
+    "Sample": {"prediction_type": "sample"},
+    "V prediction": {"prediction_type": "v_prediction", "rescale_betas_zero_snr": True},
+}
+
+SCHEDULE_PREDICTION_TYPE_OPTIONS = list(SCHEDULE_PREDICTION_TYPE.keys())
+
+# Mixes that need fixing.
+NOISE_IMAGE_STATUS = {
+    "DPM++ 2M": ["Beta"],
+    "DPM++ 1S": ["Beta"],
+    "DPM++ 3M": ["Beta"],
+    "DPM++ 2M Ef": ["Beta"]
+}
+
+BLACK_IMAGE_STATUS = {
+    "DPM++ 2M SDE": ["Beta"],
+    "DPM++ 3M SDE": ["Beta"],
+    "DPM 3M": ["Karras", "Beta"],
+    "DPM++ 2M SDE Ef": ["Beta"]
+}
+
+ERROR_IMAGE_STATUS = {
+    "DPM++ 2M": ["Exponential"],
+    "DPM++ 2M SDE": ["Exponential"],
+    "DPM++ 2S": ["Exponential", "Beta"],
+    "DPM++ 1S": ["Exponential"],
+    "DPM++ 3M": ["Exponential"],
+    "DPM++ 3M SDE": ["Exponential"],
+    "DPM 3M": ["Exponential"],
+    "DEIS": ["Exponential", "Beta"],
+    "UniPC": ["Exponential", "Beta"],
+    "SA Solver": ["Exponential", "Beta"],
+    "DPM++ 2M Ef": ["Exponential"],
+    "DPM++ 2M SDE Ef": ["Exponential"]
+}
+
+INCOMPATIBILITY_SAMPLER_SCHEDULE = {}
+
+
+# Function to merge each dictionary into the global dictionary
+def merge_dicts(source_dict):
+    for key, value in source_dict.items():
+        if key not in INCOMPATIBILITY_SAMPLER_SCHEDULE:
+            INCOMPATIBILITY_SAMPLER_SCHEDULE[key] = []
+        INCOMPATIBILITY_SAMPLER_SCHEDULE[key].extend(value)
+
+
+# Merge each dictionary
+merge_dicts(NOISE_IMAGE_STATUS)
+merge_dicts(BLACK_IMAGE_STATUS)
+merge_dicts(ERROR_IMAGE_STATUS)
 
 IP_ADAPTER_MODELS = {
     "StableDiffusionPipeline": {

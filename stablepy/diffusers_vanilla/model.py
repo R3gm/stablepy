@@ -58,7 +58,12 @@ from .constants import (
 from .multi_emphasis_prompt import long_prompts_with_weighting
 from diffusers.utils import load_image
 from .prompt_weights import get_embed_new, add_comma_after_pattern_ti
-from .utils import save_pil_image_with_metadata, checkpoint_model_type, get_string_metadata
+from .utils import (
+    save_pil_image_with_metadata,
+    checkpoint_model_type,
+    get_string_metadata,
+    extra_string_metadata,
+)
 from .lora_loader import lora_mix_load
 from .inpainting_canvas import draw, make_inpaint_condition
 from .adetailer import ad_model_process
@@ -87,6 +92,12 @@ from .main_prompt_embeds import (
     Promt_Embedder_SDXL,
     Promt_Embedder_FLUX,
 )
+from .sampler_scheduler_config import (
+    configure_scheduler,
+    verify_schedule_integrity,
+    check_scheduler_compatibility,
+)
+
 logging.getLogger("diffusers").setLevel(logging.ERROR)
 logging.getLogger("transformers").setLevel(logging.ERROR)
 diffusers.utils.logging.set_verbosity(40)
@@ -675,8 +686,7 @@ class Model_Diffusers(PreviewGenerator):
 
                     case "FluxPipeline":
                         self.pipe = DiffusionPipeline.from_pretrained(
-                            base_model_id,
-                            torch_dtype=self.type_model_precision
+                            base_model_id, torch_dtype=self.type_model_precision
                         )
 
                     case "StableDiffusionPipeline":
@@ -735,7 +745,12 @@ class Model_Diffusers(PreviewGenerator):
             self.vae_model = vae_model
 
             # Define base scheduler
-            self.default_scheduler = copy.deepcopy(self.pipe.scheduler)
+            scheduler_copy = copy.deepcopy(self.pipe.scheduler)
+            self.default_scheduler = (
+                verify_schedule_integrity(scheduler_copy)
+                if self.class_name == "StableDiffusionXLPipeline"
+                else scheduler_copy
+            )
             logger.debug(f"Base sampler: {self.default_scheduler}")
 
         if class_name == "StableDiffusionPipeline":
@@ -1027,6 +1042,9 @@ class Model_Diffusers(PreviewGenerator):
         return init_image, control_mask, control_image
 
     def get_scheduler(self, name):
+        if self.class_name == "FluxPipeline":
+            return self.pipe.scheduler
+
         if name in SCHEDULER_CONFIG_MAP:
             scheduler_class, config = SCHEDULER_CONFIG_MAP[name]
             # return scheduler_class.from_config(self.pipe.scheduler.config, **config)
@@ -1402,6 +1420,8 @@ class Model_Diffusers(PreviewGenerator):
         clip_skip: Optional[bool] = True,
         seed: int = -1,
         sampler: str = "DPM++ 2M",
+        schedule_type: str = "Automatic",
+        schedule_prediction_type: str = "Automatic",
         syntax_weights: str = "Classic",
 
         lora_A: Optional[str] = None,
@@ -1763,6 +1783,10 @@ class Model_Diffusers(PreviewGenerator):
             raise ValueError(
                 "Ip adapter require the ip adapter image and the ip adapter model for the task"
             )
+        schedule_type = check_scheduler_compatibility(
+            sampler,
+            schedule_type,
+        )
 
         self.gui_active = gui_active
         self.image_previews = image_previews
@@ -1951,9 +1975,11 @@ class Model_Diffusers(PreviewGenerator):
             prompt_emb = negative_prompt_emb = None
 
         try:
-            if self.class_name != "FluxPipeline":
-                # self.pipe.scheduler = DPMSolverSinglestepScheduler() # fix default params by random scheduler, not recomn
-                self.pipe.scheduler = self.get_scheduler(sampler)
+            # self.pipe.scheduler = DPMSolverSinglestepScheduler() # fix default params by random scheduler, not recomn
+            self.pipe.scheduler = self.get_scheduler(sampler)
+            configure_scheduler(
+                self.pipe, schedule_type, schedule_prediction_type
+            )
         except Exception as e:
             logger.debug(f"{e}")
             torch.cuda.empty_cache()
@@ -2157,10 +2183,16 @@ class Model_Diffusers(PreviewGenerator):
             if adetailer_A_params.get("sampler", "Use same sampler") != "Use same sampler":
                 logger.debug("detailfix_pipe will use the sampler from adetailer_A")
                 detailfix_pipe.scheduler = self.get_scheduler(adetailer_A_params["sampler"])
+                configure_scheduler(
+                    detailfix_pipe, "Automatic", "Automatic"
+                )
             adetailer_A_params.pop("sampler", None)
             if adetailer_B_params.get("sampler", "Use same sampler") != "Use same sampler":
                 logger.debug("detailfix_pipe will use the sampler from adetailer_B")
                 detailfix_pipe.scheduler = self.get_scheduler(adetailer_A_params["sampler"])
+                configure_scheduler(
+                    detailfix_pipe, "Automatic", "Automatic"
+                )
             adetailer_B_params.pop("sampler", None)
 
             detailfix_pipe.set_progress_bar_config(leave=leave_progress_bar)
@@ -2475,6 +2507,9 @@ class Model_Diffusers(PreviewGenerator):
             if hires_sampler != "Use same sampler":
                 logger.debug("New hires sampler")
                 hires_pipe.scheduler = self.get_scheduler(hires_sampler)
+                configure_scheduler(
+                    hires_pipe, "Automatic", "Automatic"
+                )
 
             hires_pipe.set_progress_bar_config(leave=leave_progress_bar)
             hires_pipe.set_progress_bar_config(disable=disable_progress_bar)
@@ -2513,6 +2548,20 @@ class Model_Diffusers(PreviewGenerator):
         except Exception as e:
             logger.debug(f"{str(e)}")
 
+        extra_metadata = extra_string_metadata(
+            [
+                self.vae_model,
+                pag_scale if hasattr(self.pipe, "set_pag_applied_layers") else 0,
+                self.FreeU,
+                upscaler_model_path,
+                upscaler_increases_size,
+                hires_steps,
+                hires_denoising_strength,
+                self.lora_memory,
+                self.lora_scale_memory,
+            ]
+        )
+
         metadata = [
             prompt,
             negative_prompt,
@@ -2525,6 +2574,8 @@ class Model_Diffusers(PreviewGenerator):
             img_width,
             img_height,
             clip_skip,
+            schedule_type,
+            extra_metadata,
         ]
 
         # === RUN PIPE === #

@@ -19,4 +19,6 @@ from .diffusers_vanilla.constants import (
     ALL_PROMPT_WEIGHT_OPTIONS,
     SD15_TASKS,
     SDXL_TASKS,
+    SCHEDULE_TYPE_OPTIONS,
+    SCHEDULE_PREDICTION_TYPE_OPTIONS,
 )
