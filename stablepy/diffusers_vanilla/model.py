@@ -1521,12 +1521,30 @@ class Model_Diffusers(PreviewGenerator):
             seed (int, optional, defaults to -1):
                 A seed for controlling the randomness of the image generation process. -1 design a random seed.
             sampler (str, optional, defaults to "DPM++ 2M"):
-                The sampler used for the generation process.
+                The sampler algorithm that defines how noise is gradually removed.
                 To see all the valid sampler names, use the following code:
 
                 ```python
                 from stablepy import scheduler_names
                 print(scheduler_names)
+                ```
+            schedule_type (str, optional, defaults to "Automatic"):
+                The pattern controlling the rate at which noise is removed across each generation step.
+                To see all the valid schedule_type names, use the following code:
+
+                ```python
+                from stablepy import SCHEDULE_TYPE_OPTIONS
+                print(SCHEDULE_TYPE_OPTIONS)
+                ```
+            schedule_prediction_type (str, optional, defaults to "Automatic"):
+                Prediction type of the scheduler function; can be `epsilon` (predicts the noise of the diffusion process),
+                `sample` (directly predicts the noisy sample`) or `v_prediction` (see section 2.4 of [Imagen
+                Video](https://imagen.research.google/video/paper.pdf) paper).
+                To see all the valid schedule_prediction_type names, use the following code:
+
+                ```python
+                from stablepy import SCHEDULE_PREDICTION_TYPE_OPTIONS
+                print(SCHEDULE_PREDICTION_TYPE_OPTIONS)
                 ```
             syntax_weights (str, optional, defaults to "Classic"):
                 Specifies the type of syntax weights and emphasis used during generation.
