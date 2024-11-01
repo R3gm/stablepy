@@ -388,7 +388,7 @@ class StableDiffusionLongPromptProcessor(FrozenCLIPEmbedderWithCustomWordsBase):
         self.get_pooled = False
         if hasattr(wrapped, "text_encoder_2"):
             self.layer = "hidden"
-            self.layer_idx = 11
+            self.layer_idx = -2
 
         self.emphasis = emphasis
         self.CLIP_stop_at_last_layers = clip_skip
@@ -438,11 +438,9 @@ class StableDiffusionLongPromptProcessor(FrozenCLIPEmbedderWithCustomWordsBase):
 
     # sdxl no clip skip
     def encode_with_transformers_xl(self, tokens):
-        outputs = self.text_encoder(input_ids=tokens, output_hidden_states=self.layer == "hidden")
+        outputs = self.text_encoder.text_model(input_ids=tokens, output_hidden_states=self.layer == "hidden")
 
-        pooled = None
-        if outputs[0].shape[-1] == 1280:
-            pooled = outputs[0]
+        pooled = outputs.pooler_output
 
         if self.layer == "last":
             z = outputs.last_hidden_state
