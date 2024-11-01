@@ -6,6 +6,7 @@ from .constants import (
     INCOMPATIBILITY_SAMPLER_SCHEDULE,
     SCHEDULE_TYPES,
     SCHEDULE_PREDICTION_TYPE,
+    AYS_SCHEDULES,
 )
 
 
@@ -105,3 +106,23 @@ def check_scheduler_compatibility(sampler, schedule_type):
         schedule_type = "Automatic"
 
     return schedule_type
+
+
+def ays_timesteps(cls, schedule):
+    if schedule not in AYS_SCHEDULES:
+        return {}
+
+    list_steps = AYS_SCHEDULES[schedule]
+
+    if cls == "StableDiffusionPipeline":
+        steps = list_steps[0]
+    elif cls == "StableDiffusionXLPipeline":
+        steps = list_steps[1]
+    else:
+        raise ValueError(
+            f"The pipeline {cls} does not support AYS scheduling."
+        )
+
+    key_param = "sigmas" if "beta" in schedule else "timesteps"
+
+    return {key_param: steps}

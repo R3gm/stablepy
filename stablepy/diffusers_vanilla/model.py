@@ -96,6 +96,7 @@ from .sampler_scheduler_config import (
     configure_scheduler,
     verify_schedule_integrity,
     check_scheduler_compatibility,
+    ays_timesteps,
 )
 
 logging.getLogger("diffusers").setLevel(logging.ERROR)
@@ -2048,6 +2049,10 @@ class Model_Diffusers(PreviewGenerator):
 
         if hasattr(self.pipe, "set_pag_applied_layers"):
             pipe_params_config["pag_scale"] = float(pag_scale)
+
+        pipe_params_config.update(
+            ays_timesteps(self.class_name, schedule_type)
+        )
 
         if self.task_name == "txt2img":
             pipe_params_config["height"] = img_height
