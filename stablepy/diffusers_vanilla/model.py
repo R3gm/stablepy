@@ -2051,7 +2051,7 @@ class Model_Diffusers(PreviewGenerator):
             pipe_params_config["pag_scale"] = float(pag_scale)
 
         pipe_params_config.update(
-            ays_timesteps(self.class_name, schedule_type)
+            ays_timesteps(self.class_name, schedule_type, num_steps)
         )
 
         if self.task_name == "txt2img":

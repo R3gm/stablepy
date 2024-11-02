@@ -218,8 +218,10 @@ scheduler_names = list(SCHEDULER_CONFIG_MAP.keys())
 FLASH_AUTO_LOAD_SAMPLER = scheduler_names[-2:]
 
 AYS_SCHEDULES = {
+    "AYS timesteps": [[999, 850, 736, 645, 545, 455, 343, 233, 124, 24], [999, 845, 730, 587, 443, 310, 193, 116, 53, 13]],
     "AYS 10 steps": [[999, 850, 736, 645, 545, 455, 343, 233, 124, 24], [999, 845, 730, 587, 443, 310, 193, 116, 53, 13]],  # [sd1.5, sdxl]
-    "AYS beta 10 steps": [[14.615, 6.475, 3.861, 2.697, 1.886, 1.396, 0.963, 0.652, 0.399, 0.152, 0.0], [14.615, 6.315, 3.771, 2.181, 1.342, 0.862, 0.555, 0.380, 0.234, 0.113, 0.0]]  # [sd1.5, sdxl]
+    "AYS sigmas": [[14.615, 6.475, 3.861, 2.697, 1.886, 1.396, 0.963, 0.652, 0.399, 0.152, 0.029], [14.615, 6.315, 3.771, 2.181, 1.342, 0.862, 0.555, 0.380, 0.234, 0.113, 0.029]],  # [sd1.5, sdxl] # sampler Euler
+    "AYS sigmas 10 steps": [[14.615, 6.475, 3.861, 2.697, 1.886, 1.396, 0.963, 0.652, 0.399, 0.152, 0.0], [14.615, 6.315, 3.771, 2.181, 1.342, 0.862, 0.555, 0.380, 0.234, 0.113, 0.0]],  # [sd1.5, sdxl] # sampler Euler
 }
 
 SCHEDULE_TYPES = {
@@ -230,8 +232,10 @@ SCHEDULE_TYPES = {
     "SGM Uniform": {"timestep_spacing": "trailing"},
     "Normal": {"use_karras_sigmas": False},  # check
     "Simple": {"timestep_spacing": "trailing", "use_karras_sigmas": False},
+    "AYS timesteps": {"use_karras_sigmas": False},
     "AYS 10 steps": {"use_karras_sigmas": False},
-    # "AYS beta 10 steps": {"use_karras_sigmas": False},
+    # "AYS sigmas": {"use_karras_sigmas": False},  # Euler
+    # "AYS sigmas 10 steps": {"use_karras_sigmas": False},  # Euler
 }
 
 SCHEDULE_TYPE_OPTIONS = list(SCHEDULE_TYPES.keys())

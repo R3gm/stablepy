@@ -8,6 +8,7 @@ from .constants import (
     SCHEDULE_PREDICTION_TYPE,
     AYS_SCHEDULES,
 )
+import numpy as np
 
 
 def configure_scheduler(pipe, schedule_type, schedule_prediction_type):
@@ -108,7 +109,21 @@ def check_scheduler_compatibility(sampler, schedule_type):
     return schedule_type
 
 
-def ays_timesteps(cls, schedule):
+def loglinear_interp(t_steps, num_steps):
+    """
+    Performs log-linear interpolation of a given array of decreasing numbers.
+    """
+    xs = np.linspace(0, 1, len(t_steps))
+    ys = np.log(t_steps[::-1])
+
+    new_xs = np.linspace(0, 1, num_steps)
+    new_ys = np.interp(new_xs, xs, ys)
+
+    interped_ys = np.exp(new_ys)[::-1].copy()
+    return interped_ys
+
+
+def ays_timesteps(cls, schedule, num_steps):
     if schedule not in AYS_SCHEDULES:
         return {}
 
@@ -123,6 +138,16 @@ def ays_timesteps(cls, schedule):
             f"The pipeline {cls} does not support AYS scheduling."
         )
 
-    key_param = "sigmas" if "beta" in schedule else "timesteps"
+    key_param = "sigmas" if "sigmas" in schedule else "timesteps"
+
+    if schedule == "AYS timesteps":
+        t_steps = loglinear_interp(steps, num_steps)
+        # steps = t_steps[t_steps != 0]
+        # t_steps = np.append(t_steps, 0)
+        steps = np.round(t_steps).astype(int).tolist()
+    elif schedule == "AYS sigmas":
+        t_steps = loglinear_interp(steps, num_steps)
+        t_steps[-1] = .0
+        steps = t_steps.tolist()
 
     return {key_param: steps}
