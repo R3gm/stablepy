@@ -3,6 +3,7 @@ from PIL import Image
 from PIL.PngImagePlugin import PngInfo
 from ..logging.logging_setup import logger
 from .constants import SCHEDULE_TYPES
+import re
 
 
 def generate_lora_tags(names_list, scales_list):
@@ -25,10 +26,10 @@ def extra_string_metadata(metadata_list):
             parameters_beta += f", FreeU: {metadata_list[2]}"
         if metadata_list[3]:
             upscaler_param = (
-                    os.path.splitext(os.path.basename(str(metadata_list[3])))[0]
-                    if os.path.exists(metadata_list[3])
-                    else metadata_list[3]
-                )
+                os.path.splitext(os.path.basename(str(metadata_list[3])))[0]
+                if os.path.exists(metadata_list[3])
+                else metadata_list[3]
+            )
             parameters_beta += f", Hires upscaler: {upscaler_param}"
             parameters_beta += f", Hires upscale: {metadata_list[4]}"
             if metadata_list[5]:
@@ -43,6 +44,39 @@ def extra_string_metadata(metadata_list):
         logger.info("Error generating extra image metadata")
 
     return parameters_beta
+
+
+def sanitize_filename(filename):
+    # Replace any character that's not alphanumeric, a dash, an underscore, or a period with '_'
+    return re.sub(r'[^a-zA-Z0-9_\-.]', '_', filename)
+
+
+def assemble_filename_pattern(suffix_images, metadata):
+    FILENAME_PATTERN = {
+        "prompt_section": metadata[0][:15] if metadata[0] else "",
+        "neg_prompt_section": metadata[1][:15] if metadata[1] else "",
+        "model": os.path.splitext(os.path.basename(str(metadata[2])))[0],
+        "vae": os.path.splitext(os.path.basename(str(metadata[3])))[0] if metadata[3] else "",
+        "num_steps": metadata[4],
+        "guidance_scale": metadata[5],
+        "sampler": metadata[6],
+        "schedule_type": metadata[11],
+        "img_width": metadata[8],
+        "img_height": metadata[9],
+        "seed": "_STABLEPYSEEDKEY_",
+    }
+
+    filename_image = ""
+    list_key_words = suffix_images.split(",")
+    for key_word in list_key_words:
+        if key_word.strip():
+            filename_image += "_"
+            if key_word in FILENAME_PATTERN:
+                filename_image += str(FILENAME_PATTERN[key_word])
+            else:
+                filename_image += key_word
+
+    return sanitize_filename(filename_image)
 
 
 def get_string_metadata(metadata_list):
@@ -77,14 +111,19 @@ def get_string_metadata(metadata_list):
     return string_parameters
 
 
-def save_pil_image_with_metadata(image, folder_path, string_parameters):
+def save_pil_image_with_metadata(
+    image,
+    folder_path,
+    string_parameters,
+    suffix="",
+):
     if not os.path.exists(folder_path):
         os.makedirs(folder_path)
 
     existing_files = os.listdir(folder_path)
 
     # Determine the next available image name
-    image_name = f"image{str(len(existing_files) + 1).zfill(3)}.png"
+    image_name = f"{str(len(existing_files) + 1).zfill(5)}{suffix}.png"
     image_path = os.path.join(folder_path, image_name)
 
     try:

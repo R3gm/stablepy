@@ -63,6 +63,7 @@ from .utils import (
     checkpoint_model_type,
     get_string_metadata,
     extra_string_metadata,
+    assemble_filename_pattern,
 )
 from .lora_loader import lora_mix_load
 from .inpainting_canvas import draw, make_inpaint_condition
@@ -1484,6 +1485,7 @@ class Model_Diffusers(PreviewGenerator):
         loop_generation: int = 1,
         display_images: bool = False,
         save_generated_images: bool = True,
+        filename_pattern: str = "model,seed",
         image_storage_location: str = "./images",
         generator_in_cpu: bool = False,
         leave_progress_bar: bool = False,
@@ -1679,6 +1681,14 @@ class Model_Diffusers(PreviewGenerator):
                 If you use a notebook, you will be able to display the images generated with this parameter.
             save_generated_images (bool, optional, defaults to True):
                 By default, the generated images are saved in the current location within the 'images' folder. You can disable this with this parameter.
+            filename_pattern (str , optional, defaults to "model,seed"):
+                Sets the name that will be used to save the images.
+                This name can be any text or a specific key, and each value needs to be separated by a comma.
+                You can check the list of valid keys:
+                ```python
+                from stablepy import VALID_FILENAME_PATTERNS
+                print(VALID_FILENAME_PATTERNS)
+                ```
             image_storage_location (str , optional, defaults to "./images"):
                 The directory where the generated images are saved.
             generator_in_cpu (bool, optional, defaults to False):
@@ -2607,6 +2617,10 @@ class Model_Diffusers(PreviewGenerator):
             extra_metadata,
         ]
 
+        self.filename_pattern = assemble_filename_pattern(
+            filename_pattern, metadata
+        )
+
         # === RUN PIPE === #
         handle_task = self.start_work if not image_previews else self.start_stream
 
@@ -2775,8 +2789,11 @@ class Model_Diffusers(PreviewGenerator):
 
             image_path = "not saved in storage"
             if save_generated_images:
+                sfx = self.filename_pattern
+                if "_STABLEPYSEEDKEY_" in sfx:
+                    sfx = sfx.replace("_STABLEPYSEEDKEY_", str(seed_))
                 image_path = save_pil_image_with_metadata(
-                    image_, image_storage_location, image_generation_data
+                    image_, image_storage_location, image_generation_data, sfx
                 )
 
             image_list.append(image_path)

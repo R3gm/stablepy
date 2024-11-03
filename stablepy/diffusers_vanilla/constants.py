@@ -46,14 +46,18 @@ from diffusers import (
     # StableDiffusionXLControlNetImg2ImgPAGPipeline,
 )
 
+SD15 = "StableDiffusionPipeline"
+SDXL = "StableDiffusionXLPipeline"
+FLUX = "FluxPipeline"
+
 CLASS_DIFFUSERS_TASK = {
-    "StableDiffusionPipeline": {
+    SD15: {
         "base": StableDiffusionPipeline,
         "inpaint": StableDiffusionControlNetInpaintPipeline,
         "controlnet": StableDiffusionControlNetPipeline,
         # "controlnet_img2img": StableDiffusionControlNetImg2ImgPipeline,
     },
-    "StableDiffusionXLPipeline": {
+    SDXL: {
         "base": StableDiffusionXLPipeline,
         "inpaint": StableDiffusionXLInpaintPipeline,
         "controlnet": StableDiffusionXLControlNetPipeline,
@@ -63,13 +67,13 @@ CLASS_DIFFUSERS_TASK = {
 }
 
 CLASS_PAG_DIFFUSERS_TASK = {
-    "StableDiffusionPipeline": {
+    SD15: {
         "base": StableDiffusionPAGPipeline,
         "inpaint": StableDiffusionControlNetInpaintPipeline,
         "controlnet": StableDiffusionControlNetPAGPipeline,
         # "controlnet_img2img": StableDiffusionControlNetImg2ImgPAGPipeline,
     },
-    "StableDiffusionXLPipeline": {
+    SDXL: {
         "base": StableDiffusionXLPAGPipeline,
         "inpaint": StableDiffusionXLPAGInpaintPipeline,
         "controlnet": StableDiffusionXLControlNetPAGPipeline,
@@ -143,11 +147,11 @@ T2I_PREPROCESSOR_NAME = {
 }
 
 FLASH_LORA = {
-    "StableDiffusionPipeline": {
+    SD15: {
         "LCM Auto-Loader": "latent-consistency/lcm-lora-sdv1-5",
         "TCD Auto-Loader": "h1t/TCD-SD15-LoRA",
     },
-    "StableDiffusionXLPipeline": {
+    SDXL: {
         "LCM Auto-Loader": "latent-consistency/lcm-lora-sdxl",
         "TCD Auto-Loader": "h1t/TCD-SDXL-LoRA",
     },
@@ -300,7 +304,7 @@ merge_dicts(BLACK_IMAGE_STATUS)
 merge_dicts(ERROR_IMAGE_STATUS)
 
 IP_ADAPTER_MODELS = {
-    "StableDiffusionPipeline": {
+    SD15: {
         # "img_encoder": ["h94/IP-Adapter", "models/image_encoder"],
         "full_face": ["h94/IP-Adapter", "models", "ip-adapter-full-face_sd15.safetensors", "H"],
         "plus_face": ["h94/IP-Adapter", "models", "ip-adapter-plus-face_sd15.safetensors", "H"],
@@ -316,7 +320,7 @@ IP_ADAPTER_MODELS = {
         "faceid_portrait": ["h94/IP-Adapter-FaceID", "", "ip-adapter-faceid-portrait_sd15.bin", None],
         "composition_plus": ["ostris/ip-composition-adapter", "", "ip_plus_composition_sd15.safetensors", "H"]
     },
-    "StableDiffusionXLPipeline": {
+    SDXL: {
         # "img_encoder": ["h94/IP-Adapter", "sdxl_models/image_encoder"],
         "plus_face": ["h94/IP-Adapter", "sdxl_models", "ip-adapter-plus-face_sdxl_vit-h.safetensors", "H"],
         "plus": ["h94/IP-Adapter", "sdxl_models", "ip-adapter-plus_sdxl_vit-h.safetensors", "H"],
@@ -338,13 +342,27 @@ def name_list_ip_adapters(model_key):
     return adapters
 
 
-IP_ADAPTERS_SD = name_list_ip_adapters("StableDiffusionPipeline")
-IP_ADAPTERS_SDXL = name_list_ip_adapters("StableDiffusionXLPipeline")
+IP_ADAPTERS_SD = name_list_ip_adapters(SD15)
+IP_ADAPTERS_SDXL = name_list_ip_adapters(SDXL)
 
 REPO_IMAGE_ENCODER = {
     "H": "laion/CLIP-ViT-H-14-laion2B-s32B-b79K",
     "G": "laion/CLIP-ViT-bigG-14-laion2B-39B-b160k",
 }
+
+VALID_FILENAME_PATTERNS = [
+    "prompt_section",
+    "neg_prompt_section",
+    "model",
+    "vae",
+    "num_steps",
+    "guidance_scale",
+    "sampler",
+    "schedule_type",
+    "img_width",
+    "img_height",
+    "seed",
+]
 
 BETA_STYLE_LIST = [
     {

@@ -23,6 +23,7 @@ from .diffusers_vanilla.constants import (
     SCHEDULE_PREDICTION_TYPE_OPTIONS,
     FLUX_SCHEDULE_TYPES,
     FLUX_SCHEDULE_TYPE_OPTIONS,
+    VALID_FILENAME_PATTERNS,
 )
 from .diffusers_vanilla.sampler_scheduler_config import (
     check_scheduler_compatibility

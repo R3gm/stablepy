@@ -53,6 +53,14 @@ def configure_scheduler(pipe, schedule_type, schedule_prediction_type):
                 prediction_type=selected_prediction
             )
 
+    if (
+        hasattr(pipe.scheduler.config, "prediction_type")
+        and pipe.scheduler.config.prediction_type == "v_prediction"
+    ):
+        pipe.scheduler.register_to_config(
+            rescale_betas_zero_snr=True,
+        )
+
 
 def verify_schedule_integrity(model_scheduler):
     if (
@@ -107,6 +115,7 @@ def verify_schedule_integrity(model_scheduler):
 
 def check_scheduler_compatibility(cls, sampler, schedule_type):
     msg = ""
+    auto_schedule = SCHEDULE_TYPE_OPTIONS[0]
 
     if cls == "FluxPipeline":
         if "Flow" not in sampler:
@@ -117,18 +126,21 @@ def check_scheduler_compatibility(cls, sampler, schedule_type):
             )
 
         valid_schedule = FLUX_SCHEDULE_TYPES.get(schedule_type, None)
-        valid_options = (
-            FLUX_SCHEDULE_TYPE_OPTIONS
-            if sampler != "FlowMatchEuler"
-            else []
-        )
-        if not valid_schedule:
+
+        if sampler == "FlowMatchEuler":
+            if schedule_type != auto_schedule:
+                msg += (
+                    "FlowMatchEuler only support"
+                    f" '{auto_schedule}' schedule type."
+                )
+                schedule_type = auto_schedule
+        elif not valid_schedule:
             msg += (
                 f"The sampler: {sampler} only support schedule types"
-                f": {', '.join(valid_options)}"
-                ". Changed to 'Automatic'."
+                f": {', '.join(FLUX_SCHEDULE_TYPE_OPTIONS)}"
+                f". Changed to '{auto_schedule}'."
             )
-            schedule_type = "Automatic"
+            schedule_type = auto_schedule
 
         return sampler, schedule_type, msg
 
@@ -149,9 +161,9 @@ def check_scheduler_compatibility(cls, sampler, schedule_type):
         msg += (
             f"The sampler: {sampler} only support schedule types"
             f": {', '.join(COMPATIBLE_SCHEDULES)}"
-            ". Changed to 'Automatic'."
+            f". Changed to '{auto_schedule}'."
         )
-        schedule_type = "Automatic"
+        schedule_type = auto_schedule
 
     return sampler, schedule_type, msg
 
