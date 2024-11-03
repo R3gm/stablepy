@@ -1043,8 +1043,10 @@ class Model_Diffusers(PreviewGenerator):
         return init_image, control_mask, control_image
 
     def get_scheduler(self, name):
-        if self.class_name == "FluxPipeline":
-            return self.pipe.scheduler
+        if "Flow" in name and self.class_name != "FluxPipeline":
+            name = name.replace("FlowMatch", "")
+        elif "Flow" not in name and self.class_name == "FluxPipeline":
+            name = "FlowMatchDPM++ 2M"
 
         if name in SCHEDULER_CONFIG_MAP:
             scheduler_class, config = SCHEDULER_CONFIG_MAP[name]
@@ -1802,10 +1804,14 @@ class Model_Diffusers(PreviewGenerator):
             raise ValueError(
                 "Ip adapter require the ip adapter image and the ip adapter model for the task"
             )
-        schedule_type = check_scheduler_compatibility(
+
+        sampler, schedule_type, msg_schedule = check_scheduler_compatibility(
+            self.class_name,
             sampler,
             schedule_type,
         )
+        if msg_schedule:
+            logger.warning(msg_schedule)
 
         self.gui_active = gui_active
         self.image_previews = image_previews

@@ -21,4 +21,9 @@ from .diffusers_vanilla.constants import (
     SDXL_TASKS,
     SCHEDULE_TYPE_OPTIONS,
     SCHEDULE_PREDICTION_TYPE_OPTIONS,
+    FLUX_SCHEDULE_TYPES,
+    FLUX_SCHEDULE_TYPE_OPTIONS,
+)
+from .diffusers_vanilla.sampler_scheduler_config import (
+    check_scheduler_compatibility
 )

@@ -5,8 +5,11 @@ from ..logging.logging_setup import logger
 from .constants import (
     INCOMPATIBILITY_SAMPLER_SCHEDULE,
     SCHEDULE_TYPES,
+    SCHEDULE_TYPE_OPTIONS,
     SCHEDULE_PREDICTION_TYPE,
     AYS_SCHEDULES,
+    FLUX_SCHEDULE_TYPES,
+    FLUX_SCHEDULE_TYPE_OPTIONS,
 )
 import numpy as np
 
@@ -14,6 +17,11 @@ import numpy as np
 def configure_scheduler(pipe, schedule_type, schedule_prediction_type):
 
     if "Flux" in str(pipe.__class__.__name__):
+
+        flux_selected_schedule = FLUX_SCHEDULE_TYPES.get(schedule_type, None)
+        if flux_selected_schedule:
+            pipe.scheduler.register_to_config(**flux_selected_schedule)
+
         return None
 
     # Get the configuration for the selected schedule
@@ -97,16 +105,55 @@ def verify_schedule_integrity(model_scheduler):
     return original_scheduler
 
 
-def check_scheduler_compatibility(sampler, schedule_type):
+def check_scheduler_compatibility(cls, sampler, schedule_type):
+    msg = ""
+
+    if cls == "FluxPipeline":
+        if "Flow" not in sampler:
+            sampler = "FlowMatchDPM++ 2M"
+            msg += (
+                "The selected sampler does not work with FLUX models;"
+                f" so it has been switched to {sampler}. "
+            )
+
+        valid_schedule = FLUX_SCHEDULE_TYPES.get(schedule_type, None)
+        valid_options = (
+            FLUX_SCHEDULE_TYPE_OPTIONS
+            if sampler != "FlowMatchEuler"
+            else []
+        )
+        if not valid_schedule:
+            msg += (
+                f"The sampler: {sampler} only support schedule types"
+                f": {', '.join(valid_options)}"
+                ". Changed to 'Automatic'."
+            )
+            schedule_type = "Automatic"
+
+        return sampler, schedule_type, msg
+
+    if "Flow" in sampler:
+        sampler = sampler.replace("FlowMatch", "")
+        msg += (
+            "The selected sampler works only with FLUX models;"
+            f" so it has been switched to {sampler}. "
+        )
+
     incompatible_schedule = INCOMPATIBILITY_SAMPLER_SCHEDULE.get(sampler, [])
     if schedule_type in incompatible_schedule:
-        logger.warning(
-            f"The sampler: {sampler} with schedule type: {schedule_type} "
-            "is not well supported; changed to 'Automatic'."
+        COMPATIBLE_SCHEDULES = [
+            item for item in SCHEDULE_TYPE_OPTIONS
+            if item not in incompatible_schedule
+        ]
+
+        msg += (
+            f"The sampler: {sampler} only support schedule types"
+            f": {', '.join(COMPATIBLE_SCHEDULES)}"
+            ". Changed to 'Automatic'."
         )
         schedule_type = "Automatic"
 
-    return schedule_type
+    return sampler, schedule_type, msg
 
 
 def loglinear_interp(t_steps, num_steps):
