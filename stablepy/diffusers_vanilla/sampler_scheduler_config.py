@@ -3,6 +3,9 @@ import json
 from huggingface_hub import hf_hub_download
 from ..logging.logging_setup import logger
 from .constants import (
+    SD15,
+    SDXL,
+    FLUX,
     INCOMPATIBILITY_SAMPLER_SCHEDULE,
     SCHEDULE_TYPES,
     SCHEDULE_TYPE_OPTIONS,
@@ -117,7 +120,7 @@ def check_scheduler_compatibility(cls, sampler, schedule_type):
     msg = ""
     auto_schedule = SCHEDULE_TYPE_OPTIONS[0]
 
-    if cls == "FluxPipeline":
+    if cls == FLUX:
         if "Flow" not in sampler:
             sampler = "FlowMatchDPM++ 2M"
             msg += (
@@ -127,20 +130,20 @@ def check_scheduler_compatibility(cls, sampler, schedule_type):
 
         valid_schedule = FLUX_SCHEDULE_TYPES.get(schedule_type, None)
 
-        if sampler == "FlowMatchEuler":
-            if schedule_type != auto_schedule:
+        if schedule_type != auto_schedule:
+            if sampler == "FlowMatchEuler":
                 msg += (
                     "FlowMatchEuler only support"
                     f" '{auto_schedule}' schedule type."
                 )
                 schedule_type = auto_schedule
-        elif not valid_schedule:
-            msg += (
-                f"The sampler: {sampler} only support schedule types"
-                f": {', '.join(FLUX_SCHEDULE_TYPE_OPTIONS)}"
-                f". Changed to '{auto_schedule}'."
-            )
-            schedule_type = auto_schedule
+            elif not valid_schedule:
+                msg += (
+                    f"The sampler: {sampler} only support schedule types"
+                    f": {', '.join(FLUX_SCHEDULE_TYPE_OPTIONS)}"
+                    f". Changed to '{auto_schedule}'."
+                )
+                schedule_type = auto_schedule
 
         return sampler, schedule_type, msg
 
@@ -188,9 +191,9 @@ def ays_timesteps(cls, schedule, num_steps):
 
     list_steps = AYS_SCHEDULES[schedule]
 
-    if cls == "StableDiffusionPipeline":
+    if cls == SD15:
         steps = list_steps[0]
-    elif cls == "StableDiffusionXLPipeline":
+    elif cls == SDXL:
         steps = list_steps[1]
     else:
         raise ValueError(

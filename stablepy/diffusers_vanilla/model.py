@@ -36,6 +36,9 @@ from diffusers import (
     DDIMScheduler,
 )
 from .constants import (
+    SD15,
+    SDXL,
+    FLUX,
     CLASS_DIFFUSERS_TASK,
     CLASS_PAG_DIFFUSERS_TASK,
     CONTROLNET_MODEL_IDS,
@@ -362,7 +365,7 @@ class PreviewGenerator:
         latents = callback_kwargs["latents"]
         if step % self.concurrency == 0:  # every how many steps
             logger.debug(step)
-            if self.class_name == "FluxPipeline":
+            if self.class_name == FLUX:
                 latents = self.pipe._unpack_latents(latents, self.metadata[9], self.metadata[8], self.pipe.vae_scale_factor)
                 latents = (latents / self.pipe.vae.config.scaling_factor) + self.pipe.vae.config.shift_factor
                 batch_size, channels, height, width = latents.shape
@@ -478,7 +481,7 @@ class Model_Diffusers(PreviewGenerator):
             scheduler=self.pipe.scheduler,
         )
 
-        if class_name == "FluxPipeline":
+        if class_name == FLUX:
             model_components["text_encoder_2"] = self.pipe.text_encoder_2
             model_components["tokenizer_2"] = self.pipe.tokenizer_2
             model_components["transformer"] = self.pipe.transformer
@@ -518,7 +521,7 @@ class Model_Diffusers(PreviewGenerator):
             model_components["feature_extractor"] = self.pipe.feature_extractor
             model_components["image_encoder"] = self.pipe.image_encoder
 
-        if class_name == "StableDiffusionPipeline":
+        if class_name == SD15:
             model_components["safety_checker"] = self.pipe.safety_checker
             model_components["requires_safety_checker"] = self.pipe.config.requires_safety_checker
 
@@ -528,7 +531,7 @@ class Model_Diffusers(PreviewGenerator):
                 )
                 tk = "controlnet"
 
-        elif class_name == "StableDiffusionXLPipeline":
+        elif class_name == SDXL:
             model_components["text_encoder_2"] = self.pipe.text_encoder_2
             model_components["tokenizer_2"] = self.pipe.tokenizer_2
 
@@ -651,7 +654,7 @@ class Model_Diffusers(PreviewGenerator):
                         ),
                         torch_dtype=self.type_model_precision,
                     )
-                    class_name = "StableDiffusionXLPipeline"
+                    class_name = SDXL
                 elif model_type == "sd1.5":
                     self.pipe = StableDiffusionPipeline.from_single_file(
                         base_model_id,
@@ -662,7 +665,7 @@ class Model_Diffusers(PreviewGenerator):
                         # ),
                         torch_dtype=self.type_model_precision,
                     )
-                    class_name = "StableDiffusionPipeline"
+                    class_name = SD15
                 else:
                     raise ValueError(f"Model type {model_type} not supported.")
             else:
@@ -750,16 +753,16 @@ class Model_Diffusers(PreviewGenerator):
             scheduler_copy = copy.deepcopy(self.pipe.scheduler)
             self.default_scheduler = (
                 verify_schedule_integrity(scheduler_copy)
-                if self.class_name == "StableDiffusionXLPipeline"
+                if self.class_name == SDXL
                 else scheduler_copy
             )
             logger.debug(f"Base sampler: {self.default_scheduler}")
 
-        if class_name == "StableDiffusionPipeline":
+        if class_name == SD15:
             self.prompt_embedder = Promt_Embedder_SD1()
-        elif class_name == "StableDiffusionXLPipeline":
+        elif class_name == SDXL:
             self.prompt_embedder = Promt_Embedder_SDXL()
-        elif class_name == "FluxPipeline":
+        elif class_name == FLUX:
             self.prompt_embedder = Promt_Embedder_FLUX()
 
         if task_name in self.model_memory:
@@ -775,9 +778,9 @@ class Model_Diffusers(PreviewGenerator):
             self.pipe.watermark = None
             return
 
-        # if class_name == "StableDiffusionPipeline" and task_name not in SD15_TASKS:
+        # if class_name == SD15 and task_name not in SD15_TASKS:
         #     logger.error(f"The selected task: {task_name} is not implemented for SD 1.5")
-        # elif class_name == "StableDiffusionXLPipeline" and task_name not in SDXL_TASKS:
+        # elif class_name == SDXL and task_name not in SDXL_TASKS:
         #     logger.error(f"The selected task: {task_name} is not implemented for SDXL")
 
         # Load task
@@ -808,7 +811,7 @@ class Model_Diffusers(PreviewGenerator):
         self.vae_model = vae_model
         self.class_name = class_name
 
-        if self.class_name == "StableDiffusionXLPipeline":
+        if self.class_name == SDXL:
             self.pipe.enable_vae_slicing()
             self.pipe.enable_vae_tiling()
             self.pipe.watermark = None
@@ -851,7 +854,7 @@ class Model_Diffusers(PreviewGenerator):
         if image is None:
             raise ValueError("No reference image found.")
 
-        # if self.class_name == "StableDiffusionPipeline" and self.task_name in ["lineart", "lineart_anime"]:
+        # if self.class_name == SD15 and self.task_name in ["lineart", "lineart_anime"]:
         #     if "anime" in preprocessor_name:
         #         self.load_controlnet_weight("lineart_anime")
         #         logger.info("Linear anime")
@@ -1044,9 +1047,9 @@ class Model_Diffusers(PreviewGenerator):
         return init_image, control_mask, control_image
 
     def get_scheduler(self, name):
-        if "Flow" in name and self.class_name != "FluxPipeline":
+        if "Flow" in name and self.class_name != FLUX:
             name = name.replace("FlowMatch", "")
-        elif "Flow" not in name and self.class_name == "FluxPipeline":
+        elif "Flow" not in name and self.class_name == FLUX:
             name = "FlowMatchDPM++ 2M"
 
         if name in SCHEDULER_CONFIG_MAP:
@@ -1834,7 +1837,7 @@ class Model_Diffusers(PreviewGenerator):
                 reload=True,
             )
         elif (
-            self.class_name == "FluxPipeline"
+            self.class_name == FLUX
             and (self.pipe.text_encoder is None or self.pipe.transformer is None)
         ):
             logger.info("Realoading flux pipeline")
@@ -1865,7 +1868,7 @@ class Model_Diffusers(PreviewGenerator):
         if xformers_memory_efficient_attention and torch.cuda.is_available():
             self.pipe.disable_xformers_memory_efficient_attention()
 
-        if self.class_name != "FluxPipeline":
+        if self.class_name != FLUX:
             self.pipe.to(self.device)
         else:
             self.pipe.text_encoder.to(self.device)
@@ -1976,9 +1979,9 @@ class Model_Diffusers(PreviewGenerator):
             self.pipe.to(self.device)
 
         # FreeU
-        if FreeU and self.class_name != "FluxPipeline":
+        if FreeU and self.class_name != FLUX:
             logger.info("FreeU active")
-            if self.class_name == "StableDiffusionPipeline":
+            if self.class_name == SD15:
                 # sd
                 self.pipe.enable_freeu(s1=0.9, s2=0.2, b1=1.2, b2=1.4)
             else:
@@ -2001,11 +2004,11 @@ class Model_Diffusers(PreviewGenerator):
             syntax_weights=syntax_weights,
         )
 
-        if self.class_name == "StableDiffusionXLPipeline":
+        if self.class_name == SDXL:
             # Additional prompt for SDXL
             conditioning, pooled = prompt_emb.clone(), negative_prompt_emb.clone()
             prompt_emb = negative_prompt_emb = None
-        elif self.class_name == "FluxPipeline":
+        elif self.class_name == FLUX:
             conditioning, pooled = prompt_emb.clone(), negative_prompt_emb.clone()
             prompt_emb = negative_prompt_emb = None
 
@@ -2077,7 +2080,7 @@ class Model_Diffusers(PreviewGenerator):
             pipe_params_config["image"] = control_image
             logger.info(f"Image resolution: {str(control_image.size)}")
 
-        if self.class_name == "StableDiffusionPipeline":
+        if self.class_name == SD15:
             pipe_params_config["prompt_embeds"] = prompt_emb
             pipe_params_config["negative_prompt_embeds"] = negative_prompt_emb
 
@@ -2101,7 +2104,7 @@ class Model_Diffusers(PreviewGenerator):
                 pipe_params_config["strength"] = strength
                 pipe_params_config["eta"] = 1.0
 
-        elif self.class_name == "StableDiffusionXLPipeline":
+        elif self.class_name == SDXL:
             pipe_params_config["prompt_embeds"] = conditioning[0:1]
             pipe_params_config["pooled_prompt_embeds"] = pooled[0:1]
             pipe_params_config["negative_prompt_embeds"] = conditioning[1:2]
@@ -2125,7 +2128,7 @@ class Model_Diffusers(PreviewGenerator):
             elif self.task_name == "img2img":
                 pipe_params_config["strength"] = strength
 
-        elif self.class_name == "FluxPipeline":
+        elif self.class_name == FLUX:
             pipe_params_config.pop("negative_prompt", None)
             pipe_params_config.pop("clip_skip", None)
             pipe_params_config["prompt_embeds"] = conditioning
@@ -2236,7 +2239,7 @@ class Model_Diffusers(PreviewGenerator):
 
             detailfix_pipe.set_progress_bar_config(leave=leave_progress_bar)
             detailfix_pipe.set_progress_bar_config(disable=disable_progress_bar)
-            if self.class_name != "FluxPipeline":
+            if self.class_name != FLUX:
                 detailfix_pipe.to(self.device)
             else:
                 detailfix_pipe.__class__._execution_device = property(_execution_device)
@@ -2279,7 +2282,7 @@ class Model_Diffusers(PreviewGenerator):
             )
 
             # Params detailfix
-            if self.class_name == "StableDiffusionPipeline":
+            if self.class_name == SD15:
                 # SD detailfix
                 # detailfix_params_A["controlnet_conditioning_scale"] = controlnet_conditioning_scale
                 # detailfix_params_A["control_guidance_start"] = control_guidance_start
@@ -2302,7 +2305,7 @@ class Model_Diffusers(PreviewGenerator):
                 detailfix_params_A["prompt"] = None
                 detailfix_params_A["negative_prompt"] = None
 
-            elif self.class_name == "StableDiffusionXLPipeline":
+            elif self.class_name == SDXL:
                 # SDXL detailfix
                 if prompt_empty_detailfix_A and negative_prompt_empty_detailfix_A:
                     conditioning_detailfix_A, pooled_detailfix_A = conditioning, pooled
@@ -2322,7 +2325,7 @@ class Model_Diffusers(PreviewGenerator):
                 detailfix_params_A["negative_prompt_embeds"] = conditioning_detailfix_A[1:2]
                 detailfix_params_A["negative_pooled_prompt_embeds"] = pooled_detailfix_A[1:2]
 
-            elif self.class_name == "FluxPipeline":
+            elif self.class_name == FLUX:
                 # Flux detailfix
                 if prompt_empty_detailfix_A and negative_prompt_empty_detailfix_A:
                     conditioning_detailfix_A, pooled_detailfix_A = conditioning, pooled
@@ -2382,7 +2385,7 @@ class Model_Diffusers(PreviewGenerator):
             )
 
             # Params detailfix
-            if self.class_name == "StableDiffusionPipeline":
+            if self.class_name == SD15:
                 # SD detailfix
                 # detailfix_params_B["controlnet_conditioning_scale"] = controlnet_conditioning_scale
                 # detailfix_params_B["control_guidance_start"] = control_guidance_start
@@ -2404,7 +2407,7 @@ class Model_Diffusers(PreviewGenerator):
                 detailfix_params_B["prompt"] = None
                 detailfix_params_B["negative_prompt"] = None
 
-            elif self.class_name == "StableDiffusionXLPipeline":
+            elif self.class_name == SDXL:
                 # SDXL detailfix
                 if prompt_empty_detailfix_B and negative_prompt_empty_detailfix_B:
                     conditioning_detailfix_B, pooled_detailfix_B = conditioning, pooled
@@ -2423,7 +2426,7 @@ class Model_Diffusers(PreviewGenerator):
                 detailfix_params_B["negative_prompt_embeds"] = conditioning_detailfix_B[1:2]
                 detailfix_params_B["negative_pooled_prompt_embeds"] = pooled_detailfix_B[1:2]
 
-            elif self.class_name == "FluxPipeline":
+            elif self.class_name == FLUX:
                 # Flux detailfix
                 if prompt_empty_detailfix_B and negative_prompt_empty_detailfix_B:
                     conditioning_detailfix_B, pooled_detailfix_B = conditioning, pooled
@@ -2458,7 +2461,7 @@ class Model_Diffusers(PreviewGenerator):
                 "clip_skip": None,
                 "strength": hires_denoising_strength,
             }
-            if self.class_name == "StableDiffusionPipeline":
+            if self.class_name == SD15:
                 hires_params_config["eta"] = 1.0
 
             if self.ip_adapter_config:
@@ -2474,7 +2477,7 @@ class Model_Diffusers(PreviewGenerator):
             )
 
             # Hires embed params
-            if self.class_name == "StableDiffusionPipeline":
+            if self.class_name == SD15:
                 if hires_prompt_empty and hires_negative_prompt_empty:
                     hires_params_config["prompt_embeds"] = prompt_emb
                     hires_params_config["negative_prompt_embeds"] = negative_prompt_emb
@@ -2489,7 +2492,7 @@ class Model_Diffusers(PreviewGenerator):
 
                     hires_params_config["prompt_embeds"] = prompt_emb_hires
                     hires_params_config["negative_prompt_embeds"] = negative_prompt_emb_hires
-            elif self.class_name == "StableDiffusionXLPipeline":
+            elif self.class_name == SDXL:
                 if hires_prompt_empty and hires_negative_prompt_empty:
                     hires_conditioning, hires_pooled = conditioning, pooled
                 else:
@@ -2508,7 +2511,7 @@ class Model_Diffusers(PreviewGenerator):
                 hires_params_config["negative_prompt_embeds"] = hires_conditioning[1:2]
                 hires_params_config["negative_pooled_prompt_embeds"] = hires_pooled[1:2]
 
-            elif self.class_name == "FluxPipeline":
+            elif self.class_name == FLUX:
                 if hires_prompt_empty and hires_negative_prompt_empty:
                     hires_conditioning, hires_pooled = conditioning, pooled
                 else:
@@ -2552,7 +2555,7 @@ class Model_Diffusers(PreviewGenerator):
 
             hires_pipe.set_progress_bar_config(leave=leave_progress_bar)
             hires_pipe.set_progress_bar_config(disable=disable_progress_bar)
-            if self.class_name != "FluxPipeline":
+            if self.class_name != FLUX:
                 hires_pipe.to(self.device)
             else:
                 hires_pipe.__class__._execution_device = property(_execution_device)
@@ -2679,7 +2682,7 @@ class Model_Diffusers(PreviewGenerator):
         metadata,
     ):
 
-        if self.class_name == "FluxPipeline":
+        if self.class_name == FLUX:
             if upscaler_model_path is None and not adetailer_A and not adetailer_B and loop_generation == 1:
                 self.pipe.transformer = None
             if hasattr(self.pipe, "controlnet") and loop_generation == 1:
@@ -2864,7 +2867,7 @@ class Model_Diffusers(PreviewGenerator):
             pipe_params_config["generator"] = generators if self.task_name != "img2img" else generators[0]  # no list
             seeds = seeds if self.task_name != "img2img" else [seeds[0]] * num_images
 
-            if self.class_name == "FluxPipeline":
+            if self.class_name == FLUX:
                 self.pipe.text_encoder = None
                 self.pipe.text_encoder_2 = None
                 torch.cuda.empty_cache()
@@ -2989,7 +2992,7 @@ class Model_Diffusers(PreviewGenerator):
             pipe_params_config["generator"] = generators if self.task_name != "img2img" else generators[0]  # no list
             seeds = seeds if self.task_name != "img2img" else [seeds[0]] * num_images
 
-            if self.class_name == "FluxPipeline":
+            if self.class_name == FLUX:
                 self.pipe.text_encoder = None
                 self.pipe.text_encoder_2 = None
                 torch.cuda.empty_cache()
