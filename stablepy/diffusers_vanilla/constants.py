@@ -146,17 +146,6 @@ T2I_PREPROCESSOR_NAME = {
     "sdxl_lineart_t2i": "Lineart",
 }
 
-FLASH_LORA = {
-    SD15: {
-        "LCM Auto-Loader": "latent-consistency/lcm-lora-sdv1-5",
-        "TCD Auto-Loader": "h1t/TCD-SD15-LoRA",
-    },
-    SDXL: {
-        "LCM Auto-Loader": "latent-consistency/lcm-lora-sdxl",
-        "TCD Auto-Loader": "h1t/TCD-SDXL-LoRA",
-    },
-}
-
 PROMPT_WEIGHT_OPTIONS = {
     "Compel": "Compel",
     "Classic": "Classic",
@@ -214,7 +203,20 @@ SCHEDULER_CONFIG_MAP = {
 }
 
 scheduler_names = list(SCHEDULER_CONFIG_MAP.keys())
-FLASH_AUTO_LOAD_SAMPLER = scheduler_names[-2:]
+
+FLASH_AUTO_LOAD_SAMPLER = ["LCM Auto-Loader", "TCD Auto-Loader"]
+
+FLASH_LORA = {
+    SD15: {
+        FLASH_AUTO_LOAD_SAMPLER[0]: "latent-consistency/lcm-lora-sdv1-5",
+        FLASH_AUTO_LOAD_SAMPLER[1]: "h1t/TCD-SD15-LoRA",
+    },
+    SDXL: {
+        FLASH_AUTO_LOAD_SAMPLER[0]: "latent-consistency/lcm-lora-sdxl",
+        FLASH_AUTO_LOAD_SAMPLER[1]: "h1t/TCD-SDXL-LoRA",
+    },
+}
+
 
 AYS_SCHEDULES = {
     "AYS timesteps": [[999, 850, 736, 645, 545, 455, 343, 233, 124, 24], [999, 845, 730, 587, 443, 310, 193, 116, 53, 13]],
