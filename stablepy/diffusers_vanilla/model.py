@@ -11,7 +11,6 @@ from diffusers import (
     StableDiffusionXLPipeline,
     AutoPipelineForImage2Image,
     FluxTransformer2DModel,
-    FluxPipeline,
 )
 from huggingface_hub import hf_hub_download
 import torch
@@ -69,6 +68,9 @@ from .utils import (
     get_string_metadata,
     extra_string_metadata,
     assemble_filename_pattern,
+    process_prompts_valid,
+    convert_image_to_numpy_array,
+    latents_to_rgb,
 )
 from .lora_loader import lora_mix_load
 from .inpainting_canvas import draw, make_inpaint_condition
@@ -80,12 +82,10 @@ from .style_prompt_config import (
     styles_data,
     STYLE_NAMES,
     get_json_content,
-    apply_style
+    apply_style,
 )
 import os
-from compel import Compel, ReturnedEmbeddingsType
 import mediapy
-from IPython.display import display
 from PIL import Image
 from typing import Union, Optional, List, Tuple, Dict, Any, Callable # noqa
 import logging
@@ -278,80 +278,6 @@ class Preprocessor:
 # =====================================
 
 
-def process_prompts_valid(specific_prompt, specific_negative_prompt, prompt, negative_prompt):
-    specific_prompt_empty = (specific_prompt in [None, ""])
-    specific_negative_prompt_empty = (specific_negative_prompt in [None, ""])
-
-    prompt_valid = prompt if specific_prompt_empty else specific_prompt
-    negative_prompt_valid = negative_prompt if specific_negative_prompt_empty else specific_negative_prompt
-
-    return specific_prompt_empty, specific_negative_prompt_empty, prompt_valid, negative_prompt_valid
-
-
-def convert_image_to_numpy_array(image, gui_active=False):
-    if isinstance(image, str):
-        # If the input is a string (file path), open it as an image
-        image_pil = Image.open(image)
-        if image_pil.mode != 'RGB':
-            image_pil = image_pil.convert('RGB')
-        numpy_array = np.array(image_pil, dtype=np.uint8)
-    elif isinstance(image, Image.Image):
-        # If the input is already a PIL Image, convert it to a NumPy array
-        if image.mode != 'RGB':
-            image = image.convert('RGB')
-        numpy_array = np.array(image, dtype=np.uint8)
-    elif isinstance(image, np.ndarray):
-        # If the input is a NumPy array, ensure it's np.uint8
-        numpy_array = image.astype(np.uint8)
-    else:
-        if gui_active:
-            logger.info("Not found image")
-            return None
-        else:
-            raise ValueError(
-                "Unsupported image type or not control image found; Bug report to https://github.com/R3gm/stablepy or https://github.com/R3gm/SD_diffusers_interactive"
-            )
-
-    # Extract the RGB channels
-    try:
-        array_rgb = numpy_array[:, :, :3]
-    except Exception as e:
-        logger.error(str(e))
-        logger.error("Unsupported image type")
-        raise ValueError(
-            "Unsupported image type; Bug report to https://github.com/R3gm/stablepy or https://github.com/R3gm/SD_diffusers_interactive"
-        )
-
-    return array_rgb
-
-
-def latents_to_rgb(latents, latent_resize, vae_decoding, pipe):
-    weights = (
-        (60, -60, 25, -70),
-        (60, -5, 15, -50),
-        (60, 10, -5, -35)
-    )
-    if vae_decoding:
-        with torch.no_grad():
-            latents = [tl.unsqueeze(0) for tl in torch.unbind(latents, dim=0)][0]
-            image = pipe.vae.decode(latents / pipe.vae.config.scaling_factor, return_dict=False)[0]
-
-        resized_image = pipe.image_processor.postprocess(image, output_type="pil")
-    else:
-        weights_tensor = torch.tensor(weights, dtype=latents.dtype, device=latents.device).T
-
-        biases_tensor = torch.tensor((150, 140, 130), dtype=latents.dtype, device=latents.device)
-        rgb_tensor = torch.einsum("...lxy,lr -> ...rxy", latents, weights_tensor) + biases_tensor.view(-1, 1, 1)
-        image_array = rgb_tensor.clamp(0, 255)[0].byte().cpu().numpy()
-        image_array = image_array.transpose(1, 2, 0)  # Change the order of dimensions
-
-        pil_image = Image.fromarray(image_array)
-
-        resized_image = pil_image.resize((pil_image.size[0] * latent_resize, pil_image.size[1] * latent_resize), Image.LANCZOS)  # Resize 128x128 * ...
-
-    return resized_image
-
-
 class PreviewGenerator:
     def __init__(self, *args, **kwargs):
         self.image_step = None
@@ -388,7 +314,7 @@ class PreviewGenerator:
                 yield self.image_step  # Yield the new image
 
             if self.fail_work:
-                logger.debug(f"Stream failed")
+                logger.debug("Stream failed")
                 raise Exception(self.fail_work)
 
     def generate_images(self, pipe_params_config):
@@ -861,21 +787,6 @@ class Model_Diffusers(PreviewGenerator):
 
         return
 
-    def load_controlnet_weight(self, task_name: str) -> None:
-        torch.cuda.empty_cache()
-        gc.collect()
-        model_id = CONTROLNET_MODEL_IDS[task_name]
-        if isinstance(model_id, list):
-            # SD1.5 model
-            model_id = model_id[0]
-        controlnet = ControlNetModel.from_pretrained(
-            model_id, torch_dtype=self.type_model_precision
-        )
-        controlnet.to(self.device)
-        torch.cuda.empty_cache()
-        gc.collect()
-        self.pipe.controlnet = controlnet
-        # self.task_name = task_name
 
     @torch.inference_mode()
     def get_image_preprocess(
@@ -893,13 +804,6 @@ class Model_Diffusers(PreviewGenerator):
     ) -> list[PIL.Image.Image]:
         if image is None:
             raise ValueError("No reference image found.")
-
-        # if self.class_name == SD15 and self.task_name in ["lineart", "lineart_anime"]:
-        #     if "anime" in preprocessor_name:
-        #         self.load_controlnet_weight("lineart_anime")
-        #         logger.info("Linear anime")
-        #     else:
-        #         self.load_controlnet_weight("lineart")
 
         if "t2i" in self.task_name:
             preprocessor_name = T2I_PREPROCESSOR_NAME[self.task_name] if t2i_adapter_preprocessor else "None"
@@ -1913,7 +1817,7 @@ class Model_Diffusers(PreviewGenerator):
         else:
             self.pipe.text_encoder.to(self.device)
             self.pipe.text_encoder_2.to(self.device)
-            logger.debug(str(self.pipe._execution_device)) # alternative patch to secuential_cpu_offload()
+            logger.debug(str(self.pipe._execution_device))  # alternative patch to secuential_cpu_offload()
 
             origin_device = self.device
 
