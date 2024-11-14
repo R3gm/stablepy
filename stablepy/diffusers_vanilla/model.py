@@ -10,6 +10,7 @@ from diffusers import (
     T2IAdapter,
     StableDiffusionXLPipeline,
     AutoPipelineForImage2Image,
+    FluxTransformer2DModel,
 )
 from huggingface_hub import hf_hub_download
 import torch
@@ -658,14 +659,28 @@ class Model_Diffusers(PreviewGenerator):
                 elif model_type == "sd1.5":
                     self.pipe = StableDiffusionPipeline.from_single_file(
                         base_model_id,
-                        # vae=None
-                        # if vae_model == None
-                        # else AutoencoderKL.from_single_file(
-                        #     vae_model
-                        # ),
                         torch_dtype=self.type_model_precision,
                     )
                     class_name = SD15
+                elif model_type in ["flux-dev", "flux-schnell"]:
+
+                    if "dev" in model_type:
+                        repo_flux_model = "camenduru/FLUX.1-dev-diffusers"
+                    else:
+                        repo_flux_model = "black-forest-labs/FLUX.1-schnell"
+
+                    transformer = FluxTransformer2DModel.from_single_file(
+                        base_model_id,
+                        subfolder="transformer",
+                        torch_dtype=self.type_model_precision,
+                        config=repo_flux_model,
+                    )
+                    self.pipe = DiffusionPipeline.from_pretrained(
+                        repo_flux_model,
+                        transformer=transformer,
+                        torch_dtype=self.type_model_precision,
+                    )
+                    class_name = FLUX
                 else:
                     raise ValueError(f"Model type {model_type} not supported.")
             else:

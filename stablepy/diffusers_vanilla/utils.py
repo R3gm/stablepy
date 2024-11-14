@@ -150,6 +150,10 @@ def checkpoint_model_type(checkpoint_path):
     key_name_v2_1 = "model.diffusion_model.input_blocks.2.1.transformer_blocks.0.attn2.to_k.weight"
     key_name_sd_xl_base = "conditioner.embedders.1.model.transformer.resblocks.9.mlp.c_proj.bias"
     key_name_sd_xl_refiner = "conditioner.embedders.0.model.transformer.resblocks.9.mlp.c_proj.bias"
+    key_name_flux = [
+        "double_blocks.0.img_attn.norm.key_norm.scale",
+        "model.diffusion_model.double_blocks.0.img_attn.norm.key_norm.scale",
+    ]
 
     # model_type = "v1"
     model_type = "sd1.5"
@@ -163,6 +167,13 @@ def checkpoint_model_type(checkpoint_path):
     elif key_name_sd_xl_refiner in checkpoint:
         # only refiner xl has embedder and one text embedders
         model_type = "refiner"
+    elif any(key in checkpoint for key in key_name_flux):
+        if any(
+            g in checkpoint for g in ["guidance_in.in_layer.bias", "model.diffusion_model.guidance_in.in_layer.bias"]
+        ):
+            model_type = "flux-dev"
+        else:
+            model_type = "flux-schnell"
 
     del checkpoint
 
