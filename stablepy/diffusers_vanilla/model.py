@@ -11,6 +11,7 @@ from diffusers import (
     StableDiffusionXLPipeline,
     AutoPipelineForImage2Image,
     FluxTransformer2DModel,
+    FluxPipeline,
 )
 from huggingface_hub import hf_hub_download
 import torch
@@ -685,7 +686,10 @@ class Model_Diffusers(PreviewGenerator):
                     raise ValueError(f"Model type {model_type} not supported.")
             else:
                 try:
-                    file_config = hf_hub_download(repo_id=base_model_id, filename="model_index.json")
+                    file_config = hf_hub_download(
+                        repo_id=base_model_id,
+                        filename="model_index.json",
+                    )
                 except Exception as e:
                     logger.error(
                         "Unable to obtain the configuration file. Make sure "
@@ -705,8 +709,29 @@ class Model_Diffusers(PreviewGenerator):
                 match class_name:
 
                     case "FluxPipeline":
+
+                        t_config = hf_hub_download(
+                            repo_id=base_model_id,
+                            filename="transformer/config.json",
+                        )
+                        with open(t_config, 'r') as json_t:
+                            transformer_config = json.load(json_t)
+
+                        if transformer_config["guidance_embeds"]:
+                            repo_flux_model = "camenduru/FLUX.1-dev-diffusers"
+                        else:
+                            repo_flux_model = "black-forest-labs/FLUX.1-schnell"
+
+                        transformer = FluxTransformer2DModel.from_pretrained(
+                            base_model_id,
+                            subfolder="transformer",
+                            torch_dtype=self.type_model_precision,
+                            # config=repo_flux_model,
+                        )
                         self.pipe = DiffusionPipeline.from_pretrained(
-                            base_model_id, torch_dtype=self.type_model_precision
+                            repo_flux_model,
+                            transformer=transformer,
+                            torch_dtype=self.type_model_precision,
                         )
 
                     case "StableDiffusionPipeline":
