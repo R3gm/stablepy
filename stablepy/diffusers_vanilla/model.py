@@ -636,29 +636,39 @@ class Model_Diffusers(PreviewGenerator):
 
                     case "FluxPipeline":
 
-                        t_config = hf_hub_download(
-                            repo_id=base_model_id,
-                            filename="transformer/config.json",
-                        )
-                        with open(t_config, 'r') as json_t:
-                            transformer_config = json.load(json_t)
-
-                        if transformer_config["guidance_embeds"]:
-                            repo_flux_model = "camenduru/FLUX.1-dev-diffusers"
-                        else:
-                            repo_flux_model = "black-forest-labs/FLUX.1-schnell"
-
                         transformer = FluxTransformer2DModel.from_pretrained(
                             base_model_id,
                             subfolder="transformer",
                             torch_dtype=self.type_model_precision,
-                            # config=repo_flux_model,
                         )
+
+                        repo_flux = [
+                            "camenduru/FLUX.1-dev-diffusers",
+                            "black-forest-labs/FLUX.1-dev",
+                            "multimodalart/FLUX.1-dev2pro-full",
+                        ]
+                        for repo_ in repo_flux:
+                            try:
+                                _ = hf_hub_download(
+                                    repo_id=repo_,
+                                    filename="model_index.json",
+                                )
+                                repo_flux_model = repo_
+                                break
+                            except Exception as e:
+                                logger.debug(e)
+
                         self.pipe = DiffusionPipeline.from_pretrained(
                             repo_flux_model,
                             transformer=transformer,
                             torch_dtype=self.type_model_precision,
                         )
+
+                        if not self.pipe.transformer.config.guidance_embeds:
+                            self.pipe.scheduler.register_to_config(
+                                shift=1.0,
+                                use_dynamic_shifting=False,
+                            )
 
                     case "StableDiffusionPipeline":
                         self.pipe = StableDiffusionPipeline.from_pretrained(
@@ -2524,6 +2534,7 @@ class Model_Diffusers(PreviewGenerator):
                 logger.debug(f"unet_type: {self.pipe.unet.dtype}")
             else:
                 logger.debug(f"transformer_type: {self.pipe.transformer.dtype}")
+                logger.debug(f"transformer_config: {self.pipe.transformer.config}")
             logger.debug(f"vae_type: {self.pipe.vae.dtype}")
             logger.debug(f"pipe_type: {self.pipe.dtype}")
             logger.debug(f"scheduler_main_pipe: {self.pipe.scheduler}")
