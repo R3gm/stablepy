@@ -10,7 +10,9 @@ import numpy as np
 
 def generate_lora_tags(names_list, scales_list):
     tags = [
-        f"<lora:{os.path.splitext(os.path.basename(str(l_name)))[0]}:{l_scale}>"
+        f"<lora:"
+        f"{os.path.splitext(os.path.basename(str(l_name)))[0] if os.path.exists(l_name) else os.path.basename(str(l_name))}:"
+        f"{l_scale}>"
         for l_name, l_scale in zip(names_list, scales_list)
         if l_name
     ]
@@ -21,7 +23,7 @@ def extra_string_metadata(metadata_list):
     parameters_beta = ""
     try:
         if metadata_list[0]:
-            parameters_beta += f", VAE: {os.path.splitext(os.path.basename(str(metadata_list[0])))[0]}"
+            parameters_beta += f", VAE: {os.path.splitext(os.path.basename(str(metadata_list[0])))[0] if os.path.exists(metadata_list[0]) else os.path.basename(str(metadata_list[0]))}"
         if metadata_list[1]:
             parameters_beta += f", PAG: {metadata_list[1]}"
         if metadata_list[2]:
@@ -57,7 +59,7 @@ def assemble_filename_pattern(suffix_images, metadata):
     FILENAME_PATTERN = {
         "prompt_section": metadata[0][:15] if metadata[0] else "",
         "neg_prompt_section": metadata[1][:15] if metadata[1] else "",
-        "model": os.path.splitext(os.path.basename(str(metadata[2])))[0],
+        "model": os.path.splitext(os.path.basename(str(metadata[2])))[0] if os.path.exists(metadata[2]) else os.path.basename(str(metadata[2])),
         "vae": os.path.splitext(os.path.basename(str(metadata[3])))[0] if metadata[3] else "",
         "num_steps": metadata[4],
         "guidance_scale": metadata[5],
@@ -99,7 +101,7 @@ def get_string_metadata(metadata_list):
             f"CFG scale: {str(metadata_list[5])}, "
             f"Seed: {str(metadata_list[7])}, "
             f"Size: {str(metadata_list[8])}x{str(metadata_list[9])}, "
-            f"Model: {os.path.splitext(os.path.basename(str(metadata_list[2])))[0]}, "
+            f"Model: {os.path.splitext(os.path.basename(str(metadata_list[2])))[0] if os.path.exists(metadata_list[2]) else os.path.basename(str(metadata_list[2]))}, "
             f"Clip skip: {2 if metadata_list[10] else 1}"
         )
 

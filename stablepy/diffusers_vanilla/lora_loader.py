@@ -113,6 +113,7 @@ def lora_mix_load(pipe, lora_path, alpha_scale=1.0, device="cuda", dtype=torch.f
             pipe.fuse_lora(lora_scale=alpha_scale)
             pipe.unload_lora_weights()
         except Exception as e:
+            pipe.unload_lora_weights()
             if "size mismatch for" in str(e):
                 raise e
 
@@ -127,9 +128,13 @@ def lora_mix_load(pipe, lora_path, alpha_scale=1.0, device="cuda", dtype=torch.f
             if not state_dict:
                 raise ValueError("No valid layers were found.")
 
-            pipe.load_lora_weights(state_dict)
-            pipe.fuse_lora(lora_scale=alpha_scale)
-            pipe.unload_lora_weights()
+            try:
+                pipe.load_lora_weights(state_dict)
+                pipe.fuse_lora(lora_scale=alpha_scale)
+                pipe.unload_lora_weights()
+            except Exception as e:
+                pipe.unload_lora_weights()
+                raise e
     else:
         # sd lora
         try:
@@ -138,8 +143,12 @@ def lora_mix_load(pipe, lora_path, alpha_scale=1.0, device="cuda", dtype=torch.f
             )
         except Exception as e:
             logger.debug(f"{str(e)} \nDiffusers loader>>")
-            pipe.load_lora_weights(lora_path)
-            pipe.fuse_lora(lora_scale=alpha_scale)
-            pipe.unload_lora_weights()
+            try:
+                pipe.load_lora_weights(lora_path)
+                pipe.fuse_lora(lora_scale=alpha_scale)
+                pipe.unload_lora_weights()
+            except Exception as e:
+                pipe.unload_lora_weights()
+                raise e
 
     return pipe
