@@ -1,8 +1,22 @@
-# =====================================
-# Prompt weights
-# =====================================
 import torch
 import re
+
+ESCAPED_SYNTACTIC_SYMBOLS = [
+    '"',
+    '(',
+    ')',
+    '=',
+    # '-',
+    # '+',
+    # '.',
+    # ',',
+]
+
+TRANSLATION_DICT = {
+    ord(symbol): "\\" + symbol for symbol in ESCAPED_SYNTACTIC_SYMBOLS
+}
+
+
 def parse_prompt_attention(text):
     re_attention = re.compile(r"""
       \\\(|
@@ -74,9 +88,12 @@ def parse_prompt_attention(text):
 
     return res
 
+
 def prompt_attention_to_invoke_prompt(attention):
     tokens = []
     for text, weight in attention:
+        text = text.translate(TRANSLATION_DICT)
+
         # Round weight to 2 decimal places
         weight = round(weight, 2)
         if weight == 1.0:
@@ -93,10 +110,12 @@ def prompt_attention_to_invoke_prompt(attention):
                 tokens.append(f"({text}){weight}")
     return "".join(tokens)
 
+
 def concat_tensor(t):
     t_list = torch.split(t, 1, dim=0)
     t = torch.cat(t_list, dim=1)
     return t
+
 
 def merge_embeds(prompt_chanks, compel):
     num_chanks = len(prompt_chanks)
@@ -111,6 +130,7 @@ def merge_embeds(prompt_chanks, compel):
         prompt_emb = compel('')
     return prompt_emb
 
+
 def detokenize(chunk, actual_prompt):
     chunk[-1] = chunk[-1].replace('</w>', '')
     chanked_prompt = ''.join(chunk).strip()
@@ -119,10 +139,11 @@ def detokenize(chunk, actual_prompt):
             chanked_prompt = chanked_prompt.replace('</w>', ' ', 1)
         else:
             chanked_prompt = chanked_prompt.replace('</w>', '', 1)
-    actual_prompt = actual_prompt.replace(chanked_prompt,'')
+    actual_prompt = actual_prompt.replace(chanked_prompt, '')
     return chanked_prompt.strip(), actual_prompt.strip()
 
-def tokenize_line(line, tokenizer): # split into chunks
+
+def tokenize_line(line, tokenizer):  # split into chunks
     actual_prompt = line.lower().strip()
     actual_tokens = tokenizer.tokenize(actual_prompt)
     max_tokens = tokenizer.model_max_length - 2
@@ -153,6 +174,7 @@ def tokenize_line(line, tokenizer): # split into chunks
         chunks.append(actual_chunk)
 
     return chunks
+
 
 def get_embed_new(prompt, pipeline, compel, only_convert_string=False, compel_process_sd=False):
 
@@ -202,6 +224,7 @@ def get_embed_new(prompt, pipeline, compel, only_convert_string=False, compel_pr
         return ' '.join([prompt_attention_to_invoke_prompt(i) for i in global_prompt_chanks])
 
     return merge_embeds([prompt_attention_to_invoke_prompt(i) for i in global_prompt_chanks], compel)
+
 
 def add_comma_after_pattern_ti(text):
     pattern = re.compile(r'\b\w+_\d+\b')
