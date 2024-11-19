@@ -7,7 +7,7 @@ from .constants import (
     PROMPT_WEIGHT_OPTIONS,
     OLD_PROMPT_WEIGHT_OPTIONS,
 )
-from .prompt_weights import get_embed_new, add_comma_after_pattern_ti
+from .prompt_weights import get_embed_new
 
 
 class Prompt_Embedder_Base:
@@ -199,20 +199,20 @@ class Promt_Embedder_FLUX(Prompt_Embedder_Base):
             pipe,
             pipe.tokenizer,
             pipe.text_encoder,
-            2 if clip_skip else 1,
+            1,
             emphasis,
             20,
         )
 
-        text_embedder_2 = StableDiffusionLongPromptProcessor(
-            pipe,
-            pipe.tokenizer_2,
+        from .t5_embedder import T5TextProcessingEngine
+        text_embedder_2 = T5TextProcessingEngine(
             pipe.text_encoder_2,
-            2 if clip_skip else 1,
-            emphasis,
-            20,
+            pipe.tokenizer_2,
+            emphasis_name=emphasis,
+            min_length=(
+                512 if pipe.transformer.config.guidance_embeds else 256
+            ),
         )
-        # text_embedder_2.chunk_length = 512
 
         _, pooled_embeddings = text_embedder(prompt, get_pooled=True)
         positive_embeddings = text_embedder_2(prompt)

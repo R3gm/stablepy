@@ -352,7 +352,7 @@ class FrozenCLIPEmbedderWithCustomWordsBase(torch.nn.Module):
         if self.id_end != self.id_pad:
             for batch_pos in range(len(remade_batch_tokens)):
                 index = remade_batch_tokens[batch_pos].index(self.id_end)
-                tokens[batch_pos, index+1:tokens.shape[1]] = self.id_pad
+                tokens[batch_pos, index + 1: tokens.shape[1]] = self.id_pad
 
         if hasattr(self.wrapped, "transformer"):
             z, pooled = self.encode_with_transformers_flux(tokens)
@@ -453,10 +453,7 @@ class StableDiffusionLongPromptProcessor(FrozenCLIPEmbedderWithCustomWordsBase):
         outputs = self.text_encoder(input_ids=tokens.to(self.text_encoder.device), output_hidden_states=self.layer == "hidden")
 
         # outputs.to("cpu")
-
-        pooled = None
-        if outputs[0].shape[-1] == 768:
-            pooled = outputs[0]
+        pooled = outputs.pooler_output
 
         # if self.layer == "last":
         #     z = outputs.last_hidden_state
@@ -490,10 +487,10 @@ def text_embeddings_equal_len(text_embedder, prompt, negative_prompt, get_pooled
     else:
         if cond_len > uncond_len:
             n = (cond_len - uncond_len) // 77
-            all_embeddings = [cond_embeddings, torch.cat([uncond_embeddings] + [text_embedder([""])]*n, dim=1)]
+            all_embeddings = [cond_embeddings, torch.cat([uncond_embeddings] + [text_embedder([""])] * n, dim=1)]
         else:
             n = (uncond_len - cond_len) // 77
-            all_embeddings = [torch.cat([cond_embeddings] + [text_embedder([""])]*n, dim=1), uncond_embeddings]
+            all_embeddings = [torch.cat([cond_embeddings] + [text_embedder([""])] * n, dim=1), uncond_embeddings]
 
     if get_pooled:
         return all_embeddings + [pooled_cond, pooled_neg_cond]
