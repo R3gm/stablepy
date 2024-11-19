@@ -93,6 +93,7 @@ class T5TextProcessingEngine:
         self.text_encoder = text_encoder.encoder
         self.tokenizer = tokenizer
 
+        self.device = text_encoder.device.type
         self.emphasis = get_current_option(emphasis_name)()
         self.min_length = min_length
         self.id_end = 1
@@ -125,20 +126,11 @@ class T5TextProcessingEngine:
         return tokenized
 
     def encode_with_transformers(self, tokens):
-        device = "cuda"
-        tokens = tokens.to(device)
-        # self.text_encoder.shared.to(device=device) # torch.float32
-
-        import gc
-        torch.cuda.empty_cache()
-        gc.collect()
+        tokens = tokens.to(self.device)
 
         z = self.text_encoder(
             input_ids=tokens,
         )[0]
-
-        torch.cuda.empty_cache()
-        gc.collect()
 
         return z
 
@@ -228,7 +220,6 @@ class T5TextProcessingEngine:
         z = self.encode_with_transformers(tokens)
 
         self.emphasis.tokens = batch_tokens
-        print(z[0])
         self.emphasis.multipliers = torch.asarray(batch_multipliers).to(z)
         self.emphasis.z = z
         self.emphasis.after_transformers()

@@ -122,7 +122,7 @@ def check_scheduler_compatibility(cls, sampler, schedule_type):
 
     if cls == FLUX:
         if "Flow" not in sampler:
-            sampler = "FlowMatchDPM++ 2M"
+            sampler = "FlowMatch DPM++ 2M"
             msg += (
                 "The selected sampler does not work with FLUX models;"
                 f" so it has been switched to {sampler}. "
@@ -131,9 +131,9 @@ def check_scheduler_compatibility(cls, sampler, schedule_type):
         valid_schedule = FLUX_SCHEDULE_TYPES.get(schedule_type, None)
 
         if schedule_type != auto_schedule:
-            if sampler == "FlowMatchEuler":
+            if sampler == "FlowMatch Euler":
                 msg += (
-                    "FlowMatchEuler only support"
+                    "FlowMatch Euler only support"
                     f" '{auto_schedule}' schedule type."
                 )
                 schedule_type = auto_schedule
@@ -148,7 +148,7 @@ def check_scheduler_compatibility(cls, sampler, schedule_type):
         return sampler, schedule_type, msg
 
     if "Flow" in sampler:
-        sampler = sampler.replace("FlowMatch", "")
+        sampler = sampler.replace("FlowMatch ", "")
         msg += (
             "The selected sampler works only with FLUX models;"
             f" so it has been switched to {sampler}. "

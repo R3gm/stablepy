@@ -1,4 +1,7 @@
-from .multi_emphasis_prompt import StableDiffusionLongPromptProcessor, text_embeddings_equal_len
+from .multi_emphasis_prompt import (
+    StableDiffusionLongPromptProcessor,
+    text_embeddings_equal_len,
+)
 import torch
 import gc
 from compel import Compel, ReturnedEmbeddingsType
@@ -6,8 +9,16 @@ from ..logging.logging_setup import logger
 from .constants import (
     PROMPT_WEIGHT_OPTIONS,
     OLD_PROMPT_WEIGHT_OPTIONS,
+    SD_EMBED,
+    CLASSIC_VARIANT,
+    ALL_PROMPT_WEIGHT_OPTIONS,
 )
 from .prompt_weights import get_embed_new
+from .sd_embed.embedding_funcs import (
+    get_weighted_text_embeddings_sd15,
+    get_weighted_text_embeddings_sdxl,
+    get_weighted_text_embeddings_flux1,
+)
 
 
 class Prompt_Embedder_Base:
@@ -30,7 +41,6 @@ class Prompt_Embedder_Base:
                         s_model = {"emb_params": model_tensors}
                         # save_file(s_model, directory_name[:-3] + '.safetensors')
                         pipe.load_textual_inversion(s_model, token=name)
-
                     else:
                         # pipe.text_encoder.resize_token_embeddings(len(pipe.tokenizer),pad_to_multiple_of=128)
                         # pipe.load_textual_inversion("./bad_prompt.pt", token="baddd")
@@ -52,11 +62,16 @@ class Prompt_Embedder_Base:
                     logger.error(exception)
                     logger.error(f"Can't apply embed {name}")
 
+    @torch.no_grad()
     def __call__(self, prompt, negative_prompt, syntax_weights, pipe, clip_skip, compel):
-        if syntax_weights not in OLD_PROMPT_WEIGHT_OPTIONS:
-            emphasis = PROMPT_WEIGHT_OPTIONS[syntax_weights]
+        if syntax_weights in CLASSIC_VARIANT:
+            emphasis = CLASSIC_VARIANT[syntax_weights]
             return self.classic_variant(
                 prompt, negative_prompt, pipe, clip_skip, emphasis
+            )
+        elif syntax_weights in SD_EMBED:
+            return self.sd_embed_variant(
+                prompt, negative_prompt, pipe, clip_skip
             )
         else:
             return self.compel_processor(
@@ -77,6 +92,19 @@ class Promt_Embedder_SD1(Prompt_Embedder_Base):
         )
 
         cond_embeddings, uncond_embeddings = text_embeddings_equal_len(text_embedder, prompt, negative_prompt)
+        return cond_embeddings, uncond_embeddings, None
+
+    def sd_embed_variant(self, prompt, negative_prompt, pipe, clip_skip):
+
+        (
+            cond_embeddings,
+            uncond_embeddings
+        ) = get_weighted_text_embeddings_sd15(
+            pipe,
+            prompt=prompt,
+            neg_prompt=negative_prompt,
+        )
+
         return cond_embeddings, uncond_embeddings, None
 
     def compel_processor(self, prompt, negative_prompt, pipe, clip_skip, syntax_weights, compel):
@@ -156,6 +184,27 @@ class Promt_Embedder_SDXL(Prompt_Embedder_Base):
 
         return all_cond, all_pooled, None
 
+    def sd_embed_variant(self, prompt, negative_prompt, pipe, clip_skip):
+
+        (
+            cond_embed,
+            neg_uncond_embed,
+            cond_pooled,
+            uncond_pooled
+        ) = get_weighted_text_embeddings_sdxl(
+            pipe,
+            prompt=prompt,
+            neg_prompt=negative_prompt,
+        )
+
+        all_cond = torch.cat([cond_embed, neg_uncond_embed])
+
+        all_pooled = torch.cat([cond_pooled, uncond_pooled])
+
+        assert torch.equal(all_cond[0:1], cond_embed), "Tensors are not equal"
+
+        return all_cond, all_pooled, None
+
     def compel_processor(self, prompt, negative_prompt, pipe, clip_skip, syntax_weights, compel):
 
         if compel is None or clip_skip != self.last_clip_skip:
@@ -222,6 +271,27 @@ class Promt_Embedder_FLUX(Prompt_Embedder_Base):
 
         # pipe.text_encoder_2.to("cpu")
         # pipe.transformer.to("cuda")
+        torch.cuda.empty_cache()
+        gc.collect()
+
+        return positive_embeddings, pooled_embeddings, None
+
+    def sd_embed_variant(self, prompt, negative_prompt, pipe, clip_skip):
+
+        torch.cuda.empty_cache()
+        gc.collect()
+
+        (
+            positive_embeddings,
+            pooled_embeddings
+        ) = get_weighted_text_embeddings_flux1(
+            pipe=pipe,
+            prompt=prompt,
+        )
+
+        positive_embeddings = positive_embeddings.to(dtype=pipe.text_encoder_2.dtype)
+        pooled_embeddings = pooled_embeddings.to(dtype=pipe.text_encoder.dtype)
+
         torch.cuda.empty_cache()
         gc.collect()
 

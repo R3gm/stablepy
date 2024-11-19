@@ -481,7 +481,7 @@ def text_embeddings_equal_len(text_embedder, prompt, negative_prompt, get_pooled
 
     cond_len = cond_embeddings.shape[1]
     uncond_len = uncond_embeddings.shape[1]
-    # print(cond_embeddings.shape, uncond_embeddings.shape)
+
     if cond_len == uncond_len:
         all_embeddings = [cond_embeddings, uncond_embeddings]
     else:

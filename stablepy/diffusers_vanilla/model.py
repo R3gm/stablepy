@@ -797,7 +797,6 @@ class Model_Diffusers(PreviewGenerator):
 
         return
 
-
     @torch.inference_mode()
     def get_image_preprocess(
         self,
@@ -1002,9 +1001,9 @@ class Model_Diffusers(PreviewGenerator):
 
     def get_scheduler(self, name):
         if "Flow" in name and self.class_name != FLUX:
-            name = name.replace("FlowMatch", "")
+            name = name.replace("FlowMatch ", "")
         elif "Flow" not in name and self.class_name == FLUX:
-            name = "FlowMatchDPM++ 2M"
+            name = "FlowMatch DPM++ 2M"
 
         if name in SCHEDULER_CONFIG_MAP:
             scheduler_class, config = SCHEDULER_CONFIG_MAP[name]
@@ -1128,8 +1127,8 @@ class Model_Diffusers(PreviewGenerator):
         self.style_json_file = ""
 
         logger.info(
-                    f"Beta styles loaded with {len(self.STYLE_NAMES)} styles"
-                )
+            f"Beta styles loaded with {len(self.STYLE_NAMES)} styles"
+        )
 
     def set_ip_adapter_multimode_scale(self, ip_scales, ip_adapter_mode):
         mode_scales = []
@@ -2012,12 +2011,12 @@ class Model_Diffusers(PreviewGenerator):
 
         # Task Parameters
         pipe_params_config = {
-                "prompt": None,
-                "negative_prompt": None,
-                "num_inference_steps": num_steps,
-                "guidance_scale": guidance_scale,
-                "clip_skip": None,
-                "num_images_per_prompt": num_images,
+            "prompt": None,
+            "negative_prompt": None,
+            "num_inference_steps": num_steps,
+            "guidance_scale": guidance_scale,
+            "clip_skip": None,
+            "num_images_per_prompt": num_images,
         }
 
         if hasattr(self.pipe, "set_pag_applied_layers"):
@@ -2667,18 +2666,18 @@ class Model_Diffusers(PreviewGenerator):
 
         if hires_before_adetailer and upscaler_model_path is not None:
             logger.debug(
-                    "Hires before; same seed for each image (no batch)"
-                )
+                "Hires before; same seed for each image (no batch)"
+            )
             images = process_images_high_resolution(
-                    images,
-                    upscaler_model_path,
-                    upscaler_increases_size,
-                    esrgan_tile, esrgan_tile_overlap,
-                    hires_steps, hires_params_config,
-                    self.task_name,
-                    generators[0],  # pipe_params_config["generator"][0], # no generator
-                    hires_pipe,
-                )
+                images,
+                upscaler_model_path,
+                upscaler_increases_size,
+                esrgan_tile, esrgan_tile_overlap,
+                hires_steps, hires_params_config,
+                self.task_name,
+                generators[0],  # pipe_params_config["generator"][0], # no generator
+                hires_pipe,
+            )
 
             # Adetailer stuff
         if adetailer_A or adetailer_B:
@@ -2691,18 +2690,18 @@ class Model_Diffusers(PreviewGenerator):
 
             if adetailer_A:
                 images = ad_model_process(
-                        pipe_params_df=post_processing_params["detailfix_params_A"],
-                        detailfix_pipe=post_processing_params["detailfix_pipe"],
-                        image_list_task=images,
-                        **adetailer_A_params,
-                    )
+                    pipe_params_df=post_processing_params["detailfix_params_A"],
+                    detailfix_pipe=post_processing_params["detailfix_pipe"],
+                    image_list_task=images,
+                    **adetailer_A_params,
+                )
             if adetailer_B:
                 images = ad_model_process(
-                        pipe_params_df=post_processing_params["detailfix_params_B"],
-                        detailfix_pipe=post_processing_params["detailfix_pipe"],
-                        image_list_task=images,
-                        **adetailer_B_params,
-                    )
+                    pipe_params_df=post_processing_params["detailfix_params_B"],
+                    detailfix_pipe=post_processing_params["detailfix_pipe"],
+                    image_list_task=images,
+                    **adetailer_B_params,
+                )
 
             if self.task_name not in ["txt2img", "inpaint", "img2img"]:
                 images = [control_image] + images
@@ -2712,18 +2711,18 @@ class Model_Diffusers(PreviewGenerator):
 
         if hires_after_adetailer and upscaler_model_path is not None:
             logger.debug(
-                    "Hires after; same seed for each image (no batch)"
-                )
+                "Hires after; same seed for each image (no batch)"
+            )
             images = process_images_high_resolution(
-                    images,
-                    upscaler_model_path,
-                    upscaler_increases_size,
-                    esrgan_tile, esrgan_tile_overlap,
-                    hires_steps, hires_params_config,
-                    self.task_name,
-                    generators[0],  # pipe_params_config["generator"][0], # no generator
-                    hires_pipe,
-                )
+                images,
+                upscaler_model_path,
+                upscaler_increases_size,
+                esrgan_tile, esrgan_tile_overlap,
+                hires_steps, hires_params_config,
+                self.task_name,
+                generators[0],  # pipe_params_config["generator"][0], # no generator
+                hires_pipe,
+            )
 
         logger.info(f"Seeds: {seeds}")
 
@@ -2801,7 +2800,7 @@ class Model_Diffusers(PreviewGenerator):
                 if num_images == 1:
                     seeds = [seed]
                 else:
-                    seeds = [seed] + [random.randint(0, 2147483647) for _ in range(num_images-1)]
+                    seeds = [seed] + [random.randint(0, 2147483647) for _ in range(num_images - 1)]
 
             # generators
             generators = []  # List to store all the generators
@@ -2926,7 +2925,7 @@ class Model_Diffusers(PreviewGenerator):
                 if num_images == 1:
                     seeds = [seed]
                 else:
-                    seeds = [seed] + [random.randint(0, 2147483647) for _ in range(num_images-1)]
+                    seeds = [seed] + [random.randint(0, 2147483647) for _ in range(num_images - 1)]
 
             # generators
             generators = []  # List to store all the generators

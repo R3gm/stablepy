@@ -146,17 +146,29 @@ T2I_PREPROCESSOR_NAME = {
     "sdxl_lineart_t2i": "Lineart",
 }
 
-PROMPT_WEIGHT_OPTIONS = {
+OLD_PROMPT_WEIGHT_OPTIONS = {
     "Compel": "Compel",
     "Classic": "Classic",
+}
+
+SD_EMBED = {
+    "Classic-sd_embed": "sd_embed",
+}
+
+CLASSIC_VARIANT = {
     "Classic-original": "Original",
     "Classic-no_norm": "No norm",
     "Classic-ignore": "Ignore",
-    "None": "None"
+    "None": "None",
+}
+
+PROMPT_WEIGHT_OPTIONS = {
+    **OLD_PROMPT_WEIGHT_OPTIONS,
+    **SD_EMBED,
+    **CLASSIC_VARIANT
 }
 
 ALL_PROMPT_WEIGHT_OPTIONS = list(PROMPT_WEIGHT_OPTIONS.keys())
-OLD_PROMPT_WEIGHT_OPTIONS = ALL_PROMPT_WEIGHT_OPTIONS[0:2]
 
 # Sampler: DPM++ 2M, Schedule type: Exponential
 SCHEDULER_CONFIG_MAP = {
@@ -182,9 +194,9 @@ SCHEDULER_CONFIG_MAP = {
     "DPM++ 2M EDM": (EDMDPMSolverMultistepScheduler, {"solver_order": 2, "solver_type": "midpoint", "final_sigmas_type": "zero", "algorithm_type": "dpmsolver++"}),
     "DDPM": (DDPMScheduler, {}),
     "SA Solver": (SASolverScheduler, {"use_karras_sigmas": False, "timestep_spacing": "linspace"}),
-    "DPM++ 2M Lu": (DPMSolverMultistepScheduler, {"algorithm_type": "dpmsolver++", "use_lu_lambdas": True}),
+    # "DPM++ 2M Lu": (DPMSolverMultistepScheduler, {"algorithm_type": "dpmsolver++", "use_lu_lambdas": True}),
     "DPM++ 2M Ef": (DPMSolverMultistepScheduler, {"algorithm_type": "dpmsolver++", "euler_at_final": True}),
-    "DPM++ 2M SDE Lu": (DPMSolverMultistepScheduler, {"use_lu_lambdas": True, "algorithm_type": "sde-dpmsolver++"}),
+    # "DPM++ 2M SDE Lu": (DPMSolverMultistepScheduler, {"use_lu_lambdas": True, "algorithm_type": "sde-dpmsolver++"}),
     "DPM++ 2M SDE Ef": (DPMSolverMultistepScheduler, {"algorithm_type": "sde-dpmsolver++", "euler_at_final": True}),
 
     "LCM": (LCMScheduler, {}),
@@ -192,14 +204,14 @@ SCHEDULER_CONFIG_MAP = {
     "LCM Auto-Loader": (LCMScheduler, {}),
     "TCD Auto-Loader": (TCDScheduler, {}),
 
-    "FlowMatchEuler": (FlowMatchEulerDiscreteScheduler, {}),
-    # "FlowMatchHeun": (FlowMatchHeunDiscreteScheduler, {}),
-    "FlowMatchDPM2": (FlowMatchDPMSolverMultistepScheduler, {"algorithm_type": "dpmsolver2", "eta": 1.0, "s_noise": 1.0, "use_noise_sampler": True}),
-    "FlowMatchDPM++ 2M": (FlowMatchDPMSolverMultistepScheduler, {"algorithm_type": "dpmsolver++2M", "eta": 1.0, "s_noise": 1.0, "use_noise_sampler": True}),
-    "FlowMatchDPM++ 2S": (FlowMatchDPMSolverMultistepScheduler, {"algorithm_type": "dpmsolver++2S", "eta": 1.0, "s_noise": 1.0, "use_noise_sampler": True}),
-    "FlowMatchDPM++ SDE": (FlowMatchDPMSolverMultistepScheduler, {"algorithm_type": "dpmsolver++sde", "eta": 1.0, "s_noise": 1.0, "use_noise_sampler": True}),
-    "FlowMatchDPM++ 2M SDE": (FlowMatchDPMSolverMultistepScheduler, {"algorithm_type": "dpmsolver++2Msde", "eta": 1.0, "s_noise": 1.0, "use_noise_sampler": True}),
-    "FlowMatchDPM++ 3M SDE": (FlowMatchDPMSolverMultistepScheduler, {"algorithm_type": "dpmsolver++3Msde", "eta": 1.0, "s_noise": 1.0, "use_noise_sampler": True}),
+    "FlowMatch Euler": (FlowMatchEulerDiscreteScheduler, {}),
+    # "FlowMatch Heun": (FlowMatchHeunDiscreteScheduler, {}),
+    "FlowMatch DPM2": (FlowMatchDPMSolverMultistepScheduler, {"algorithm_type": "dpmsolver2", "eta": 1.0, "s_noise": 1.0, "use_noise_sampler": True}),
+    "FlowMatch DPM++ 2M": (FlowMatchDPMSolverMultistepScheduler, {"algorithm_type": "dpmsolver++2M", "eta": 1.0, "s_noise": 1.0, "use_noise_sampler": True}),
+    "FlowMatch DPM++ 2S": (FlowMatchDPMSolverMultistepScheduler, {"algorithm_type": "dpmsolver++2S", "eta": 1.0, "s_noise": 1.0, "use_noise_sampler": True}),
+    "FlowMatch DPM++ SDE": (FlowMatchDPMSolverMultistepScheduler, {"algorithm_type": "dpmsolver++sde", "eta": 1.0, "s_noise": 1.0, "use_noise_sampler": True}),
+    "FlowMatch DPM++ 2M SDE": (FlowMatchDPMSolverMultistepScheduler, {"algorithm_type": "dpmsolver++2Msde", "eta": 1.0, "s_noise": 1.0, "use_noise_sampler": True}),
+    "FlowMatch DPM++ 3M SDE": (FlowMatchDPMSolverMultistepScheduler, {"algorithm_type": "dpmsolver++3Msde", "eta": 1.0, "s_noise": 1.0, "use_noise_sampler": True}),
 }
 
 scheduler_names = list(SCHEDULER_CONFIG_MAP.keys())
@@ -233,6 +245,7 @@ SCHEDULE_TYPES = {
     "SGM Uniform": {"timestep_spacing": "trailing"},
     "Normal": {"use_karras_sigmas": False},  # check
     "Simple": {"timestep_spacing": "trailing", "use_karras_sigmas": False},
+    "Lambdas": {"use_lu_lambdas": True},
     "AYS timesteps": {"use_karras_sigmas": False},
     "AYS 10 steps": {"use_karras_sigmas": False},
     # "AYS sigmas": {"use_karras_sigmas": False},  # Euler
@@ -260,33 +273,28 @@ FLUX_SCHEDULE_TYPES = {
 FLUX_SCHEDULE_TYPE_OPTIONS = list(FLUX_SCHEDULE_TYPES.keys())
 
 # Mixes that need fixing.
-NOISE_IMAGE_STATUS = {
-    "DPM++ 2M": ["Beta"],
-    "DPM++ 1S": ["Beta"],
-    "DPM++ 3M": ["Beta"],
-    "DPM++ 2M Ef": ["Beta"]
-}
+NOISE_IMAGE_STATUS = {}  # EDM
 
 BLACK_IMAGE_STATUS = {
-    "DPM++ 2M SDE": ["Beta"],
-    "DPM++ 3M SDE": ["Beta"],
-    "DPM 3M": ["Karras", "Beta"],
-    "DPM++ 2M SDE Ef": ["Beta"]
+    "DPM 3M": ["Karras", "Exponential", "Beta", "Lambdas"],  #
 }
 
 ERROR_IMAGE_STATUS = {
-    "DPM++ 2M": ["Exponential"],
-    "DPM++ 2M SDE": ["Exponential"],
     "DPM++ 2S": ["Exponential", "Beta"],
-    "DPM++ 1S": ["Exponential"],
-    "DPM++ 3M": ["Exponential"],
-    "DPM++ 3M SDE": ["Exponential"],
-    "DPM 3M": ["Exponential"],
-    "DEIS": ["Exponential", "Beta"],
-    "UniPC": ["Exponential", "Beta"],
-    "SA Solver": ["Exponential", "Beta"],
-    "DPM++ 2M Ef": ["Exponential"],
-    "DPM++ 2M SDE Ef": ["Exponential"]
+    "DEIS": ["Exponential", "Beta", "AYS timesteps", "AYS 10 steps"],
+    "UniPC": ["Exponential", "Beta", "AYS timesteps", "AYS 10 steps"],
+    "SA Solver": ["Exponential", "Beta", "AYS timesteps", "AYS 10 steps"],
+    "DPM++ SDE": ["AYS timesteps", "AYS 10 steps"],
+    "DPM2": ["AYS timesteps", "AYS 10 steps"],
+    "DPM2 a": ["AYS timesteps", "AYS 10 steps"],
+    "Euler a": ["AYS timesteps", "AYS 10 steps"],
+    "LMS": ["AYS timesteps", "AYS 10 steps"],
+    "DDIM": ["AYS timesteps", "AYS 10 steps"],
+    "PNDM": ["AYS timesteps", "AYS 10 steps"],
+    "Euler EDM": ["AYS timesteps", "AYS 10 steps"],
+    "DPM++ 2M EDM": ["AYS timesteps", "AYS 10 steps"],
+    # "DPM++ 2M Lu": ["AYS timesteps", "AYS 10 steps"],
+    "DPM++ 2M SDE Lu": ["AYS timesteps", "AYS 10 steps"],
 }
 
 INCOMPATIBILITY_SAMPLER_SCHEDULE = {}
