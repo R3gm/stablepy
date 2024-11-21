@@ -59,7 +59,6 @@ from .constants import (
     OLD_PROMPT_WEIGHT_OPTIONS,
     FLASH_AUTO_LOAD_SAMPLER,
 )
-from .multi_emphasis_prompt import long_prompts_with_weighting
 from diffusers.utils import load_image
 from .prompt_weights import get_embed_new, add_comma_after_pattern_ti
 from .utils import (
@@ -71,6 +70,7 @@ from .utils import (
     process_prompts_valid,
     convert_image_to_numpy_array,
     latents_to_rgb,
+    load_cn_diffusers,
 )
 from .lora_loader import lora_mix_load
 from .inpainting_canvas import draw, make_inpaint_condition
@@ -361,6 +361,7 @@ class Model_Diffusers(PreviewGenerator):
         type_model_precision=torch.float16,
         retain_task_model_in_cache=True,
         device=None,
+        controlnet_model="Automatic",
     ):
         super().__init__()
         self.device = (
@@ -370,17 +371,21 @@ class Model_Diffusers(PreviewGenerator):
         )
         self.base_model_id = ""
         self.task_name = ""
+        self.model_id_task = "Automatic"
         self.vae_model = None
         self.type_model_precision = (
             type_model_precision if torch.cuda.is_available() else torch.float32
         )  # For SD 1.5
 
+        reload = False
         self.load_pipe(
             base_model_id,
             task_name,
             vae_model,
             type_model_precision,
+            reload,
             retain_task_model_in_cache,
+            controlnet_model,
         )
         self.preprocessor = Preprocessor()
 
@@ -429,13 +434,13 @@ class Model_Diffusers(PreviewGenerator):
                 from .extra_pipe.flux.pipeline_flux_controlnet import FluxControlNetPipeline
                 from .extra_pipe.flux.controlnet_flux import FluxControlNetModel
 
-                controlnet_model = "Shakker-Labs/FLUX.1-dev-ControlNet-Union-Pro"
+                logger.info(f"ControlNet model: {model_id}")
 
                 if hasattr(self.pipe, "controlnet"):
                     model_components["controlnet"] = self.pipe.controlnet
                 else:
                     model_components["controlnet"] = FluxControlNetModel.from_pretrained(
-                        controlnet_model,
+                        model_id,
                         torch_dtype=torch.bfloat16
                     ).to(cpu_device)
 
@@ -454,9 +459,17 @@ class Model_Diffusers(PreviewGenerator):
             model_components["requires_safety_checker"] = self.pipe.config.requires_safety_checker
 
             if task_name not in ["txt2img", "img2img"]:
-                model_components["controlnet"] = ControlNetModel.from_pretrained(
-                    model_id, torch_dtype=self.type_model_precision
-                )
+                logger.info(f"ControlNet model: {model_id}")
+                if os.path.exists(model_id):
+                    model_components["controlnet"] = load_cn_diffusers(
+                        model_id,
+                        "lllyasviel/control_v11p_sd15s2_lineart_anime",
+                        self.type_model_precision,
+                    )
+                else:
+                    model_components["controlnet"] = ControlNetModel.from_pretrained(
+                        model_id, torch_dtype=self.type_model_precision
+                    )
                 tk = "controlnet"
 
         elif class_name == SDXL:
@@ -464,10 +477,24 @@ class Model_Diffusers(PreviewGenerator):
             model_components["tokenizer_2"] = self.pipe.tokenizer_2
 
             if task_name not in ["txt2img", "inpaint", "img2img"]:
+                logger.info(f"Task model: {model_id}")
                 if "t2i" not in task_name:
-                    model_components["controlnet"] = ControlNetModel.from_pretrained(
-                        model_id, torch_dtype=torch.float16, variant="fp16"
-                    ).to(self.device)
+                    if os.path.exists(model_id):
+                        model_components["controlnet"] = load_cn_diffusers(
+                            model_id,
+                            "r3gm/controlnet-lineart-anime-sdxl-fp16",
+                            torch.float16,
+                        ).to(self.device)
+                    else:
+                        try:
+                            model_components["controlnet"] = ControlNetModel.from_pretrained(
+                                model_id, torch_dtype=torch.float16, variant="fp16"
+                            ).to(self.device)
+                        except Exception as e:
+                            logger.debug(str(e))
+                            model_components["controlnet"] = ControlNetModel.from_pretrained(
+                                model_id, torch_dtype=torch.float16
+                            ).to(self.device)
                     tk = "controlnet"
                 else:
                     model_components["adapter"] = T2IAdapter.from_pretrained(
@@ -513,10 +540,15 @@ class Model_Diffusers(PreviewGenerator):
         type_model_precision=torch.float16,
         reload=False,
         retain_task_model_in_cache=True,
+        controlnet_model="Automatic",
     ) -> DiffusionPipeline:
+        if not controlnet_model:
+            controlnet_model = "Automatic"
+
         if (
             base_model_id == self.base_model_id
             and task_name == self.task_name
+            and controlnet_model == self.model_id_task
             and hasattr(self, "pipe")
             and self.vae_model == vae_model
             and self.pipe is not None
@@ -741,24 +773,6 @@ class Model_Diffusers(PreviewGenerator):
         elif class_name == FLUX:
             self.prompt_embedder = Promt_Embedder_FLUX()
 
-        if task_name in self.model_memory:
-            self.pipe = self.model_memory[task_name]
-            # Create new base values
-            # self.pipe.to(self.device)
-            # torch.cuda.empty_cache()
-            # gc.collect()
-            self.base_model_id = base_model_id
-            self.task_name = task_name
-            self.vae_model = vae_model
-            self.class_name = class_name
-            self.pipe.watermark = None
-            return
-
-        # if class_name == SD15 and task_name not in SD15_TASKS:
-        #     logger.error(f"The selected task: {task_name} is not implemented for SD 1.5")
-        # elif class_name == SDXL and task_name not in SDXL_TASKS:
-        #     logger.error(f"The selected task: {task_name} is not implemented for SDXL")
-
         # Load task
         model_id = CONTROLNET_MODEL_IDS[task_name]
         if isinstance(model_id, list):
@@ -768,10 +782,29 @@ class Model_Diffusers(PreviewGenerator):
             #     model_id = model_id[2]
             else:
                 model_id = model_id[0]
+        if class_name == FLUX:
+            model_id = "Shakker-Labs/FLUX.1-dev-ControlNet-Union-Pro"
+        if controlnet_model != "Automatic":
+            model_id = controlnet_model
+
+        if task_name in self.model_memory:
+            if controlnet_model != "Automatic":
+                logger.warning(
+                    "The controlnet_model parameter does not support "
+                    "retain_task_model_in_cache = True"
+                )
+            self.pipe = self.model_memory[task_name]
+            self.base_model_id = base_model_id
+            self.task_name = task_name
+            self.vae_model = vae_model
+            self.class_name = class_name
+            self.pipe.watermark = None
+            return
 
         if (
             (self.task_name != task_name)
             or (self.class_name != class_name)
+            or (self.model_id_task != model_id)
         ):
             self.switch_pipe_class(
                 class_name,
@@ -1787,7 +1820,10 @@ class Model_Diffusers(PreviewGenerator):
                 self.base_model_id,
                 task_name=self.task_name,
                 vae_model=self.vae_model,
+                type_model_precision=self.type_model_precision,
+                retain_task_model_in_cache=False,
                 reload=True,
+                controlnet_model=self.model_id_task,
             )
         elif (
             self.class_name == FLUX
@@ -1800,7 +1836,10 @@ class Model_Diffusers(PreviewGenerator):
                 self.base_model_id,
                 task_name=self.task_name,
                 vae_model=self.vae_model,
+                type_model_precision=self.type_model_precision,
+                retain_task_model_in_cache=False,
                 reload=True,
+                controlnet_model=self.model_id_task,
             )
             self.device = original_device
 
@@ -2638,9 +2677,15 @@ class Model_Diffusers(PreviewGenerator):
 
         if self.class_name == FLUX:
             if upscaler_model_path is None and not adetailer_A and not adetailer_B and loop_generation == 1:
-                self.pipe.transformer = None
+                if os.getenv("SPACES_ZERO_GPU"):
+                    self.pipe.transformer = None
+                else:
+                    self.pipe.transformer.to("cpu")
             if hasattr(self.pipe, "controlnet") and loop_generation == 1:
-                self.pipe.controlnet = None
+                if os.getenv("SPACES_ZERO_GPU"):
+                    self.pipe.controlnet = None
+                else:
+                    self.pipe.controlnet.to("cpu")
 
             if upscaler_model_path not in LATENT_UPSCALERS:
                 self.pipe.vae.to(self.device)
@@ -2653,7 +2698,8 @@ class Model_Diffusers(PreviewGenerator):
                     latents = (latents / self.pipe.vae.config.scaling_factor) + self.pipe.vae.config.shift_factor
                     image = self.pipe.vae.decode(latents, return_dict=False)[0]
                     images = self.pipe.image_processor.postprocess(image, output_type="pil")
-                    # self.pipe.vae.to("cpu")
+                    if not os.getenv("SPACES_ZERO_GPU"):
+                        self.pipe.vae.to("cpu")
 
         if isinstance(images, torch.Tensor):
             images = [tl.unsqueeze(0) for tl in torch.unbind(images, dim=0)]
@@ -2822,8 +2868,12 @@ class Model_Diffusers(PreviewGenerator):
             seeds = seeds if self.task_name != "img2img" else [seeds[0]] * num_images
 
             if self.class_name == FLUX:
-                self.pipe.text_encoder = None
-                self.pipe.text_encoder_2 = None
+                if os.getenv("SPACES_ZERO_GPU"):
+                    self.pipe.text_encoder = None
+                    self.pipe.text_encoder_2 = None
+                else:
+                    self.pipe.text_encoder.to("cpu")
+                    self.pipe.text_encoder_2.to("cpu")
                 torch.cuda.empty_cache()
                 gc.collect()
                 if self.task_name == "txt2img":
@@ -2947,8 +2997,12 @@ class Model_Diffusers(PreviewGenerator):
             seeds = seeds if self.task_name != "img2img" else [seeds[0]] * num_images
 
             if self.class_name == FLUX:
-                self.pipe.text_encoder = None
-                self.pipe.text_encoder_2 = None
+                if os.getenv("SPACES_ZERO_GPU"):
+                    self.pipe.text_encoder = None
+                    self.pipe.text_encoder_2 = None
+                else:
+                    self.pipe.text_encoder.to("cpu")
+                    self.pipe.text_encoder_2.to("cpu")
                 torch.cuda.empty_cache()
                 gc.collect()
                 if self.task_name == "txt2img":

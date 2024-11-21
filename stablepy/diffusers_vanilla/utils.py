@@ -6,6 +6,9 @@ from .constants import SCHEDULE_TYPES
 import re
 import torch
 import numpy as np
+from diffusers.utils.import_utils import is_accelerate_available
+from diffusers import ControlNetModel
+from accelerate import init_empty_weights
 
 
 def generate_lora_tags(names_list, scales_list):
@@ -182,6 +185,41 @@ def checkpoint_model_type(checkpoint_path):
     del checkpoint
 
     return model_type
+
+
+def load_cn_diffusers(model_path, base_config, torch_dtype):
+    from diffusers.loaders.single_file_utils import convert_controlnet_checkpoint
+    from diffusers.models.model_loading_utils import load_state_dict, load_model_dict_into_meta
+
+    state_dict = load_state_dict(model_path)
+
+    while "state_dict" in state_dict:
+        state_dict = state_dict["state_dict"]
+
+    if "time_embedding.linear_1.weight" not in state_dict:
+        # https://github.com/huggingface/diffusers/blob/cd6ca9df2987c000b28e13b19bd4eec3ef3c914b/src/diffusers/loaders/single_file_model.py#L50
+        state_dict = convert_controlnet_checkpoint(state_dict, base_config)
+
+    if not state_dict:
+        raise ValueError(
+            f"Failed to load {model_path}. Weights for this component appear to be missing in the checkpoint."
+        )
+
+    config = ControlNetModel.load_config(base_config)
+
+    with init_empty_weights():
+        controlnet_model = ControlNetModel.from_config(config)
+
+    if is_accelerate_available():
+        unexpected_keys = load_model_dict_into_meta(controlnet_model, state_dict, dtype=torch_dtype)
+
+    else:
+        _, unexpected_keys = controlnet_model.load_state_dict(state_dict, strict=False)
+
+    controlnet_model.to(torch_dtype)
+    controlnet_model.eval()
+
+    return controlnet_model
 
 
 def process_prompts_valid(specific_prompt, specific_negative_prompt, prompt, negative_prompt):
