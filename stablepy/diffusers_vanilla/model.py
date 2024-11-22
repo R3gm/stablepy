@@ -71,6 +71,7 @@ from .utils import (
     convert_image_to_numpy_array,
     latents_to_rgb,
     load_cn_diffusers,
+    check_variant_file,
 )
 from .lora_loader import lora_mix_load
 from .inpainting_canvas import draw, make_inpaint_condition
@@ -486,15 +487,9 @@ class Model_Diffusers(PreviewGenerator):
                             torch.float16,
                         ).to(self.device)
                     else:
-                        try:
-                            model_components["controlnet"] = ControlNetModel.from_pretrained(
-                                model_id, torch_dtype=torch.float16, variant="fp16"
-                            ).to(self.device)
-                        except Exception as e:
-                            logger.debug(str(e))
-                            model_components["controlnet"] = ControlNetModel.from_pretrained(
-                                model_id, torch_dtype=torch.float16
-                            ).to(self.device)
+                        model_components["controlnet"] = ControlNetModel.from_pretrained(
+                            model_id, torch_dtype=torch.float16, variant=check_variant_file(model_id, "fp16")
+                        ).to(self.device)
                     tk = "controlnet"
                 else:
                     model_components["adapter"] = T2IAdapter.from_pretrained(
@@ -1464,6 +1459,8 @@ class Model_Diffusers(PreviewGenerator):
         hires_prompt: str = "",
         hires_negative_prompt: str = "",
         hires_sampler: str = "Use same sampler",
+        hires_scheduler: str = "Use same scheduler",
+        hires_guidance_scale: float = -1.,
 
         ip_adapter_image: Optional[Any] = [],  # str Image
         ip_adapter_mask: Optional[Any] = [],  # str Image
@@ -1628,6 +1625,11 @@ class Model_Diffusers(PreviewGenerator):
                 The negative prompt for hires. If not specified, the main negative prompt will be used.
             hires_sampler (str, optional, defaults to "Use same sampler"):
                 The sampler used for the hires generation process. If not specified, the main sampler will be used.
+            hires_scheduler (str, optional, defaults to "Use same scheduler"):
+                The schedule type used for the hires generation process. If not specified, the main schedule will be used.
+            hires_guidance_scale (float, optional, defaults to -1.):
+                The guidance scale used for the hires generation process.
+                If the value is set to -1. the main guidance_scale will be used
             image (Any, optional):
                 The image to be used for the Inpaint, ControlNet, or T2I adapter.
             preprocessor_name (str, optional, defaults to "None"):
@@ -2218,14 +2220,14 @@ class Model_Diffusers(PreviewGenerator):
                 logger.debug("detailfix_pipe will use the sampler from adetailer_A")
                 detailfix_pipe.scheduler = self.get_scheduler(adetailer_A_params["sampler"])
                 configure_scheduler(
-                    detailfix_pipe, "Automatic", "Automatic"
+                    detailfix_pipe, "Automatic", schedule_prediction_type
                 )
             adetailer_A_params.pop("sampler", None)
             if adetailer_B_params.get("sampler", "Use same sampler") != "Use same sampler":
                 logger.debug("detailfix_pipe will use the sampler from adetailer_B")
                 detailfix_pipe.scheduler = self.get_scheduler(adetailer_A_params["sampler"])
                 configure_scheduler(
-                    detailfix_pipe, "Automatic", "Automatic"
+                    detailfix_pipe, "Automatic", schedule_prediction_type
                 )
             adetailer_B_params.pop("sampler", None)
 
@@ -2449,7 +2451,7 @@ class Model_Diffusers(PreviewGenerator):
                 "prompt": None,
                 "negative_prompt": None,
                 "num_inference_steps": hires_steps,
-                "guidance_scale": guidance_scale,
+                "guidance_scale": hires_guidance_scale if hires_guidance_scale > -0.1 else guidance_scale,
                 "clip_skip": None,
                 "strength": hires_denoising_strength,
             }
@@ -2538,12 +2540,23 @@ class Model_Diffusers(PreviewGenerator):
                     self.hires_pipe = hires_pipe
 
             # Hires scheduler
-            if hires_sampler != "Use same sampler":
+            hires_sampler_fix, hires_scheduler_fix, msg_hires_fix = check_scheduler_compatibility(
+                self.class_name,
+                hires_sampler if hires_sampler != "Use same sampler" else sampler,
+                hires_scheduler if hires_scheduler != "Use same scheduler" else schedule_type,
+            )
+            if msg_hires_fix:
+                logger.warning(f"Hires > {msg_hires_fix}")
+
+            if sampler != hires_sampler_fix or schedule_type != hires_scheduler_fix:
                 logger.debug("New hires sampler")
-                hires_pipe.scheduler = self.get_scheduler(hires_sampler)
+                hires_pipe.scheduler = self.get_scheduler(hires_sampler_fix)
                 configure_scheduler(
-                    hires_pipe, "Automatic", "Automatic"
+                    hires_pipe, hires_scheduler_fix, schedule_prediction_type
                 )
+            hires_params_config.update(
+                ays_timesteps(self.class_name, hires_scheduler_fix, hires_steps)
+            )
 
             hires_pipe.set_progress_bar_config(leave=leave_progress_bar)
             hires_pipe.set_progress_bar_config(disable=disable_progress_bar)

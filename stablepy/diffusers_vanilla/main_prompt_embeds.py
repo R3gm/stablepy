@@ -111,6 +111,7 @@ class Promt_Embedder_SD1(Prompt_Embedder_Base):
             pipe,
             prompt=prompt,
             neg_prompt=negative_prompt,
+            clip_skip=(1 if clip_skip else 0)
         )
 
         return cond_embeddings, uncond_embeddings, None

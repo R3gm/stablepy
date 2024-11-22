@@ -9,6 +9,8 @@ import numpy as np
 from diffusers.utils.import_utils import is_accelerate_available
 from diffusers import ControlNetModel
 from accelerate import init_empty_weights
+from huggingface_hub import model_info as model_info_data
+from diffusers.pipelines.pipeline_loading_utils import variant_compatible_siblings
 
 
 def generate_lora_tags(names_list, scales_list):
@@ -220,6 +222,24 @@ def load_cn_diffusers(model_path, base_config, torch_dtype):
     controlnet_model.eval()
 
     return controlnet_model
+
+
+def check_variant_file(model_id, variant):
+    try:
+        info = model_info_data(
+            model_id,
+            timeout=5.0,
+        )
+
+        filenames = {sibling.rfilename for sibling in info.siblings}
+        _, variant_filenames = variant_compatible_siblings(
+            filenames, variant=variant
+        )
+    except Exception as e:
+        logger.debug(str(e))
+        variant_filenames = None
+
+    return variant if variant_filenames else None
 
 
 def process_prompts_valid(specific_prompt, specific_negative_prompt, prompt, negative_prompt):
