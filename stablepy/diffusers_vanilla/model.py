@@ -1459,7 +1459,7 @@ class Model_Diffusers(PreviewGenerator):
         hires_prompt: str = "",
         hires_negative_prompt: str = "",
         hires_sampler: str = "Use same sampler",
-        hires_scheduler: str = "Use same scheduler",
+        hires_schedule_type: str = "Use same schedule type",
         hires_guidance_scale: float = -1.,
 
         ip_adapter_image: Optional[Any] = [],  # str Image
@@ -1625,7 +1625,7 @@ class Model_Diffusers(PreviewGenerator):
                 The negative prompt for hires. If not specified, the main negative prompt will be used.
             hires_sampler (str, optional, defaults to "Use same sampler"):
                 The sampler used for the hires generation process. If not specified, the main sampler will be used.
-            hires_scheduler (str, optional, defaults to "Use same scheduler"):
+            hires_schedule_type (str, optional, defaults to "Use same schedule type"):
                 The schedule type used for the hires generation process. If not specified, the main schedule will be used.
             hires_guidance_scale (float, optional, defaults to -1.):
                 The guidance scale used for the hires generation process.
@@ -2540,22 +2540,22 @@ class Model_Diffusers(PreviewGenerator):
                     self.hires_pipe = hires_pipe
 
             # Hires scheduler
-            hires_sampler_fix, hires_scheduler_fix, msg_hires_fix = check_scheduler_compatibility(
+            hires_sampler_fix, hires_sch_type_fix, msg_hires_fix = check_scheduler_compatibility(
                 self.class_name,
                 hires_sampler if hires_sampler != "Use same sampler" else sampler,
-                hires_scheduler if hires_scheduler != "Use same scheduler" else schedule_type,
+                hires_schedule_type if hires_schedule_type != "Use same schedule type" else schedule_type,
             )
             if msg_hires_fix:
                 logger.warning(f"Hires > {msg_hires_fix}")
 
-            if sampler != hires_sampler_fix or schedule_type != hires_scheduler_fix:
+            if sampler != hires_sampler_fix or schedule_type != hires_sch_type_fix:
                 logger.debug("New hires sampler")
                 hires_pipe.scheduler = self.get_scheduler(hires_sampler_fix)
                 configure_scheduler(
-                    hires_pipe, hires_scheduler_fix, schedule_prediction_type
+                    hires_pipe, hires_sch_type_fix, schedule_prediction_type
                 )
             hires_params_config.update(
-                ays_timesteps(self.class_name, hires_scheduler_fix, hires_steps)
+                ays_timesteps(self.class_name, hires_sch_type_fix, hires_steps)
             )
 
             hires_pipe.set_progress_bar_config(leave=leave_progress_bar)
