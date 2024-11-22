@@ -1,6 +1,6 @@
 from .multi_emphasis_prompt import (
-    StableDiffusionLongPromptProcessor,
-    text_embeddings_equal_len,
+    ClassicTextProcessingEngine,
+    pad_equal_len,
 )
 import torch
 import gc
@@ -82,17 +82,25 @@ class Prompt_Embedder_Base:
 class Promt_Embedder_SD1(Prompt_Embedder_Base):
 
     def classic_variant(self, prompt, negative_prompt, pipe, clip_skip, emphasis):
-        text_embedder = StableDiffusionLongPromptProcessor(
-            pipe,
-            pipe.tokenizer,
-            pipe.text_encoder,
-            2 if clip_skip else 1,
-            emphasis,
-            20,
+
+        clip_l_engine = ClassicTextProcessingEngine(
+            text_encoder=pipe.text_encoder,
+            tokenizer=pipe.tokenizer,
+            chunk_length=75,
+            emphasis_name=emphasis,
+            text_projection=False,
+            minimal_clip_skip=1,
+            clip_skip=2 if clip_skip else 1,
+            return_pooled=False,
+            final_layer_norm=True,
         )
 
-        cond_embeddings, uncond_embeddings = text_embeddings_equal_len(text_embedder, prompt, negative_prompt)
-        return cond_embeddings, uncond_embeddings, None
+        cond = clip_l_engine(prompt)
+        uncond = clip_l_engine(negative_prompt)
+
+        cond, uncond = pad_equal_len(clip_l_engine, cond, uncond)
+
+        return cond, uncond, None
 
     def sd_embed_variant(self, prompt, negative_prompt, pipe, clip_skip):
 
@@ -146,41 +154,42 @@ class Promt_Embedder_SD1(Prompt_Embedder_Base):
 class Promt_Embedder_SDXL(Prompt_Embedder_Base):
     def classic_variant(self, prompt, negative_prompt, pipe, clip_skip, emphasis):
 
-        text_embedder = StableDiffusionLongPromptProcessor(
-            pipe,
-            pipe.tokenizer,
-            pipe.text_encoder,
-            2 if clip_skip else 1,  # disabled with sdxl
-            emphasis,
-            20,
+        clip_l_engine = ClassicTextProcessingEngine(
+            text_encoder=pipe.text_encoder,
+            tokenizer=pipe.tokenizer,
+            emphasis_name=emphasis,
+            text_projection=False,
+            minimal_clip_skip=2,
+            clip_skip=2 if clip_skip else 1,
+            return_pooled=False,
+            final_layer_norm=False,
         )
 
-        text_embedder_2 = StableDiffusionLongPromptProcessor(
-            pipe,
-            pipe.tokenizer_2,
-            pipe.text_encoder_2,
-            2 if clip_skip else 1,  # disabled with sdxl
-            emphasis,
-            20,
+        clip_g_engine = ClassicTextProcessingEngine(
+            text_encoder=pipe.text_encoder_2,
+            tokenizer=pipe.tokenizer_2,
+            emphasis_name=emphasis,
+            text_projection=True,
+            minimal_clip_skip=2,
+            clip_skip=2 if clip_skip else 1,
+            return_pooled=True,
+            final_layer_norm=False,
         )
 
-        cond_embeddings, uncond_embeddings = text_embeddings_equal_len(text_embedder, prompt, negative_prompt, get_pooled=False)
+        cond = clip_l_engine(prompt)
+        uncond = clip_l_engine(negative_prompt)
+        cond, uncond = pad_equal_len(clip_l_engine, cond, uncond)
 
-        (
-            cond_embeddings_2,
-            uncond_embeddings_2,
-            cond_pooled,
-            uncond_pooled
-        ) = text_embeddings_equal_len(text_embedder_2, prompt, negative_prompt, get_pooled=True)
+        cond_2, cond_pooled = clip_g_engine(prompt)
+        uncond_2, uncond_pooled = clip_g_engine(negative_prompt)
+        clip_g_engine.return_pooled = False
+        cond_2, uncond_2 = pad_equal_len(clip_g_engine, cond_2, uncond_2)
 
-        cond_embed = torch.cat((cond_embeddings, cond_embeddings_2), dim=2)
-        neg_uncond_embed = torch.cat((uncond_embeddings, uncond_embeddings_2), dim=2)
+        cond_embed = torch.cat((cond, cond_2), dim=2)
+        neg_uncond_embed = torch.cat((uncond, uncond_2), dim=2)
 
         all_cond = torch.cat([cond_embed, neg_uncond_embed])
-
         all_pooled = torch.cat([cond_pooled, uncond_pooled])
-
-        assert torch.equal(all_cond[0:1], cond_embed), "Tensors are not equal"
 
         return all_cond, all_pooled, None
 
@@ -239,42 +248,44 @@ class Promt_Embedder_SDXL(Prompt_Embedder_Base):
 class Promt_Embedder_FLUX(Prompt_Embedder_Base):
     def classic_variant(self, prompt, negative_prompt, pipe, clip_skip, emphasis):
 
-        # pipe.text_encoder_2.to("cuda")
-        # pipe.transformer.to("cpu")
         torch.cuda.empty_cache()
         gc.collect()
 
-        text_embedder = StableDiffusionLongPromptProcessor(
-            pipe,
-            pipe.tokenizer,
-            pipe.text_encoder,
-            1,
-            emphasis,
-            20,
+        clip_l_engine = ClassicTextProcessingEngine(
+            text_encoder=pipe.text_encoder,
+            tokenizer=pipe.tokenizer,
+            emphasis_name=emphasis,
+            text_projection=False,
+            minimal_clip_skip=1,
+            clip_skip=1,
+            return_pooled=True,
+            final_layer_norm=True,
         )
 
         from .t5_embedder import T5TextProcessingEngine
-        text_embedder_2 = T5TextProcessingEngine(
+        t5_engine = T5TextProcessingEngine(
             pipe.text_encoder_2,
             pipe.tokenizer_2,
             emphasis_name=emphasis,
             min_length=(
-                512 if pipe.transformer.config.guidance_embeds else 256
+                256  # 512 if pipe.transformer.config.guidance_embeds else 256
             ),
         )
 
-        _, pooled_embeddings = text_embedder(prompt, get_pooled=True)
-        positive_embeddings = text_embedder_2(prompt)
+        _, cond_pooled = clip_l_engine(prompt)
+        cond = t5_engine(prompt)
 
-        pooled_embeddings = pooled_embeddings.to(dtype=pipe.text_encoder.dtype)
-        positive_embeddings = positive_embeddings.to(dtype=pipe.text_encoder_2.dtype)
+        cond_pooled = cond_pooled.to(dtype=pipe.text_encoder.dtype)
 
-        # pipe.text_encoder_2.to("cpu")
-        # pipe.transformer.to("cuda")
+        if cond.shape[0] > 1:
+            tensor_slices = [cond[i:i + 1, :, :] for i in range(cond.shape[0])]
+            cond = torch.cat(tensor_slices, dim=1)
+        cond = cond.to(dtype=pipe.text_encoder_2.dtype)
+
         torch.cuda.empty_cache()
         gc.collect()
 
-        return positive_embeddings, pooled_embeddings, None
+        return cond, cond_pooled, None
 
     def sd_embed_variant(self, prompt, negative_prompt, pipe, clip_skip):
 

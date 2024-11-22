@@ -542,7 +542,7 @@ class Model_Diffusers(PreviewGenerator):
         retain_task_model_in_cache=True,
         controlnet_model="Automatic",
     ) -> DiffusionPipeline:
-        if not controlnet_model:
+        if not controlnet_model or task_name in ["txt2img", "img2img"]:
             controlnet_model = "Automatic"
 
         if (

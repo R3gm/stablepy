@@ -198,6 +198,7 @@ SCHEDULER_CONFIG_MAP = {
     "DPM++ 2M Ef": (DPMSolverMultistepScheduler, {"algorithm_type": "dpmsolver++", "euler_at_final": True}),
     # "DPM++ 2M SDE Lu": (DPMSolverMultistepScheduler, {"use_lu_lambdas": True, "algorithm_type": "sde-dpmsolver++"}),
     "DPM++ 2M SDE Ef": (DPMSolverMultistepScheduler, {"algorithm_type": "sde-dpmsolver++", "euler_at_final": True}),
+    "DPM 3M Ef": (DPMSolverMultistepScheduler, {"algorithm_type": "dpmsolver", "final_sigmas_type": "sigma_min", "solver_order": 3, "euler_at_final": True}),
 
     "LCM": (LCMScheduler, {}),
     "TCD": (TCDScheduler, {}),
@@ -294,7 +295,7 @@ ERROR_IMAGE_STATUS = {
     "Euler EDM": ["AYS timesteps", "AYS 10 steps"],
     "DPM++ 2M EDM": ["AYS timesteps", "AYS 10 steps"],
     # "DPM++ 2M Lu": ["AYS timesteps", "AYS 10 steps"],
-    "DPM++ 2M SDE Lu": ["AYS timesteps", "AYS 10 steps"],
+    # "DPM++ 2M SDE Lu": ["AYS timesteps", "AYS 10 steps"],
 }
 
 INCOMPATIBILITY_SAMPLER_SCHEDULE = {}
