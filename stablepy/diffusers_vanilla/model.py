@@ -72,6 +72,7 @@ from .utils import (
     latents_to_rgb,
     load_cn_diffusers,
     check_variant_file,
+    cachebox,
 )
 from .lora_loader import lora_mix_load
 from .inpainting_canvas import draw, make_inpaint_condition
@@ -588,6 +589,7 @@ class Model_Diffusers(PreviewGenerator):
             self.ip_adapter_config = None
             self.embed_loaded = []
             self.FreeU = False
+            self.create_prompt_embeds.memory.clear()
             torch.cuda.empty_cache()
             gc.collect()
 
@@ -825,6 +827,7 @@ class Model_Diffusers(PreviewGenerator):
 
         return
 
+    @cachebox(max_cache_size=2)
     @torch.inference_mode()
     def get_image_preprocess(
         self,
@@ -1041,6 +1044,7 @@ class Model_Diffusers(PreviewGenerator):
         else:
             raise ValueError(f"Scheduler with name {name} not found. Valid schedulers: {', '.join(scheduler_names)}")
 
+    @cachebox(max_cache_size=2)
     def create_prompt_embeds(
         self,
         prompt,
@@ -1359,8 +1363,14 @@ class Model_Diffusers(PreviewGenerator):
                 if single_lora is not None:
                     logger.info(f"LoRA in memory: {single_lora}")
             pass
-
+        elif (
+            self.lora_memory == [None] * 5
+            and [lora_A, lora_B, lora_C, lora_D, lora_E] == [None] * 5
+        ):
+            pass
         else:
+            self.create_prompt_embeds.memory.clear()
+
             logger.debug("_un, re and load_ lora")
 
             self.process_lora(
@@ -1951,7 +1961,6 @@ class Model_Diffusers(PreviewGenerator):
             # First load
             logger.info("Loading IP adapter")
             self.set_ip_adapter_model(ip_weights)
-
         elif self.ip_adapter_config is not None and not ip_adapter_image:
             # Unload
             logger.debug("IP adapter unload all")
@@ -2035,7 +2044,6 @@ class Model_Diffusers(PreviewGenerator):
                 image_mask=image_mask,
                 gui_active=gui_active,
             )
-
         elif self.task_name != "txt2img":
             control_image = self.get_image_preprocess(
                 image=array_rgb,

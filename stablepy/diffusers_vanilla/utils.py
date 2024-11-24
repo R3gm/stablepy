@@ -11,6 +11,8 @@ from diffusers import ControlNetModel
 from accelerate import init_empty_weights
 from huggingface_hub import model_info as model_info_data
 from diffusers.pipelines.pipeline_loading_utils import variant_compatible_siblings
+import hashlib
+from collections import OrderedDict
 
 
 def generate_lora_tags(names_list, scales_list):
@@ -314,3 +316,45 @@ def latents_to_rgb(latents, latent_resize, vae_decoding, pipe):
         resized_image = pil_image.resize((pil_image.size[0] * latent_resize, pil_image.size[1] * latent_resize), Image.LANCZOS)  # Resize 128x128 * ...
 
     return resized_image
+
+
+def cachebox(max_cache_size=None, hash_func=hashlib.md5):
+    """Alternative to lru_cache"""
+
+    def decorator(func):
+        func.memory = OrderedDict()
+
+        def _compute_hash(*args, **kwargs):
+            """Compute a hash key from the given arguments."""
+            key_string = "|".join(map(str, args)) + "|" + "|".join(f"{k}:{v}" for k, v in kwargs.items())
+            return hash_func(key_string.encode()).hexdigest()
+
+        def wrapper(*args, **kwargs):
+            # Check if the function is a method (bound to a class instance)
+            if len(args) > 0 and hasattr(args[0], "__class__"):
+                # Exclude the first argument (self) from the key
+                key = _compute_hash(*args[1:], **kwargs)
+            else:
+                # Use all arguments if it's not a method
+                key = _compute_hash(*args, **kwargs)
+
+            if key in func.memory:
+                logger.debug(f"Fetching result from memory for hash key: {key}")
+                # Move the key to the end to mark it as recently used
+                func.memory.move_to_end(key)
+                return func.memory[key]
+            else:
+                logger.debug(f"Computing result for hash: {key}")
+                result = func(*args, **kwargs)
+                func.memory[key] = result
+                # Check if the cache size exceeds the limit
+                if max_cache_size is not None and len(func.memory) > max_cache_size:
+                    # Remove the oldest item
+                    removed_key, removed_value = func.memory.popitem(last=False)
+                    logger.debug(f"Evicting oldest cache entry: {removed_key}")
+                return result
+
+        # Ensure the memory attribute is accessible on the decorated function
+        wrapper.memory = func.memory
+        return wrapper
+    return decorator
