@@ -13,6 +13,7 @@ from huggingface_hub import model_info as model_info_data
 from diffusers.pipelines.pipeline_loading_utils import variant_compatible_siblings
 import hashlib
 from collections import OrderedDict
+import gc
 
 
 def generate_lora_tags(names_list, scales_list):
@@ -358,3 +359,8 @@ def cachebox(max_cache_size=None, hash_func=hashlib.md5):
         wrapper.memory = func.memory
         return wrapper
     return decorator
+
+
+def release_resources():
+    torch.cuda.empty_cache()
+    gc.collect()

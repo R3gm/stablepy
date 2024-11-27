@@ -1,4 +1,3 @@
-import gc
 import time
 import numpy as np
 import PIL.Image
@@ -44,23 +43,16 @@ from .constants import (
     CLASS_PAG_DIFFUSERS_TASK,
     CONTROLNET_MODEL_IDS,
     FLUX_CN_UNION_MODES,
-    VALID_TASKS,
-    SD15_TASKS,
-    SDXL_TASKS,
     T2I_PREPROCESSOR_NAME,
     FLASH_LORA,
     SCHEDULER_CONFIG_MAP,
     scheduler_names,
     IP_ADAPTER_MODELS,
-    IP_ADAPTERS_SD,
-    IP_ADAPTERS_SDXL,
     REPO_IMAGE_ENCODER,
-    PROMPT_WEIGHT_OPTIONS,
-    OLD_PROMPT_WEIGHT_OPTIONS,
     FLASH_AUTO_LOAD_SAMPLER,
 )
 from diffusers.utils import load_image
-from .prompt_weights import get_embed_new, add_comma_after_pattern_ti
+from .prompt_weights import add_comma_after_pattern_ti
 from .utils import (
     save_pil_image_with_metadata,
     checkpoint_model_type,
@@ -73,8 +65,9 @@ from .utils import (
     load_cn_diffusers,
     check_variant_file,
     cachebox,
+    release_resources,
 )
-from .lora_loader import lora_mix_load
+from .lora_loader import lora_mix_load, load_no_fused_lora
 from .inpainting_canvas import draw, make_inpaint_condition
 from .adetailer import ad_model_process
 from ..logging.logging_setup import logger
@@ -151,6 +144,10 @@ class DepthEstimator:
         image = resize_image(image, resolution=image_resolution)
         return PIL.Image.fromarray(image)
 
+    def to(self, device):
+        self.model.model.to(device)
+        self.model.device = torch.device(device)
+
 
 class ImageSegmentor:
     def __init__(self):
@@ -219,9 +216,10 @@ class Preprocessor:
         self.model = None
         self.name = ""
 
-    def load(self, name: str) -> None:
+    def load(self, name: str, use_cuda: bool = False) -> None:
         if name == self.name:
             return
+
         if name == "HED":
             self.model = HEDdetector.from_pretrained(self.MODEL_ID)
         elif name == "Midas":
@@ -247,10 +245,13 @@ class Preprocessor:
         elif name == "UPerNet":
             self.model = ImageSegmentor()
         else:
-            raise ValueError
-        torch.cuda.empty_cache()
-        gc.collect()
+            raise ValueError("No valid preprocessor name")
+
+        release_resources()
+
         self.name = name
+        if use_cuda and hasattr(self.model, "to"):
+            self.model.to("cuda")
 
     def __call__(self, image: PIL.Image.Image, **kwargs) -> PIL.Image.Image:
         if self.name == "Canny":
@@ -379,6 +380,12 @@ class Model_Diffusers(PreviewGenerator):
             type_model_precision if torch.cuda.is_available() else torch.float32
         )  # For SD 1.5
 
+        self.image_encoder_name = None
+        self.image_encoder_module = None
+
+        self.last_lora_error = ""
+        self.num_loras = 7
+
         reload = False
         self.load_pipe(
             base_model_id,
@@ -390,15 +397,17 @@ class Model_Diffusers(PreviewGenerator):
             controlnet_model,
         )
         self.preprocessor = Preprocessor()
+        self.advanced_params()
 
         self.styles_data = styles_data
         self.STYLE_NAMES = STYLE_NAMES
         self.style_json_file = ""
 
-        self.image_encoder_name = None
-        self.image_encoder_module = None
-
-        self.last_lora_error = ""
+    def advanced_params(
+        self,
+        image_preprocessor_cuda_active: bool = False,
+    ):
+        self.image_preprocessor_cuda_active = image_preprocessor_cuda_active
 
     def switch_pipe_class(
         self,
@@ -406,6 +415,7 @@ class Model_Diffusers(PreviewGenerator):
         task_name,
         model_id,
         enable_pag,
+        verbose_info=False,
     ):
 
         tk = "base"
@@ -436,7 +446,8 @@ class Model_Diffusers(PreviewGenerator):
                 from .extra_pipe.flux.pipeline_flux_controlnet import FluxControlNetPipeline
                 from .extra_pipe.flux.controlnet_flux import FluxControlNetModel
 
-                logger.info(f"ControlNet model: {model_id}")
+                if verbose_info:
+                    logger.info(f"ControlNet model: {model_id}")
 
                 if hasattr(self.pipe, "controlnet"):
                     model_components["controlnet"] = self.pipe.controlnet
@@ -461,7 +472,8 @@ class Model_Diffusers(PreviewGenerator):
             model_components["requires_safety_checker"] = self.pipe.config.requires_safety_checker
 
             if task_name not in ["txt2img", "img2img"]:
-                logger.info(f"ControlNet model: {model_id}")
+                if verbose_info:
+                    logger.info(f"ControlNet model: {model_id}")
                 if os.path.exists(model_id):
                     model_components["controlnet"] = load_cn_diffusers(
                         model_id,
@@ -479,7 +491,8 @@ class Model_Diffusers(PreviewGenerator):
             model_components["tokenizer_2"] = self.pipe.tokenizer_2
 
             if task_name not in ["txt2img", "inpaint", "img2img"]:
-                logger.info(f"Task model: {model_id}")
+                if verbose_info:
+                    logger.info(f"Task model: {model_id}")
                 if "t2i" not in task_name:
                     if os.path.exists(model_id):
                         model_components["controlnet"] = load_cn_diffusers(
@@ -506,6 +519,7 @@ class Model_Diffusers(PreviewGenerator):
         if enable_pag:
             if (
                 tk == "adapter" or
+                task_name == "shuffle" or
                 (task_name in ["inpaint", "img2img"] and "XL" not in class_name)
             ):
                 logger.warning(
@@ -525,8 +539,7 @@ class Model_Diffusers(PreviewGenerator):
 
         # Create new base values
         self.pipe.to(self.device)
-        torch.cuda.empty_cache()
-        gc.collect()
+        release_resources()
 
     def load_pipe(
         self,
@@ -582,16 +595,15 @@ class Model_Diffusers(PreviewGenerator):
             self.pipe = None
             self.task_name = ""
             self.model_memory = {}
-            self.lora_memory = [None, None, None, None, None]
-            self.lora_scale_memory = [1.0, 1.0, 1.0, 1.0, 1.0]
-            self.lora_status = [None] * 5
+            self.lora_memory = [None] * self.num_loras
+            self.lora_scale_memory = [1.0] * self.num_loras
+            self.lora_status = [None] * self.num_loras
             self.flash_config = None
             self.ip_adapter_config = None
             self.embed_loaded = []
             self.FreeU = False
             self.create_prompt_embeds.memory.clear()
-            torch.cuda.empty_cache()
-            gc.collect()
+            release_resources()
 
             # Load new model
             if os.path.isfile(base_model_id):  # exists or not same # if os.path.exists(base_model_id):
@@ -603,7 +615,8 @@ class Model_Diffusers(PreviewGenerator):
                     model_type = "sd1.5"
 
                 if model_type == "sdxl":
-                    logger.info("Default VAE: madebyollin/sdxl-vae-fp16-fix")
+                    if vae_model is None:
+                        logger.info("Default VAE: madebyollin/sdxl-vae-fp16-fix")
                     self.pipe = StableDiffusionXLPipeline.from_single_file(
                         base_model_id,
                         vae=AutoencoderKL.from_pretrained(
@@ -706,7 +719,8 @@ class Model_Diffusers(PreviewGenerator):
                         )
 
                     case "StableDiffusionXLPipeline":
-                        logger.info("Default VAE: madebyollin/sdxl-vae-fp16-fix")
+                        if vae_model is None:
+                            logger.info("Default VAE: madebyollin/sdxl-vae-fp16-fix")
                         try:
                             self.pipe = DiffusionPipeline.from_pretrained(
                                 base_model_id,
@@ -738,9 +752,12 @@ class Model_Diffusers(PreviewGenerator):
                 logger.debug("Default VAE")
                 pass
             else:
+                logger.info(f"VAE: {vae_model}")
                 if os.path.isfile(vae_model):
                     self.pipe.vae = AutoencoderKL.from_single_file(
-                        vae_model
+                        vae_model,
+                        config="stabilityai/stable-diffusion-xl-base-1.0",
+                        subfolder="vae",
                     )
                 else:
                     self.pipe.vae = AutoencoderKL.from_pretrained(
@@ -763,20 +780,18 @@ class Model_Diffusers(PreviewGenerator):
             )
             logger.debug(f"Base sampler: {self.default_scheduler}")
 
-        if class_name == SD15:
-            self.prompt_embedder = Promt_Embedder_SD1()
-        elif class_name == SDXL:
-            self.prompt_embedder = Promt_Embedder_SDXL()
-        elif class_name == FLUX:
-            self.prompt_embedder = Promt_Embedder_FLUX()
+            if class_name == SD15:
+                self.prompt_embedder = Promt_Embedder_SD1()
+            elif class_name == SDXL:
+                self.prompt_embedder = Promt_Embedder_SDXL()
+            elif class_name == FLUX:
+                self.prompt_embedder = Promt_Embedder_FLUX()
 
         # Load task
         model_id = CONTROLNET_MODEL_IDS[task_name]
         if isinstance(model_id, list):
             if "XL" in class_name:
                 model_id = model_id[1]
-            # if "Flux" in class_name:
-            #     model_id = model_id[2]
             else:
                 model_id = model_id[0]
         if class_name == FLUX:
@@ -808,6 +823,7 @@ class Model_Diffusers(PreviewGenerator):
                 task_name,
                 model_id,
                 enable_pag=False,
+                verbose_info=True,
             )
 
         self.model_id_task = model_id
@@ -854,103 +870,63 @@ class Model_Diffusers(PreviewGenerator):
             "detect_resolution": preprocess_resolution,
         }
 
+        invalid_name = f"Invalid preprocessor name for task: {self.task_name}"
+        model_name = None
+
         if preprocessor_name in ["None", "None (anime)"] or self.task_name in ["ip2p", "img2img", "pattern", "sdxl_tile_realistic"]:
             image = HWC3(image)
             image = resize_image(image, resolution=image_resolution)
-            control_image = PIL.Image.fromarray(image)
+            return PIL.Image.fromarray(image)
         elif self.task_name in ["canny", "sdxl_canny_t2i"]:
-            self.preprocessor.load("Canny")
-            control_image = self.preprocessor(
-                low_threshold=low_threshold,
-                high_threshold=high_threshold,
-                **params_preprocessor
-            )
+            params_preprocessor["low_threshold"] = low_threshold
+            params_preprocessor["high_threshold"] = high_threshold
+            model_name = "Canny"
         elif self.task_name in ["openpose", "sdxl_openpose_t2i"]:
-            self.preprocessor.load("Openpose")
-            control_image = self.preprocessor(
-                hand_and_face=True,
-                **params_preprocessor
-            )
+            params_preprocessor["hand_and_face"] = True
+            if "core" in preprocessor_name:
+                params_preprocessor["hand_and_face"] = False
+            model_name = "Openpose"
         elif self.task_name in ["depth", "sdxl_depth-midas_t2i"]:
-            self.preprocessor.load(preprocessor_name)
-            control_image = self.preprocessor(
-                **params_preprocessor
-            )
+            model_name = preprocessor_name
         elif self.task_name == "mlsd":
-            self.preprocessor.load("MLSD")
-            control_image = self.preprocessor(
-                thr_v=value_threshold,
-                thr_d=distance_threshold,
-                **params_preprocessor
-            )
+            params_preprocessor["thr_v"] = value_threshold
+            params_preprocessor["thr_d"] = distance_threshold
+            model_name = "MLSD"
         elif self.task_name in ["scribble", "sdxl_sketch_t2i"]:
-            if preprocessor_name == "HED":
-                self.preprocessor.load(preprocessor_name)
-                control_image = self.preprocessor(
-                    scribble=False,
-                    **params_preprocessor
-                )
-            elif preprocessor_name == "PidiNet":
-                self.preprocessor.load(preprocessor_name)
-                control_image = self.preprocessor(
-                    safe=False,
-                    **params_preprocessor
-                )
+            if "HED" in preprocessor_name:
+                params_preprocessor["scribble"] = False
+                model_name = "HED"
+            else:
+                params_preprocessor["safe"] = False
+                model_name = "PidiNet"
         elif self.task_name == "softedge":
-            if preprocessor_name in ["HED", "HED safe"]:
-                safe = "safe" in preprocessor_name
-                self.preprocessor.load("HED")
-                control_image = self.preprocessor(
-                    scribble=safe,
-                    **params_preprocessor
-                )
-            elif preprocessor_name in ["PidiNet", "PidiNet safe"]:
-                safe = "safe" in preprocessor_name
-                self.preprocessor.load("PidiNet")
-                control_image = self.preprocessor(
-                    safe=safe,
-                    **params_preprocessor
-                )
+            if "HED" in preprocessor_name:
+                params_preprocessor["scribble"] = "safe" in preprocessor_name
+                model_name = "HED"
+            else:
+                params_preprocessor["safe"] = "safe" in preprocessor_name
+                model_name = "PidiNet"
         elif self.task_name == "segmentation":
-            self.preprocessor.load(preprocessor_name)
-            control_image = self.preprocessor(
-                **params_preprocessor
-            )
+            model_name = preprocessor_name
         elif self.task_name == "normalbae":
-            self.preprocessor.load("NormalBae")
-            control_image = self.preprocessor(
-                **params_preprocessor
-            )
+            model_name = "NormalBae"
         elif self.task_name in ["lineart", "lineart_anime", "sdxl_lineart_t2i"]:
-            if preprocessor_name in ["Lineart", "Lineart coarse"]:
-                coarse = "coarse" in preprocessor_name
-                self.preprocessor.load("Lineart")
-                control_image = self.preprocessor(
-                    coarse=coarse,
-                    **params_preprocessor
-                )
-            elif preprocessor_name == "Lineart (anime)":
-                self.preprocessor.load("LineartAnime")
-                control_image = self.preprocessor(
-                    **params_preprocessor
-                )
+            params_preprocessor["coarse"] = "coarse" in preprocessor_name
+            model_name = "LineartAnime" if "anime" in preprocessor_name.lower() else "Lineart"
         elif self.task_name == "shuffle":
-            self.preprocessor.load(preprocessor_name)
-            control_image = self.preprocessor(
-                image=image,
-                image_resolution=image_resolution,
-            )
+            params_preprocessor.pop("detect_resolution", None)
+            model_name = preprocessor_name
         elif self.task_name == "tile":
             image_np = resize_image(image, resolution=image_resolution)
             blur_names = {
-                "Mild Blur": 5,
+                "Mild Blur": 3,
                 "Moderate Blur": 15,
                 "Heavy Blur": 27,
             }
             image_np = apply_gaussian_blur(
                 image_np, ksize=blur_names[preprocessor_name]
             )
-            control_image = PIL.Image.fromarray(image_np)
+            return PIL.Image.fromarray(image_np)
         elif self.task_name == "recolor":
             image_np = resize_image(image, resolution=image_resolution)
 
@@ -958,11 +934,13 @@ class Model_Diffusers(PreviewGenerator):
                 image_np = recolor_luminance(image_np, thr_a=recolor_gamma_correction)
             elif preprocessor_name == "Recolor intensity":
                 image_np = recolor_intensity(image_np, thr_a=recolor_gamma_correction)
+            else:
+                raise ValueError(invalid_name)
 
-            control_image = PIL.Image.fromarray(image_np)
-        else:
-            raise ValueError("No valid preprocessor name")
+            return PIL.Image.fromarray(image_np)
 
+        self.preprocessor.load(model_name, self.image_preprocessor_cuda_active)
+        control_image = self.preprocessor(**params_preprocessor)
         return control_image
 
     @torch.inference_mode()
@@ -1299,8 +1277,7 @@ class Model_Diffusers(PreviewGenerator):
                         do_classifier_free_guidance
                     )[0]
 
-                    gc.collect()
-                    torch.cuda.empty_cache()
+                    release_resources()
 
                     self.pipe.unet.encoder_hid_proj.image_projection_layers[i].clip_embeds = clip_embeds.to(dtype=self.type_model_precision)
                     if "plusv2" in ip_weight:
@@ -1308,8 +1285,7 @@ class Model_Diffusers(PreviewGenerator):
                     else:
                         self.pipe.unet.encoder_hid_proj.image_projection_layers[i].shortcut = False
 
-                gc.collect()
-                torch.cuda.empty_cache()
+                release_resources()
 
             # average_embedding = torch.mean(torch.stack(faceid_all_embeds, dim=0), dim=0)
 
@@ -1335,6 +1311,71 @@ class Model_Diffusers(PreviewGenerator):
 
         return image_embeds, processed_masks
 
+    def load_lora_on_the_fly(
+        self,
+        lora_A=None, lora_scale_A=1.0,
+        lora_B=None, lora_scale_B=1.0,
+        lora_C=None, lora_scale_C=1.0,
+        lora_D=None, lora_scale_D=1.0,
+        lora_E=None, lora_scale_E=1.0,
+        lora_F=None, lora_scale_F=1.0,
+        lora_G=None, lora_scale_G=1.0,
+    ):
+        """
+        Dynamically applies LoRA weights without fusing them.
+        LoRAs load quickly, but they need more RAM and can make the inference process take longer.
+
+        Note:
+            Ensure any merged LoRA with `model.lora_merge()` remains loaded before using this method.
+        """
+
+        current_lora_list = [
+            lora_A,
+            lora_B,
+            lora_C,
+            lora_D,
+            lora_E,
+            lora_F,
+            lora_G
+        ]
+
+        current_lora_scale_list = [
+            lora_scale_A,
+            lora_scale_B,
+            lora_scale_C,
+            lora_scale_D,
+            lora_scale_E,
+            lora_scale_F,
+            lora_scale_G
+        ]
+
+        lora_status = [None] * self.num_loras
+
+        if self.lora_memory == current_lora_list and self.lora_scale_memory == current_lora_scale_list:
+            for single_lora in self.lora_memory:
+                if single_lora is not None:
+                    logger.info(f"LoRA in memory: {single_lora}")
+            pass
+        elif (
+            self.lora_memory == [None] * self.num_loras
+            and current_lora_list == [None] * self.num_loras
+        ):
+            pass
+        else:
+            self.create_prompt_embeds.memory.clear()
+
+            lora_status = load_no_fused_lora(
+                self.pipe, self.num_loras,
+                current_lora_list, current_lora_scale_list
+            )
+
+        logger.debug(str(self.pipe.get_active_adapters()))
+
+        self.lora_memory = current_lora_list
+        self.lora_scale_memory = current_lora_scale_list
+
+        return lora_status
+
     def lora_merge(
         self,
         lora_A=None, lora_scale_A=1.0,
@@ -1342,30 +1383,39 @@ class Model_Diffusers(PreviewGenerator):
         lora_C=None, lora_scale_C=1.0,
         lora_D=None, lora_scale_D=1.0,
         lora_E=None, lora_scale_E=1.0,
+        lora_F=None, lora_scale_F=1.0,
+        lora_G=None, lora_scale_G=1.0,
     ):
-
-        lora_status = [None] * 5
-
-        if self.lora_memory == [
+        current_lora_list = [
             lora_A,
             lora_B,
             lora_C,
             lora_D,
             lora_E,
-        ] and self.lora_scale_memory == [
+            lora_F,
+            lora_G
+        ]
+
+        current_lora_scale_list = [
             lora_scale_A,
             lora_scale_B,
             lora_scale_C,
             lora_scale_D,
             lora_scale_E,
-        ]:
+            lora_scale_F,
+            lora_scale_G
+        ]
+
+        lora_status = [None] * self.num_loras
+
+        if self.lora_memory == current_lora_list and self.lora_scale_memory == current_lora_scale_list:
             for single_lora in self.lora_memory:
                 if single_lora is not None:
                     logger.info(f"LoRA in memory: {single_lora}")
             pass
         elif (
-            self.lora_memory == [None] * 5
-            and [lora_A, lora_B, lora_C, lora_D, lora_E] == [None] * 5
+            self.lora_memory == [None] * self.num_loras
+            and current_lora_list == [None] * self.num_loras
         ):
             pass
         else:
@@ -1373,36 +1423,14 @@ class Model_Diffusers(PreviewGenerator):
 
             logger.debug("_un, re and load_ lora")
 
-            self.process_lora(
-                self.lora_memory[0], self.lora_scale_memory[0], unload=True
-            )
-            self.process_lora(
-                self.lora_memory[1], self.lora_scale_memory[1], unload=True
-            )
-            self.process_lora(
-                self.lora_memory[2], self.lora_scale_memory[2], unload=True
-            )
-            self.process_lora(
-                self.lora_memory[3], self.lora_scale_memory[3], unload=True
-            )
-            self.process_lora(
-                self.lora_memory[4], self.lora_scale_memory[4], unload=True
-            )
+            for l_memory, scale_memory in zip(self.lora_memory, self.lora_scale_memory):
+                self.process_lora(l_memory, scale_memory, unload=True)
 
-            lora_status[0] = self.process_lora(lora_A, lora_scale_A)
-            lora_status[1] = self.process_lora(lora_B, lora_scale_B)
-            lora_status[2] = self.process_lora(lora_C, lora_scale_C)
-            lora_status[3] = self.process_lora(lora_D, lora_scale_D)
-            lora_status[4] = self.process_lora(lora_E, lora_scale_E)
+            for i, (l_new, scale_new) in enumerate(zip(current_lora_list, current_lora_scale_list)):
+                lora_status[i] = self.process_lora(l_new, scale_new)
 
-        self.lora_memory = [lora_A, lora_B, lora_C, lora_D, lora_E]
-        self.lora_scale_memory = [
-            lora_scale_A,
-            lora_scale_B,
-            lora_scale_C,
-            lora_scale_D,
-            lora_scale_E,
-        ]
+        self.lora_memory = current_lora_list
+        self.lora_scale_memory = current_lora_scale_list
 
         return lora_status
 
@@ -1432,6 +1460,10 @@ class Model_Diffusers(PreviewGenerator):
         lora_scale_D: float = 1.0,
         lora_E: Optional[str] = None,
         lora_scale_E: float = 1.0,
+        lora_F: Optional[str] = None,
+        lora_scale_F: float = 1.0,
+        lora_G: Optional[str] = None,
+        lora_scale_G: float = 1.0,
         textual_inversion: List[Tuple[str, str]] = [],
         FreeU: bool = False,
         adetailer_A: bool = False,
@@ -1575,6 +1607,14 @@ class Model_Diffusers(PreviewGenerator):
             lora_E (str, optional):
                 Placeholder for lora E parameter.
             lora_scale_E (float, optional, defaults to 1.0):
+                Placeholder for lora scale E parameter.
+            lora_F (str, optional):
+                Placeholder for lora E parameter.
+            lora_scale_F (float, optional, defaults to 1.0):
+                Placeholder for lora scale E parameter.
+            lora_G (str, optional):
+                Placeholder for lora E parameter.
+            lora_scale_G (float, optional, defaults to 1.0):
                 Placeholder for lora scale E parameter.
             textual_inversion (List[Tuple[str, str]], optional, defaults to []):
                 Placeholder for textual inversion list of tuples. Help the model to adapt to a particular
@@ -1906,6 +1946,8 @@ class Model_Diffusers(PreviewGenerator):
             lora_C, lora_scale_C,
             lora_D, lora_scale_D,
             lora_E, lora_scale_E,
+            lora_F, lora_scale_F,
+            lora_G, lora_scale_G,
         )
 
         if sampler in FLASH_AUTO_LOAD_SAMPLER and self.flash_config is None:
@@ -2016,15 +2058,13 @@ class Model_Diffusers(PreviewGenerator):
             prompt_emb = negative_prompt_emb = None
 
         try:
-            # self.pipe.scheduler = DPMSolverSinglestepScheduler() # fix default params by random scheduler, not recomn
             self.pipe.scheduler = self.get_scheduler(sampler)
             configure_scheduler(
                 self.pipe, schedule_type, schedule_prediction_type
             )
         except Exception as e:
             logger.debug(f"{e}")
-            torch.cuda.empty_cache()
-            gc.collect()
+            release_resources()
             raise RuntimeError("Error in sampler, please try again")
 
         self.pipe.safety_checker = None
@@ -2198,7 +2238,7 @@ class Model_Diffusers(PreviewGenerator):
 
             # Pipe detailfix_pipe
             if not hasattr(self, "detailfix_pipe") or not retain_detailfix_model_previous_load:
-                if adetailer_A_params.get("inpaint_only", False) == True or adetailer_B_params.get("inpaint_only", False) == True:
+                if adetailer_A_params.get("inpaint_only", False) is True or adetailer_B_params.get("inpaint_only", False) is True:
                     detailfix_pipe = custom_task_model_loader(
                         pipe=self.pipe,
                         model_category="detailfix",
@@ -2245,8 +2285,7 @@ class Model_Diffusers(PreviewGenerator):
                 detailfix_pipe.to(self.device)
             else:
                 detailfix_pipe.__class__._execution_device = property(_execution_device)
-            torch.cuda.empty_cache()
-            gc.collect()
+            release_resources()
 
             post_processing_params["detailfix_pipe"] = detailfix_pipe
 
@@ -2572,8 +2611,7 @@ class Model_Diffusers(PreviewGenerator):
                 hires_pipe.to(self.device)
             else:
                 hires_pipe.__class__._execution_device = property(_execution_device)
-            torch.cuda.empty_cache()
-            gc.collect()
+            release_resources()
 
             if (
                 upscaler_model_path in LATENT_UPSCALERS
@@ -2710,8 +2748,7 @@ class Model_Diffusers(PreviewGenerator):
 
             if upscaler_model_path not in LATENT_UPSCALERS:
                 self.pipe.vae.to(self.device)
-                torch.cuda.empty_cache()
-                gc.collect()
+                release_resources()
                 images.to(self.device)
 
                 with torch.no_grad():
@@ -2728,8 +2765,7 @@ class Model_Diffusers(PreviewGenerator):
         if self.task_name not in ["txt2img", "inpaint", "img2img"]:
             images = [control_image] + images
 
-        torch.cuda.empty_cache()
-        gc.collect()
+        release_resources()
 
         if hires_before_adetailer and upscaler_model_path is not None:
             logger.debug(
@@ -2773,8 +2809,7 @@ class Model_Diffusers(PreviewGenerator):
             if self.task_name not in ["txt2img", "inpaint", "img2img"]:
                 images = [control_image] + images
                 # del detailfix_pipe
-            torch.cuda.empty_cache()
-            gc.collect()
+            release_resources()
 
         if hires_after_adetailer and upscaler_model_path is not None:
             logger.debug(
@@ -2801,7 +2836,7 @@ class Model_Diffusers(PreviewGenerator):
             if loop_generation > 1:
                 time.sleep(0.5)
 
-            # List images and save
+        # List images and save
         image_list = []
         image_metadata = []
 
@@ -2823,8 +2858,7 @@ class Model_Diffusers(PreviewGenerator):
             image_list.append(image_path)
             image_metadata.append(image_generation_data)
 
-        torch.cuda.empty_cache()
-        gc.collect()
+        release_resources()
 
         if image_list[0] != "not saved in storage":
             logger.info(image_list)
@@ -2895,12 +2929,10 @@ class Model_Diffusers(PreviewGenerator):
                 else:
                     self.pipe.text_encoder.to("cpu")
                     self.pipe.text_encoder_2.to("cpu")
-                torch.cuda.empty_cache()
-                gc.collect()
+                release_resources()
                 if self.task_name == "txt2img":
                     self.pipe.transformer.to(self.device)
-                torch.cuda.empty_cache()
-                gc.collect()
+                release_resources()
                 pipe_params_config["output_type"] = "latent"
                 # self.pipe.__class__._execution_device = property(_execution_device)
 
@@ -2956,8 +2988,7 @@ class Model_Diffusers(PreviewGenerator):
 
         if hasattr(self, "compel") and not retain_compel_previous_load:
             del self.compel
-        torch.cuda.empty_cache()
-        gc.collect()
+        release_resources()
         return images, [seeds, image_list, image_metadata]
 
     def start_stream(
@@ -2998,7 +3029,6 @@ class Model_Diffusers(PreviewGenerator):
                 else:
                     seeds = [seed] + [random.randint(0, 2147483647) for _ in range(num_images - 1)]
 
-            # generators
             generators = []  # List to store all the generators
             for calculate_seed in seeds:
                 if generator_in_cpu or self.device.type == "cpu":
@@ -3024,12 +3054,10 @@ class Model_Diffusers(PreviewGenerator):
                 else:
                     self.pipe.text_encoder.to("cpu")
                     self.pipe.text_encoder_2.to("cpu")
-                torch.cuda.empty_cache()
-                gc.collect()
+                release_resources()
                 if self.task_name == "txt2img":
                     self.pipe.transformer.to(self.device)
-                torch.cuda.empty_cache()
-                gc.collect()
+                release_resources()
                 pipe_params_config["output_type"] = "latent"
                 # self.pipe.__class__._execution_device = property(_execution_device)
                 self.metadata = metadata
@@ -3096,7 +3124,6 @@ class Model_Diffusers(PreviewGenerator):
 
         if hasattr(self, "compel") and not retain_compel_previous_load:
             del self.compel
-        torch.cuda.empty_cache()
-        gc.collect()
+        release_resources()
 
         yield images, [seeds, image_list, image_metadata]
