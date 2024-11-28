@@ -15,6 +15,8 @@ TRANSFORMERS_LIB_TASKS = ["DPT", "UPerNet", "ZoeDepth", "SegFormer", "DepthAnyth
 
 AUX_BETA_TASKS = ["TEED", "Anyline", "Lineart standard"]
 
+EXTRA_AUX_TASKS = ["Recolor", "Blur"]
+
 T2I_PREPROCESSOR_NAME = {
     "sdxl_canny_t2i": "Canny",
     "sdxl_openpose_t2i": "Openpose",

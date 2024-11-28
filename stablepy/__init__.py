@@ -31,3 +31,4 @@ from .diffusers_vanilla.preprocessor.constans_preprocessor import (
     TASK_AND_PREPROCESSORS,
     T2I_PREPROCESSOR_NAME,
 )
+from .diffusers_vanilla.preprocessor.main_preprocessor import Preprocessor

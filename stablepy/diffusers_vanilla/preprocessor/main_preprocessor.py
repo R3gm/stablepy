@@ -12,8 +12,10 @@ from .constans_preprocessor import (
     AUX_TASKS,
     TRANSFORMERS_LIB_TASKS,
     AUX_BETA_TASKS,
+    EXTRA_AUX_TASKS,
     TASK_AND_PREPROCESSORS,
 )
+from ..utils import convert_image_to_numpy_array
 
 
 def process_basic_task(image: np.ndarray, resolution: int) -> PIL.Image.Image:
@@ -23,26 +25,36 @@ def process_basic_task(image: np.ndarray, resolution: int) -> PIL.Image.Image:
     return PIL.Image.fromarray(image)
 
 
-def process_tile_task(image: np.ndarray, resolution: int, preprocessor_name: str) -> PIL.Image.Image:
-    """Process the 'tile' task with Gaussian blur."""
-    blur_levels = {"Mild Blur": 3, "Moderate Blur": 15, "Heavy Blur": 27}
-    if preprocessor_name not in blur_levels:
-        raise ValueError(f"Invalid preprocessor name for tile task: {preprocessor_name}")
-    image = resize_image(image, resolution=resolution)
-    image = apply_gaussian_blur(image, ksize=blur_levels[preprocessor_name])
-    return PIL.Image.fromarray(image)
+class RecolorDetector:
+    def resize(self, image, res):
+        if image is None:
+            raise ValueError("image must be defined.")
+
+        image = HWC3(image)
+        return resize_image(image, res)
+
+    def __call__(self, image=None, gamma_correction=1.0, image_resolution=512, mode="luminance", **kwargs):
+        """Process the 'recolor' task."""
+        if mode == "luminance":
+            func_c = recolor_luminance
+        elif mode == "intensity":
+            func_c = recolor_intensity
+        else:
+            raise ValueError("Invalid recolor mode")
+
+        result = func_c(
+            self.resize(image, image_resolution), thr_a=gamma_correction
+        )
+        return PIL.Image.fromarray(HWC3(result))
 
 
-def process_recolor_task(image: np.ndarray, resolution: int, preprocessor_name: str, gamma_correction: float) -> PIL.Image.Image:
-    """Process the 'recolor' task."""
-    image = resize_image(image, resolution=resolution)
-    if preprocessor_name == "Recolor luminance":
-        image = recolor_luminance(image, thr_a=gamma_correction)
-    elif preprocessor_name == "Recolor intensity":
-        image = recolor_intensity(image, thr_a=gamma_correction)
-    else:
-        raise ValueError(f"Invalid preprocessor name for recolor task: {preprocessor_name}")
-    return PIL.Image.fromarray(image)
+class BlurDetector(RecolorDetector):
+    def __call__(self, image=None, image_resolution=512, ksize=5, **kwargs):
+        """Process the 'tile' task with Gaussian blur."""
+        result = apply_gaussian_blur(
+            self.resize(image, image_resolution), ksize=ksize
+        )
+        return PIL.Image.fromarray(HWC3(result))
 
 
 class Preprocessor:
@@ -107,11 +119,23 @@ class Preprocessor:
             return LineartStandardDetector()
         raise ValueError(f"Unsupported task name: {name}")
 
+    def _load_extra_model(self, name: str):
+        """Lazy load custom models from specialized modules."""
+        if name == EXTRA_AUX_TASKS[0]:
+            return RecolorDetector()
+        elif name == EXTRA_AUX_TASKS[1]:
+            return BlurDetector()
+        raise ValueError(f"Unsupported task name: {name}")
+
+    def to(self, device):
+        if hasattr(self.model, "to"):
+            self.model.to("cuda")
+
     def load(self, name: str, use_cuda: bool = False) -> None:
         """Load the specified preprocessor model."""
         if name == self.name:
-            if use_cuda and hasattr(self.model, "to"):
-                self.model.to("cuda")
+            if use_cuda:
+                self.to("cuda")
             return  # Skip if already loaded
 
         if name in AUX_TASKS:
@@ -120,19 +144,25 @@ class Preprocessor:
             self.model = self._load_transformers_model(name)
         elif name in AUX_BETA_TASKS:
             self.model = self._load_custom_model(name)
+        elif name in EXTRA_AUX_TASKS:
+            self.model = self._load_extra_model(name)
         else:
             raise ValueError(f"Unknown preprocessor name: {name}")
 
         release_resources()
 
         self.name = name
-        if use_cuda and hasattr(self.model, "to"):
-            self.model.to("cuda")
+
+        if use_cuda:
+            self.to("cuda")
 
     def __call__(self, image: PIL.Image.Image, **kwargs) -> PIL.Image.Image:
         """Process an image using the loaded preprocessor model."""
         if not self.model:
             raise RuntimeError("No model is loaded. Please call `load()` first.")
+
+        if not isinstance(image, np.ndarray):
+            image = convert_image_to_numpy_array(image)
 
         if self.name == "Canny":
             return self._process_canny(image, **kwargs)
@@ -158,7 +188,7 @@ class Preprocessor:
         image = np.array(image)
         image = HWC3(image)
         image = resize_image(image, resolution=detect_resolution)
-        image = self.model(image, **kwargs)
+        image = self.model(image)  # , **kwargs)
         image = HWC3(image)
         image = resize_image(image, resolution=image_resolution)
         return PIL.Image.fromarray(image)
@@ -174,6 +204,7 @@ def get_preprocessor_params(
     high_threshold: int,
     value_threshold: float,
     distance_threshold: float,
+    gamma_correction: float,
 ) -> tuple[dict, str]:
     """
     Determine the parameters and model name for preprocessing.
@@ -188,6 +219,7 @@ def get_preprocessor_params(
         high_threshold (int): High threshold for edge detection.
         value_threshold (float): Threshold for MLSD value detection.
         distance_threshold (float): Threshold for MLSD distance detection.
+        gamma_correction (float): Threshold for Recolor thr_a.
 
     Returns:
         tuple[dict, str]: A dictionary of parameters for preprocessing and the model name.
@@ -248,5 +280,18 @@ def get_preprocessor_params(
     elif task_name == "shuffle":
         params_preprocessor.pop("detect_resolution", None)
         model_name = preprocessor_name
+    elif task_name == "recolor":
+        if "intensity" in preprocessor_name:
+            params_preprocessor["mode"] = "intensity"
+        else:
+            params_preprocessor["mode"] = "luminance"
+        params_preprocessor["gamma_correction"] = gamma_correction
+        model_name = "Recolor"
+    elif task_name == "tile":
+        blur_levels = {"Mild Blur": 3, "Moderate Blur": 15, "Heavy Blur": 27}
+        if preprocessor_name not in blur_levels:
+            raise ValueError("Invalid Blur mode")
+        params_preprocessor["ksize"] = blur_levels[preprocessor_name]
+        model_name = "Blur"
 
     return params_preprocessor, model_name

@@ -86,8 +86,6 @@ from .sampler_scheduler_config import (
 from .preprocessor.main_preprocessor import (
     Preprocessor,
     process_basic_task,
-    process_tile_task,
-    process_recolor_task,
     get_preprocessor_params,
 )
 from .preprocessor.constans_preprocessor import T2I_PREPROCESSOR_NAME
@@ -683,10 +681,6 @@ class Model_Diffusers(PreviewGenerator):
 
         if preprocessor_name in ["None", "None (anime)"] or self.task_name in ["ip2p", "img2img", "pattern", "sdxl_tile_realistic"]:
             return process_basic_task(image, image_resolution)
-        elif self.task_name == "tile":
-            return process_tile_task(image, image_resolution, preprocessor_name)
-        elif self.task_name == "recolor":
-            return process_recolor_task(image, image_resolution, preprocessor_name, recolor_gamma_correction)
 
         params_preprocessor, model_name = get_preprocessor_params(
             image,
@@ -698,6 +692,7 @@ class Model_Diffusers(PreviewGenerator):
             high_threshold,
             value_threshold,
             distance_threshold,
+            recolor_gamma_correction,
         )
 
         if not model_name:
@@ -1462,6 +1457,8 @@ class Model_Diffusers(PreviewGenerator):
                 Value threshold parameter for ControlNet MLSD.
             distance_threshold (float, optional, defaults to 0.1):
                 Distance threshold parameter for ControlNet MLSD.
+            recolor_gamma_correction (float, optional, defaults to 1.0):
+                Gamma correction parameter for ControlNet Recolor.
             controlnet_conditioning_scale (float, optional, defaults to 1.0):
                 The outputs of the ControlNet are multiplied by `controlnet_conditioning_scale` before they are added
                 to the residual in the original `unet`. Used in ControlNet and Inpaint
@@ -2593,8 +2590,6 @@ class Model_Diffusers(PreviewGenerator):
         # Show images if loop
         if display_images:
             mediapy.show_images(images)
-            # logger.info(image_list)
-            # del images
             if loop_generation > 1:
                 time.sleep(0.5)
 
@@ -2783,12 +2778,11 @@ class Model_Diffusers(PreviewGenerator):
         for i in range(loop_generation):
             # number seed
             if seed == -1:
-                seeds = [random.randint(0, 2147483647) for _ in range(num_images)]
+                seeds = [random.randint(0, 2147483647)]
             else:
-                if num_images == 1:
-                    seeds = [seed]
-                else:
-                    seeds = [seed] + [random.randint(0, 2147483647) for _ in range(num_images - 1)]
+                seeds = [seed]
+
+            seeds = [seeds[0] + i for i in range(num_images)]
 
             generators = []  # List to store all the generators
             for calculate_seed in seeds:
