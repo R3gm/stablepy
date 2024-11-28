@@ -8,7 +8,6 @@ from .diffusers_vanilla.high_resolution import LATENT_UPSCALERS
 from .diffusers_vanilla.constants import (
     CONTROLNET_MODEL_IDS,
     VALID_TASKS,
-    T2I_PREPROCESSOR_NAME,
     FLASH_LORA,
     SCHEDULER_CONFIG_MAP,
     scheduler_names,
@@ -27,4 +26,8 @@ from .diffusers_vanilla.constants import (
 )
 from .diffusers_vanilla.sampler_scheduler_config import (
     check_scheduler_compatibility
+)
+from .diffusers_vanilla.preprocessor.constans_preprocessor import (
+    TASK_AND_PREPROCESSORS,
+    T2I_PREPROCESSOR_NAME,
 )

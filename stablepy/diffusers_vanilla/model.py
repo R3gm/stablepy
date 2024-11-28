@@ -16,21 +16,6 @@ import torch
 import random
 import threading
 import json
-from controlnet_aux import (
-    CannyDetector,
-    ContentShuffleDetector,
-    HEDdetector,
-    LineartAnimeDetector,
-    LineartDetector,
-    MidasDetector,
-    MLSDdetector,
-    NormalBaeDetector,
-    OpenposeDetector,
-    PidiNetDetector,
-)
-from transformers import pipeline
-from controlnet_aux.util import HWC3, ade_palette
-from transformers import AutoImageProcessor, UperNetForSemanticSegmentation
 import cv2
 from diffusers import (
     DDIMScheduler,
@@ -43,7 +28,6 @@ from .constants import (
     CLASS_PAG_DIFFUSERS_TASK,
     CONTROLNET_MODEL_IDS,
     FLUX_CN_UNION_MODES,
-    T2I_PREPROCESSOR_NAME,
     FLASH_LORA,
     SCHEDULER_CONFIG_MAP,
     scheduler_names,
@@ -99,186 +83,19 @@ from .sampler_scheduler_config import (
     check_scheduler_compatibility,
     ays_timesteps,
 )
-
+from .preprocessor.main_preprocessor import (
+    Preprocessor,
+    process_basic_task,
+    process_tile_task,
+    process_recolor_task,
+    get_preprocessor_params,
+)
+from .preprocessor.constans_preprocessor import T2I_PREPROCESSOR_NAME
 logging.getLogger("diffusers").setLevel(logging.ERROR)
 logging.getLogger("transformers").setLevel(logging.ERROR)
 diffusers.utils.logging.set_verbosity(40)
 warnings.filterwarnings(action="ignore", category=FutureWarning, module="diffusers")
 warnings.filterwarnings(action="ignore", category=FutureWarning, module="transformers")
-
-# =====================================
-# Utils preprocessor
-# =====================================
-
-
-def resize_image(input_image, resolution, interpolation=None):
-    H, W, C = input_image.shape
-    H = float(H)
-    W = float(W)
-    k = float(resolution) / max(H, W)
-    H *= k
-    W *= k
-    H = int(np.round(H / 64.0)) * 64
-    W = int(np.round(W / 64.0)) * 64
-    if interpolation is None:
-        interpolation = cv2.INTER_LANCZOS4 if k > 1 else cv2.INTER_AREA
-    img = cv2.resize(input_image, (W, H), interpolation=interpolation)
-    return img
-
-
-class DepthEstimator:
-    def __init__(self):
-        self.model = pipeline("depth-estimation")
-
-    def __call__(self, image: np.ndarray, **kwargs) -> PIL.Image.Image:
-        detect_resolution = kwargs.pop("detect_resolution", 512)
-        image_resolution = kwargs.pop("image_resolution", 512)
-        image = np.array(image)
-        image = HWC3(image)
-        image = resize_image(image, resolution=detect_resolution)
-        image = PIL.Image.fromarray(image)
-        image = self.model(image)
-        image = image["depth"]
-        image = np.array(image)
-        image = HWC3(image)
-        image = resize_image(image, resolution=image_resolution)
-        return PIL.Image.fromarray(image)
-
-    def to(self, device):
-        self.model.model.to(device)
-        self.model.device = torch.device(device)
-
-
-class ImageSegmentor:
-    def __init__(self):
-        self.image_processor = AutoImageProcessor.from_pretrained(
-            "openmmlab/upernet-convnext-small"
-        )
-        self.image_segmentor = UperNetForSemanticSegmentation.from_pretrained(
-            "openmmlab/upernet-convnext-small"
-        )
-
-    @torch.inference_mode()
-    def __call__(self, image: np.ndarray, **kwargs) -> PIL.Image.Image:
-        detect_resolution = kwargs.pop("detect_resolution", 512)
-        image_resolution = kwargs.pop("image_resolution", 512)
-        image = HWC3(image)
-        image = resize_image(image, resolution=detect_resolution)
-        image = PIL.Image.fromarray(image)
-
-        pixel_values = self.image_processor(image, return_tensors="pt").pixel_values
-        outputs = self.image_segmentor(pixel_values)
-        seg = self.image_processor.post_process_semantic_segmentation(
-            outputs, target_sizes=[image.size[::-1]]
-        )[0]
-        color_seg = np.zeros((seg.shape[0], seg.shape[1], 3), dtype=np.uint8)
-        for label, color in enumerate(ade_palette()):
-            color_seg[seg == label, :] = color
-        color_seg = color_seg.astype(np.uint8)
-
-        color_seg = resize_image(
-            color_seg, resolution=image_resolution, interpolation=cv2.INTER_NEAREST
-        )
-        return PIL.Image.fromarray(color_seg)
-
-
-def apply_gaussian_blur(image_np, ksize=5):
-    sigmaX = ksize / 2
-    ksize = int(ksize)
-    if ksize % 2 == 0:
-        ksize += 1
-    blurred_image_np = cv2.GaussianBlur(image_np, (ksize, ksize), sigmaX=sigmaX)
-    return blurred_image_np
-
-
-def recolor_luminance(img, thr_a=1.0, **kwargs):
-    result = cv2.cvtColor(HWC3(img), cv2.COLOR_BGR2LAB)
-    result = result[:, :, 0].astype(np.float32) / 255.0
-    result = result ** thr_a
-    result = (result * 255.0).clip(0, 255).astype(np.uint8)
-    result = cv2.cvtColor(result, cv2.COLOR_GRAY2RGB)
-    return result
-
-
-def recolor_intensity(img, thr_a=1.0, **kwargs):
-    result = cv2.cvtColor(HWC3(img), cv2.COLOR_BGR2HSV)
-    result = result[:, :, 2].astype(np.float32) / 255.0
-    result = result ** thr_a
-    result = (result * 255.0).clip(0, 255).astype(np.uint8)
-    result = cv2.cvtColor(result, cv2.COLOR_GRAY2RGB)
-    return result
-
-
-class Preprocessor:
-    MODEL_ID = "lllyasviel/Annotators"
-
-    def __init__(self):
-        self.model = None
-        self.name = ""
-
-    def load(self, name: str, use_cuda: bool = False) -> None:
-        if name == self.name:
-            return
-
-        if name == "HED":
-            self.model = HEDdetector.from_pretrained(self.MODEL_ID)
-        elif name == "Midas":
-            self.model = MidasDetector.from_pretrained(self.MODEL_ID)
-        elif name == "MLSD":
-            self.model = MLSDdetector.from_pretrained(self.MODEL_ID)
-        elif name == "Openpose":
-            self.model = OpenposeDetector.from_pretrained(self.MODEL_ID)
-        elif name == "PidiNet":
-            self.model = PidiNetDetector.from_pretrained(self.MODEL_ID)
-        elif name == "NormalBae":
-            self.model = NormalBaeDetector.from_pretrained(self.MODEL_ID)
-        elif name == "Lineart":
-            self.model = LineartDetector.from_pretrained(self.MODEL_ID)
-        elif name == "LineartAnime":
-            self.model = LineartAnimeDetector.from_pretrained(self.MODEL_ID)
-        elif name == "Canny":
-            self.model = CannyDetector()
-        elif name == "ContentShuffle":
-            self.model = ContentShuffleDetector()
-        elif name == "DPT":
-            self.model = DepthEstimator()
-        elif name == "UPerNet":
-            self.model = ImageSegmentor()
-        else:
-            raise ValueError("No valid preprocessor name")
-
-        release_resources()
-
-        self.name = name
-        if use_cuda and hasattr(self.model, "to"):
-            self.model.to("cuda")
-
-    def __call__(self, image: PIL.Image.Image, **kwargs) -> PIL.Image.Image:
-        if self.name == "Canny":
-            if "detect_resolution" in kwargs:
-                detect_resolution = kwargs.pop("detect_resolution")
-                image = np.array(image)
-                image = HWC3(image)
-                image = resize_image(image, resolution=detect_resolution)
-            image = self.model(image, **kwargs)
-            return PIL.Image.fromarray(image)
-        elif self.name == "Midas":
-            detect_resolution = kwargs.pop("detect_resolution", 512)
-            image_resolution = kwargs.pop("image_resolution", 512)
-            image = np.array(image)
-            image = HWC3(image)
-            image = resize_image(image, resolution=detect_resolution)
-            image = self.model(image, **kwargs)
-            image = HWC3(image)
-            image = resize_image(image, resolution=image_resolution)
-            return PIL.Image.fromarray(image)
-        else:
-            return self.model(image, **kwargs)
-
-
-# =====================================
-# Base Model
-# =====================================
 
 
 class PreviewGenerator:
@@ -864,84 +681,35 @@ class Model_Diffusers(PreviewGenerator):
         if "t2i" in self.task_name:
             preprocessor_name = T2I_PREPROCESSOR_NAME[self.task_name] if t2i_adapter_preprocessor else "None"
 
-        params_preprocessor = {
-            "image": image,
-            "image_resolution": image_resolution,
-            "detect_resolution": preprocess_resolution,
-        }
-
-        invalid_name = f"Invalid preprocessor name for task: {self.task_name}"
-        model_name = None
-
         if preprocessor_name in ["None", "None (anime)"] or self.task_name in ["ip2p", "img2img", "pattern", "sdxl_tile_realistic"]:
-            image = HWC3(image)
-            image = resize_image(image, resolution=image_resolution)
-            return PIL.Image.fromarray(image)
-        elif self.task_name in ["canny", "sdxl_canny_t2i"]:
-            params_preprocessor["low_threshold"] = low_threshold
-            params_preprocessor["high_threshold"] = high_threshold
-            model_name = "Canny"
-        elif self.task_name in ["openpose", "sdxl_openpose_t2i"]:
-            params_preprocessor["hand_and_face"] = True
-            if "core" in preprocessor_name:
-                params_preprocessor["hand_and_face"] = False
-            model_name = "Openpose"
-        elif self.task_name in ["depth", "sdxl_depth-midas_t2i"]:
-            model_name = preprocessor_name
-        elif self.task_name == "mlsd":
-            params_preprocessor["thr_v"] = value_threshold
-            params_preprocessor["thr_d"] = distance_threshold
-            model_name = "MLSD"
-        elif self.task_name in ["scribble", "sdxl_sketch_t2i"]:
-            if "HED" in preprocessor_name:
-                params_preprocessor["scribble"] = False
-                model_name = "HED"
-            else:
-                params_preprocessor["safe"] = False
-                model_name = "PidiNet"
-        elif self.task_name == "softedge":
-            if "HED" in preprocessor_name:
-                params_preprocessor["scribble"] = "safe" in preprocessor_name
-                model_name = "HED"
-            else:
-                params_preprocessor["safe"] = "safe" in preprocessor_name
-                model_name = "PidiNet"
-        elif self.task_name == "segmentation":
-            model_name = preprocessor_name
-        elif self.task_name == "normalbae":
-            model_name = "NormalBae"
-        elif self.task_name in ["lineart", "lineart_anime", "sdxl_lineart_t2i"]:
-            params_preprocessor["coarse"] = "coarse" in preprocessor_name
-            model_name = "LineartAnime" if "anime" in preprocessor_name.lower() else "Lineart"
-        elif self.task_name == "shuffle":
-            params_preprocessor.pop("detect_resolution", None)
-            model_name = preprocessor_name
+            return process_basic_task(image, image_resolution)
         elif self.task_name == "tile":
-            image_np = resize_image(image, resolution=image_resolution)
-            blur_names = {
-                "Mild Blur": 3,
-                "Moderate Blur": 15,
-                "Heavy Blur": 27,
-            }
-            image_np = apply_gaussian_blur(
-                image_np, ksize=blur_names[preprocessor_name]
-            )
-            return PIL.Image.fromarray(image_np)
+            return process_tile_task(image, image_resolution, preprocessor_name)
         elif self.task_name == "recolor":
-            image_np = resize_image(image, resolution=image_resolution)
+            return process_recolor_task(image, image_resolution, preprocessor_name, recolor_gamma_correction)
 
-            if preprocessor_name == "Recolor luminance":
-                image_np = recolor_luminance(image_np, thr_a=recolor_gamma_correction)
-            elif preprocessor_name == "Recolor intensity":
-                image_np = recolor_intensity(image_np, thr_a=recolor_gamma_correction)
-            else:
-                raise ValueError(invalid_name)
+        params_preprocessor, model_name = get_preprocessor_params(
+            image,
+            self.task_name,
+            preprocessor_name,
+            image_resolution,
+            preprocess_resolution,
+            low_threshold,
+            high_threshold,
+            value_threshold,
+            distance_threshold,
+        )
 
-            return PIL.Image.fromarray(image_np)
+        if not model_name:
+            raise ValueError(
+                "Unsupported task name or configuration: "
+                f"{self.task_name} - {preprocessor_name}"
+            )
+
+        logger.debug(f"Preprocessor: {model_name}")
 
         self.preprocessor.load(model_name, self.image_preprocessor_cuda_active)
-        control_image = self.preprocessor(**params_preprocessor)
-        return control_image
+        return self.preprocessor(**params_preprocessor)
 
     @torch.inference_mode()
     def process_inpaint(
@@ -996,14 +764,8 @@ class Model_Diffusers(PreviewGenerator):
         else:
             raise ValueError("No image mask was found.")
 
-        image = HWC3(image)
-        image = resize_image(image, resolution=image_resolution)
-        init_image = PIL.Image.fromarray(image)
-
-        image_mask_hwc = HWC3(array_rgb_mask)
-        image_mask = resize_image(image_mask_hwc, resolution=image_resolution)
-        control_mask = PIL.Image.fromarray(image_mask)
-
+        init_image = process_basic_task(image, image_resolution)
+        control_mask = process_basic_task(array_rgb_mask, image_resolution)
         control_image = make_inpaint_condition(init_image, control_mask)
 
         return init_image, control_mask, control_image
