@@ -2658,12 +2658,11 @@ class Model_Diffusers(PreviewGenerator):
         for i in range(loop_generation):
             # number seed
             if seed == -1:
-                seeds = [random.randint(0, 2147483647) for _ in range(num_images)]
+                seeds = [random.randint(0, 2147483647)]
             else:
-                if num_images == 1:
-                    seeds = [seed]
-                else:
-                    seeds = [seed] + [random.randint(0, 2147483647) for _ in range(num_images - 1)]
+                seeds = [seed]
+
+            seeds = [seeds[0] + i for i in range(num_images)]
 
             # generators
             generators = []  # List to store all the generators
