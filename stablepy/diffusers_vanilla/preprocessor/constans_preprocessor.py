@@ -103,9 +103,7 @@ TASK_AND_PREPROCESSORS = {
         "None",
     ],
     "tile": [
-        "Mild Blur",
-        "Moderate Blur",
-        "Heavy Blur",
+        "Blur",
         "None",
     ],
 }

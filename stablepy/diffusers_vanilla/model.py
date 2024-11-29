@@ -571,8 +571,6 @@ class Model_Diffusers(PreviewGenerator):
                 if os.path.isfile(vae_model):
                     self.pipe.vae = AutoencoderKL.from_single_file(
                         vae_model,
-                        config="stabilityai/stable-diffusion-xl-base-1.0",
-                        subfolder="vae",
                     )
                 else:
                     self.pipe.vae = AutoencoderKL.from_pretrained(
@@ -672,6 +670,7 @@ class Model_Diffusers(PreviewGenerator):
         distance_threshold: float,
         t2i_adapter_preprocessor: bool,
         recolor_gamma_correction: float,
+        tile_blur_sigma: int,
     ) -> list[PIL.Image.Image]:
         if image is None:
             raise ValueError("No reference image found.")
@@ -693,6 +692,7 @@ class Model_Diffusers(PreviewGenerator):
             value_threshold,
             distance_threshold,
             recolor_gamma_correction,
+            tile_blur_sigma,
         )
 
         if not model_name:
@@ -1242,6 +1242,7 @@ class Model_Diffusers(PreviewGenerator):
         value_threshold: float = 0.1,
         distance_threshold: float = 0.1,
         recolor_gamma_correction: float = 1.0,
+        tile_blur_sigma: int = 9,
         controlnet_conditioning_scale: float = 1.0,
         control_guidance_start: float = 0.0,
         control_guidance_end: float = 1.0,
@@ -1459,6 +1460,8 @@ class Model_Diffusers(PreviewGenerator):
                 Distance threshold parameter for ControlNet MLSD.
             recolor_gamma_correction (float, optional, defaults to 1.0):
                 Gamma correction parameter for ControlNet Recolor.
+            tile_blur_sigma (int, optional, defaults to 9.0):
+                Blur sigma paramater for ControlNet Tile.
             controlnet_conditioning_scale (float, optional, defaults to 1.0):
                 The outputs of the ControlNet are multiplied by `controlnet_conditioning_scale` before they are added
                 to the residual in the original `unet`. Used in ControlNet and Inpaint
@@ -1855,6 +1858,7 @@ class Model_Diffusers(PreviewGenerator):
                 distance_threshold=distance_threshold,
                 t2i_adapter_preprocessor=t2i_adapter_preprocessor,
                 recolor_gamma_correction=recolor_gamma_correction,
+                tile_blur_sigma=tile_blur_sigma,
             )
 
         # Task Parameters

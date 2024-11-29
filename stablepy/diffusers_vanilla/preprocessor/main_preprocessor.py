@@ -49,10 +49,10 @@ class RecolorDetector:
 
 
 class BlurDetector(RecolorDetector):
-    def __call__(self, image=None, image_resolution=512, ksize=5, **kwargs):
+    def __call__(self, image=None, image_resolution=512, blur_sigma=5, **kwargs):
         """Process the 'tile' task with Gaussian blur."""
         result = apply_gaussian_blur(
-            self.resize(image, image_resolution), ksize=ksize
+            self.resize(image, image_resolution), ksize=blur_sigma
         )
         return PIL.Image.fromarray(HWC3(result))
 
@@ -205,6 +205,7 @@ def get_preprocessor_params(
     value_threshold: float,
     distance_threshold: float,
     gamma_correction: float,
+    blur_sigma: int,
 ) -> tuple[dict, str]:
     """
     Determine the parameters and model name for preprocessing.
@@ -220,6 +221,7 @@ def get_preprocessor_params(
         value_threshold (float): Threshold for MLSD value detection.
         distance_threshold (float): Threshold for MLSD distance detection.
         gamma_correction (float): Threshold for Recolor thr_a.
+        blur_sigma (int): Threshold for Blur sigma.
 
     Returns:
         tuple[dict, str]: A dictionary of parameters for preprocessing and the model name.
@@ -288,10 +290,7 @@ def get_preprocessor_params(
         params_preprocessor["gamma_correction"] = gamma_correction
         model_name = "Recolor"
     elif task_name == "tile":
-        blur_levels = {"Mild Blur": 3, "Moderate Blur": 15, "Heavy Blur": 27}
-        if preprocessor_name not in blur_levels:
-            raise ValueError("Invalid Blur mode")
-        params_preprocessor["ksize"] = blur_levels[preprocessor_name]
+        params_preprocessor["blur_sigma"] = blur_sigma
         model_name = "Blur"
 
     return params_preprocessor, model_name
