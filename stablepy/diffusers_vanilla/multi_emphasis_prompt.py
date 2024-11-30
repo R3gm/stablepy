@@ -383,7 +383,7 @@ class StableDiffusionLongPromptProcessor(FrozenCLIPEmbedderWithCustomWordsBase):
         self.get_pooled = False
         if hasattr(wrapped, "text_encoder_2"):
             self.layer = "hidden"
-            self.layer_idx = 11
+            self.layer_idx = -2
 
         self.emphasis = emphasis
         self.CLIP_stop_at_last_layers = clip_skip

@@ -415,11 +415,13 @@ class Model_Diffusers(PreviewGenerator):
             type_model_precision if torch.cuda.is_available() else torch.float32
         )  # For SD 1.5
 
+        reload = False
         self.load_pipe(
             base_model_id,
             task_name,
             vae_model,
             type_model_precision,
+            reload,
             retain_task_model_in_cache,
         )
         self.preprocessor = Preprocessor()
@@ -438,6 +440,32 @@ class Model_Diffusers(PreviewGenerator):
         model_id,
         enable_pag,
     ):
+
+        if hasattr(self.pipe, "set_pag_applied_layers"):
+            if not hasattr(self.pipe, "text_encoder_2"):
+                self.pipe = StableDiffusionPipeline(
+                    vae=self.pipe.vae,
+                    text_encoder=self.pipe.text_encoder,
+                    tokenizer=self.pipe.tokenizer,
+                    unet=self.pipe.unet,
+                    scheduler=self.pipe.scheduler,
+                    safety_checker=self.pipe.safety_checker,
+                    feature_extractor=self.pipe.feature_extractor,
+                    image_encoder=self.pipe.image_encoder,
+                    requires_safety_checker=self.pipe.config.requires_safety_checker,
+                )
+            else:
+                self.pipe = StableDiffusionXLPipeline(
+                    vae=self.pipe.vae,
+                    text_encoder=self.pipe.text_encoder,
+                    text_encoder_2=self.pipe.text_encoder_2,
+                    tokenizer=self.pipe.tokenizer,
+                    tokenizer_2=self.pipe.tokenizer_2,
+                    unet=self.pipe.unet,
+                    scheduler=self.pipe.scheduler,
+                    feature_extractor=self.pipe.feature_extractor,
+                    image_encoder=self.pipe.image_encoder,
+                )
 
         tk = "base"
         model_components = dict(
