@@ -433,11 +433,12 @@ class StableDiffusionLongPromptProcessor(FrozenCLIPEmbedderWithCustomWordsBase):
 
     # sdxl no clip skip
     def encode_with_transformers_xl(self, tokens):
-        outputs = self.text_encoder(input_ids=tokens, output_hidden_states=self.layer == "hidden")
+        outputs = self.text_encoder.text_model(input_ids=tokens, output_hidden_states=self.layer == "hidden")
 
         pooled = None
         if outputs[0].shape[-1] == 1280:
-            pooled = outputs[0]
+            pooled = outputs.pooler_output
+            pooled = self.text_encoder.text_projection(pooled)
 
         if self.layer == "last":
             z = outputs.last_hidden_state
@@ -475,7 +476,7 @@ def text_embeddings_equal_len(text_embedder, prompt, negative_prompt, get_pooled
     else:
         return all_embeddings
 
-
+@torch.no_grad()
 def long_prompts_with_weighting(pipe, prompt, negative_prompt, clip_skip=2, emphasis="Original", comma_padding_backtrack=20):
     text_embedder = StableDiffusionLongPromptProcessor(
         pipe,
