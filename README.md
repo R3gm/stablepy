@@ -6,7 +6,7 @@ The goal of this project is to make Stable Diffusion more accessible, simple and
 
 **Installation:**
 ```
-pip install stablepy==0.5.1
+pip install stablepy==0.5.2
 ```
 
 **Usage:**
@@ -79,6 +79,12 @@ images, info_image = model(
 images[1]
 ```
 **📖 New Update Details:**
+
+🔥 Version 0.5.2:
+
+- Fixed an issue where errors occurred if PAG layers weren't turned off.
+- Improved the generation quality for SDXL when using the Classic-variant prompt weight.
+- Fixed a problem where special characters weren't handled correctly with the Classic prompt weight.
 
 🔥 Version 0.5.1:
 
