@@ -50,6 +50,7 @@ from .utils import (
     check_variant_file,
     cachebox,
     release_resources,
+    validate_and_update_params,
 )
 from .lora_loader import lora_mix_load, load_no_fused_lora
 from .inpainting_canvas import draw, make_inpaint_condition
@@ -232,6 +233,32 @@ class Model_Diffusers(PreviewGenerator):
         enable_pag,
         verbose_info=False,
     ):
+
+        if hasattr(self.pipe, "set_pag_applied_layers"):
+            if not hasattr(self.pipe, "text_encoder_2"):
+                self.pipe = StableDiffusionPipeline(
+                    vae=self.pipe.vae,
+                    text_encoder=self.pipe.text_encoder,
+                    tokenizer=self.pipe.tokenizer,
+                    unet=self.pipe.unet,
+                    scheduler=self.pipe.scheduler,
+                    safety_checker=self.pipe.safety_checker,
+                    feature_extractor=self.pipe.feature_extractor,
+                    image_encoder=self.pipe.image_encoder,
+                    requires_safety_checker=self.pipe.config.requires_safety_checker,
+                )
+            else:
+                self.pipe = StableDiffusionXLPipeline(
+                    vae=self.pipe.vae,
+                    text_encoder=self.pipe.text_encoder,
+                    text_encoder_2=self.pipe.text_encoder_2,
+                    tokenizer=self.pipe.tokenizer,
+                    tokenizer_2=self.pipe.tokenizer_2,
+                    unet=self.pipe.unet,
+                    scheduler=self.pipe.scheduler,
+                    feature_extractor=self.pipe.feature_extractor,
+                    image_encoder=self.pipe.image_encoder,
+                )
 
         tk = "base"
         model_components = dict(
@@ -1284,6 +1311,7 @@ class Model_Diffusers(PreviewGenerator):
         image_previews: bool = False,
         xformers_memory_efficient_attention: bool = False,
         gui_active: bool = False,
+        **kwargs,
     ):
 
         """
@@ -2468,6 +2496,7 @@ class Model_Diffusers(PreviewGenerator):
             hires_params_config,
             hires_pipe,
             metadata,
+            kwargs,
         )
 
     def post_processing(
@@ -2653,6 +2682,7 @@ class Model_Diffusers(PreviewGenerator):
         hires_params_config,
         hires_pipe,
         metadata,
+        kwargs,
     ):
         for i in range(loop_generation):
             # number seed
@@ -2695,6 +2725,8 @@ class Model_Diffusers(PreviewGenerator):
                 release_resources()
                 pipe_params_config["output_type"] = "latent"
                 # self.pipe.__class__._execution_device = property(_execution_device)
+
+            validate_and_update_params(self.pipe.__class__, kwargs, pipe_params_config)
 
             try:
                 images = self.pipe(
@@ -2778,6 +2810,7 @@ class Model_Diffusers(PreviewGenerator):
         hires_params_config,
         hires_pipe,
         metadata,
+        kwargs,
     ):
         for i in range(loop_generation):
             # number seed
@@ -2820,6 +2853,8 @@ class Model_Diffusers(PreviewGenerator):
                 pipe_params_config["output_type"] = "latent"
                 # self.pipe.__class__._execution_device = property(_execution_device)
                 self.metadata = metadata
+
+            validate_and_update_params(self.pipe.__class__, kwargs, pipe_params_config)
 
             try:
                 logger.debug("Start stream")

@@ -14,6 +14,7 @@ from diffusers.pipelines.pipeline_loading_utils import variant_compatible_siblin
 import hashlib
 from collections import OrderedDict
 import gc
+import inspect
 
 
 def generate_lora_tags(names_list, scales_list):
@@ -317,6 +318,29 @@ def latents_to_rgb(latents, latent_resize, vae_decoding, pipe):
         resized_image = pil_image.resize((pil_image.size[0] * latent_resize, pil_image.size[1] * latent_resize), Image.LANCZOS)  # Resize 128x128 * ...
 
     return resized_image
+
+
+def validate_and_update_params(cls, kwargs, config):
+    """
+    Validates kwargs against the parameters of a given class's `__call__` method
+    and updates the provided configuration dictionary.
+
+    Args:
+        cls: The class whose `__call__` method parameters are used for validation.
+        kwargs (dict): The keyword arguments to validate.
+        config (dict): The dictionary to update with valid parameters.
+    """
+    if kwargs:
+        # logger.debug(kwargs)
+        valid_params = inspect.signature(cls.__call__).parameters.keys()
+        for name_param, value_param in kwargs.items():
+            if name_param in valid_params:
+                config.update({name_param: value_param})
+                logger.debug(f"Parameter added: '{name_param}': {value_param}.")
+            else:
+                logger.error(
+                    f"The pipeline '{cls.__name__}' had an invalid parameter"
+                    f" removed: '{name_param}'.")
 
 
 def cachebox(max_cache_size=None, hash_func=hashlib.md5):
