@@ -1,3 +1,7 @@
+from stablepy.diffusers_vanilla.extra_scheduler.scheduling_euler_discrete_variants import (
+    EulerDiscreteSchedulerNegative,
+    EulerDiscreteSchedulerMax,
+)
 from .extra_scheduler.scheduling_dpmsolver_multistep import (
     DPMSolverMultistepScheduler
 )
@@ -191,6 +195,8 @@ SCHEDULER_CONFIG_MAP = {
     # "DPM++ 2M SDE Lu": (DPMSolverMultistepScheduler, {"use_lu_lambdas": True, "algorithm_type": "sde-dpmsolver++"}),
     "DPM++ 2M SDE Ef": (DPMSolverMultistepScheduler, {"algorithm_type": "sde-dpmsolver++", "euler_at_final": True}),
     "DPM 3M Ef": (DPMSolverMultistepScheduler, {"algorithm_type": "dpmsolver", "final_sigmas_type": "sigma_min", "solver_order": 3, "euler_at_final": True}),
+    "Euler Negative": (EulerDiscreteSchedulerNegative, {}),
+    "Euler Max": (EulerDiscreteSchedulerMax, {}),
 
     "LCM": (LCMScheduler, {}),
     "TCD": (TCDScheduler, {}),
