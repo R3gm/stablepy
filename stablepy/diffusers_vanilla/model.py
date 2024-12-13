@@ -1,4 +1,11 @@
 import time
+import os
+import copy
+import warnings
+import traceback
+import threading
+import json
+
 import numpy as np
 import PIL.Image
 from diffusers import (
@@ -14,8 +21,6 @@ from diffusers import (
 from huggingface_hub import hf_hub_download
 import torch
 import random
-import threading
-import json
 import cv2
 from diffusers import (
     DDIMScheduler,
@@ -51,6 +56,8 @@ from .utils import (
     cachebox,
     release_resources,
     validate_and_update_params,
+    get_seeds,
+    CURRENT_TASK_PARAMS,
 )
 from .lora_loader import lora_mix_load, load_no_fused_lora
 from .inpainting_canvas import draw, make_inpaint_condition
@@ -64,15 +71,11 @@ from .style_prompt_config import (
     get_json_content,
     apply_style,
 )
-import os
 import mediapy
 from PIL import Image
 from typing import Union, Optional, List, Tuple, Dict, Any, Callable # noqa
 import logging
 import diffusers
-import copy
-import warnings
-import traceback
 from .main_prompt_embeds import (
     Promt_Embedder_SD1,
     Promt_Embedder_SDXL,
@@ -90,6 +93,8 @@ from .preprocessor.main_preprocessor import (
     get_preprocessor_params,
 )
 from .preprocessor.constans_preprocessor import T2I_PREPROCESSOR_NAME
+from ..face_restoration.main_face_restoration import batch_process_face_restoration
+
 logging.getLogger("diffusers").setLevel(logging.ERROR)
 logging.getLogger("transformers").setLevel(logging.ERROR)
 diffusers.utils.logging.set_verbosity(40)
@@ -546,7 +551,10 @@ class Model_Diffusers(PreviewGenerator):
 
                         if self.env_components is not None:
                             from diffusers import FluxPipeline
-                            logger.debug(f"Env components: {self.env_components.keys()}")
+
+                            logger.debug(
+                                f"Env components: {self.env_components.keys()}"
+                            )
                             self.pipe = FluxPipeline(
                                 transformer=transformer,
                                 **self.env_components,
@@ -1289,8 +1297,8 @@ class Model_Diffusers(PreviewGenerator):
 
         upscaler_model_path: Optional[str] = None,
         upscaler_increases_size: float = 1.5,
-        esrgan_tile: int = 100,
-        esrgan_tile_overlap: int = 10,
+        upscaler_tile_size: int = 192,  # max 512, step 16
+        upscaler_tile_overlap: int = 8,  # max 48
         hires_steps: int = 25,
         hires_denoising_strength: float = 0.35,
         hires_prompt: str = "",
@@ -1298,6 +1306,10 @@ class Model_Diffusers(PreviewGenerator):
         hires_sampler: str = "Use same sampler",
         hires_schedule_type: str = "Use same schedule type",
         hires_guidance_scale: float = -1.,
+
+        face_restoration_model: Optional[str] = None,
+        face_restoration_visibility: float = 1.0,
+        face_restoration_weight: float = 0.5,
 
         ip_adapter_image: Optional[Any] = [],  # str Image
         ip_adapter_mask: Optional[Any] = [],  # str Image
@@ -1446,20 +1458,20 @@ class Model_Diffusers(PreviewGenerator):
                 Perturbed Attention Guidance (PAG) enhances image generation quality without the need for training.
                 If it is used, it is recommended to use values close to 3.0 for good results.
             upscaler_model_path (str, optional):
-                This is the path of the ESRGAN model that will be used for the upscale; on the other hand,
-                you can also use simply 'Lanczos', 'Nearest,' or 'Latent,' the latter of which has variants
+                This is the path of the model that will be used for the upscale; on the other hand,
+                you can also simply use any of the built-in upscalers like 'Nearest', 'Latent', 'SwinIR 4x', etc.
                 that can be consulted in the following code:
 
                 ```python
-                from stablepy import LATENT_UPSCALERS
-                print(LATENT_UPSCALERS)
+                from stablepy import ALL_BUILTIN_UPSCALERS
+                print(ALL_BUILTIN_UPSCALERS)
                 ```
             upscaler_increases_size (float, optional, defaults to 1.5):
                 Placeholder for upscaler increases size parameter.
-            esrgan_tile (int, optional, defaults to 100):
-                Tile if use a ESRGAN model.
-            esrgan_tile_overlap (int, optional, defaults to 100):
-                Tile overlap if use a ESRGAN model.
+            upscaler_tile_size (int, optional, defaults to 192):
+                Tile if use a upscaler model.
+            upscaler_tile_overlap (int, optional, defaults to 8):
+                Tile overlap if use a upscaler model.
             hires_steps (int, optional, defaults to 25):
                 The number of denoising steps for hires. More denoising steps usually lead to a higher quality image at the
                 expense of slower inference.
@@ -1475,7 +1487,20 @@ class Model_Diffusers(PreviewGenerator):
                 The schedule type used for the hires generation process. If not specified, the main schedule will be used.
             hires_guidance_scale (float, optional, defaults to -1.):
                 The guidance scale used for the hires generation process.
-                If the value is set to -1. the main guidance_scale will be used
+                If the value is set to -1. the main guidance_scale will be used.
+            face_restoration_model (str, optional default None):
+                This is the name of the face restoration model that will be used.
+
+                To see all the valid face restoration model names, use the following code:
+
+                ```python
+                from stablepy import FACE_RESTORATION_MODELS
+                print(FACE_RESTORATION_MODELS)
+                ```
+            face_restoration_visibility (float, optional, defaults to 1.):
+                The visibility of the restored face's changes.
+            face_restoration_weight (float, optional, defaults to 1.):
+                The weight value used for the CodeFormer model.
             image (Any, optional):
                 The image to be used for the Inpaint, ControlNet, or T2I adapter.
             preprocessor_name (str, optional, defaults to "None"):
@@ -1574,9 +1599,13 @@ class Model_Diffusers(PreviewGenerator):
             image_previews (bool, optional, defaults to False):
                 Displaying the image denoising process.
             xformers_memory_efficient_attention (bool, optional, defaults to False):
-                Improves generation time, currently disabled.
+                Improves generation time; currently disabled due to quality issues with LoRA.
             gui_active (bool, optional, defaults to False):
                 utility when used with a GUI, it changes the behavior especially by displaying confirmation messages or options.
+            **kwargs (dict, optional):
+                kwargs is used to pass additional parameters to the Diffusers pipeline. This allows for flexibility
+                when specifying optional settings like guidance_rescale, eta, cross_attention_kwargs, and more.
+
 
         Specific parameter usage details:
 
@@ -1664,8 +1693,33 @@ class Model_Diffusers(PreviewGenerator):
         if msg_schedule:
             logger.warning(msg_schedule)
 
+        face_restoration_device = self.device.type
         self.gui_active = gui_active
-        self.image_previews = image_previews
+
+        pp = CURRENT_TASK_PARAMS(
+            disable_progress_bar=disable_progress_bar,
+            display_images=display_images,
+            image_storage_location=image_storage_location,
+            save_generated_images=save_generated_images,
+            retain_compel_previous_load=retain_compel_previous_load,
+            hires_steps=hires_steps,
+            hires_before_adetailer=hires_before_adetailer,
+            hires_after_adetailer=hires_after_adetailer,
+            upscaler_model_path=upscaler_model_path,
+            upscaler_increases_size=upscaler_increases_size,
+            upscaler_tile_size=upscaler_tile_size,
+            upscaler_tile_overlap=upscaler_tile_overlap,
+            face_restoration_model=face_restoration_model,
+            face_restoration_visibility=face_restoration_visibility,
+            face_restoration_weight=face_restoration_weight,
+            face_restoration_device=face_restoration_device,
+            loop_generation=loop_generation,
+            generator_in_cpu=generator_in_cpu,
+            num_images=num_images,
+            seed=seed,
+            adetailer_A=adetailer_A,
+            adetailer_B=adetailer_B,
+        )
 
         if self.pipe is None:
             self.load_pipe(
@@ -1706,7 +1760,7 @@ class Model_Diffusers(PreviewGenerator):
             )
 
         self.pipe.set_progress_bar_config(leave=leave_progress_bar)
-        self.pipe.set_progress_bar_config(disable=disable_progress_bar)
+        self.pipe.set_progress_bar_config(disable=pp.disable_progress_bar)
 
         xformers_memory_efficient_attention = False  # disabled
         if xformers_memory_efficient_attention and torch.cuda.is_available():
@@ -1838,7 +1892,7 @@ class Model_Diffusers(PreviewGenerator):
             self.FreeU = False
 
         # Prompt Optimizations
-        if hasattr(self, "compel") and not retain_compel_previous_load:
+        if hasattr(self, "compel") and not pp.retain_compel_previous_load:
             del self.compel
 
         prompt_emb, negative_prompt_emb = self.create_prompt_embeds(
@@ -1906,7 +1960,7 @@ class Model_Diffusers(PreviewGenerator):
             "num_inference_steps": num_steps,
             "guidance_scale": guidance_scale,
             "clip_skip": None,
-            "num_images_per_prompt": num_images,
+            "num_images_per_prompt": pp.num_images,
         }
 
         if hasattr(self.pipe, "set_pag_applied_layers"):
@@ -2006,7 +2060,7 @@ class Model_Diffusers(PreviewGenerator):
         if self.ip_adapter_config:
             # maybe need cache embeds
             ip_adapter_embeds, ip_adapter_masks = self.get_ip_embeds(
-                guidance_scale, ip_images, num_images, ip_masks
+                guidance_scale, ip_images, pp.num_images, ip_masks
             )
 
             pipe_params_config["ip_adapter_image_embeds"] = ip_adapter_embeds
@@ -2015,12 +2069,8 @@ class Model_Diffusers(PreviewGenerator):
                     "ip_adapter_masks": ip_adapter_masks
                 }
 
-        post_processing_params = dict(
-            display_images=display_images
-        )
-
         # detailfix params and pipe global
-        if adetailer_A or adetailer_B:
+        if pp.adetailer_A or pp.adetailer_B:
 
             # global params detailfix
             default_params_detailfix = {
@@ -2081,16 +2131,16 @@ class Model_Diffusers(PreviewGenerator):
             adetailer_B_params.pop("sampler", None)
 
             detailfix_pipe.set_progress_bar_config(leave=leave_progress_bar)
-            detailfix_pipe.set_progress_bar_config(disable=disable_progress_bar)
+            detailfix_pipe.set_progress_bar_config(disable=pp.disable_progress_bar)
             if self.class_name != FLUX:
                 detailfix_pipe.to(self.device)
             else:
                 detailfix_pipe.__class__._execution_device = property(_execution_device)
             release_resources()
+        else:
+            detailfix_pipe = None
 
-            post_processing_params["detailfix_pipe"] = detailfix_pipe
-
-        if adetailer_A:
+        if pp.adetailer_A:
             for key_param, default_value in default_params_detailfix.items():
                 if key_param not in adetailer_A_params:
                     adetailer_A_params[key_param] = default_value
@@ -2191,9 +2241,9 @@ class Model_Diffusers(PreviewGenerator):
             logger.debug(f"Pipe params detailfix A \n{detailfix_params_A}")
             logger.debug(f"Params detailfix A \n{adetailer_A_params}")
 
-            post_processing_params["detailfix_params_A"] = detailfix_params_A
+            pp.set_params(detailfix_params_A=detailfix_params_A)
 
-        if adetailer_B:
+        if pp.adetailer_B:
             for key_param, default_value in default_params_detailfix.items():
                 if key_param not in adetailer_B_params:
                     adetailer_B_params[key_param] = default_value
@@ -2291,14 +2341,14 @@ class Model_Diffusers(PreviewGenerator):
             logger.debug(f"Pipe params detailfix B \n{detailfix_params_B}")
             logger.debug(f"Params detailfix B \n{adetailer_B_params}")
 
-            post_processing_params["detailfix_params_B"] = detailfix_params_B
+            pp.set_params(detailfix_params_B=detailfix_params_B)
 
-        if hires_steps > 1 and upscaler_model_path is not None:
+        if pp.hires_steps > 1 and pp.upscaler_model_path is not None:
             # Hires params BASE
             hires_params_config = {
                 "prompt": None,
                 "negative_prompt": None,
-                "num_inference_steps": hires_steps,
+                "num_inference_steps": pp.hires_steps,
                 "guidance_scale": hires_guidance_scale if hires_guidance_scale >= 0 else guidance_scale,
                 "clip_skip": None,
                 "strength": hires_denoising_strength,
@@ -2403,11 +2453,11 @@ class Model_Diffusers(PreviewGenerator):
                     hires_pipe, hires_sch_type_fix, schedule_prediction_type
                 )
             hires_params_config.update(
-                ays_timesteps(self.class_name, hires_sch_type_fix, hires_steps)
+                ays_timesteps(self.class_name, hires_sch_type_fix, pp.hires_steps)
             )
 
             hires_pipe.set_progress_bar_config(leave=leave_progress_bar)
-            hires_pipe.set_progress_bar_config(disable=disable_progress_bar)
+            hires_pipe.set_progress_bar_config(disable=pp.disable_progress_bar)
             if self.class_name != FLUX:
                 hires_pipe.to(self.device)
             else:
@@ -2415,8 +2465,8 @@ class Model_Diffusers(PreviewGenerator):
             release_resources()
 
             if (
-                upscaler_model_path in LATENT_UPSCALERS
-                and ((not adetailer_A and not adetailer_B) or hires_before_adetailer)
+                pp.upscaler_model_path in LATENT_UPSCALERS
+                and ((not pp.adetailer_A and not pp.adetailer_B and not pp.face_restoration_model) or pp.hires_before_adetailer)
             ):
                 pipe_params_config["output_type"] = "latent"
 
@@ -2436,9 +2486,9 @@ class Model_Diffusers(PreviewGenerator):
             logger.debug(f"vae_type: {self.pipe.vae.dtype}")
             logger.debug(f"pipe_type: {self.pipe.dtype}")
             logger.debug(f"scheduler_main_pipe: {self.pipe.scheduler}")
-            if adetailer_A or adetailer_B:
+            if pp.adetailer_A or pp.adetailer_B:
                 logger.debug(f"scheduler_detailfix: {detailfix_pipe.scheduler}")
-            if hires_steps > 1 and upscaler_model_path is not None:
+            if pp.hires_steps > 1 and pp.upscaler_model_path is not None:
                 logger.debug(f"scheduler_hires: {hires_pipe.scheduler}")
         except Exception as e:
             logger.debug(f"{str(e)}")
@@ -2448,9 +2498,9 @@ class Model_Diffusers(PreviewGenerator):
                 self.vae_model,
                 pag_scale if hasattr(self.pipe, "set_pag_applied_layers") else 0,
                 self.FreeU,
-                upscaler_model_path,
-                upscaler_increases_size,
-                hires_steps,
+                pp.upscaler_model_path,
+                pp.upscaler_increases_size,
+                pp.hires_steps,
                 hires_denoising_strength,
                 self.lora_memory,
                 self.lora_scale_memory,
@@ -2473,88 +2523,58 @@ class Model_Diffusers(PreviewGenerator):
             extra_metadata,
         ]
 
-        self.filename_pattern = assemble_filename_pattern(
+        filename_pattern = assemble_filename_pattern(
             filename_pattern, metadata
+        )
+
+        pp.set_params(
+            metadata=metadata, filename_pattern=filename_pattern,
+            adetailer_A_params=adetailer_A_params, adetailer_B_params=adetailer_B_params,
+            hires_params_config=hires_params_config,
         )
 
         # === RUN PIPE === #
         handle_task = self.start_work if not image_previews else self.start_stream
 
         return handle_task(
-            num_images,
-            seed,
-            adetailer_A,
-            adetailer_A_params,
-            adetailer_B,
-            adetailer_B_params,
-            upscaler_model_path,
-            upscaler_increases_size,
-            esrgan_tile,
-            esrgan_tile_overlap,
-            hires_steps,
-            loop_generation,
-            display_images,
-            save_generated_images,
-            image_storage_location,
-            generator_in_cpu,
-            hires_before_adetailer,
-            hires_after_adetailer,
-            retain_compel_previous_load,
             control_image,
             pipe_params_config,
-            post_processing_params,
-            hires_params_config,
+            detailfix_pipe,
             hires_pipe,
-            metadata,
+            pp,
             kwargs,
         )
 
     def post_processing(
         self,
-        adetailer_A,
-        adetailer_A_params,
-        adetailer_B,
-        adetailer_B_params,
-        upscaler_model_path,
-        upscaler_increases_size,
-        esrgan_tile,
-        esrgan_tile_overlap,
-        hires_steps,
-        loop_generation,
-        display_images,
-        save_generated_images,
-        image_storage_location,
-        hires_before_adetailer,
-        hires_after_adetailer,
         control_image,
-        post_processing_params,
-        hires_params_config,
+        detailfix_pipe,
         hires_pipe,
         seeds,
         generators,
         images,
-        metadata,
+        pp,
     ):
 
         if self.class_name == FLUX:
-            if upscaler_model_path is None and not adetailer_A and not adetailer_B and loop_generation == 1:
+            if pp.upscaler_model_path is None and not pp.adetailer_A and not pp.adetailer_B and pp.loop_generation == 1:
                 if os.getenv("SPACES_ZERO_GPU"):
                     self.pipe.transformer = None
                 else:
                     self.pipe.transformer.to("cpu")
-            if hasattr(self.pipe, "controlnet") and loop_generation == 1:
+            if hasattr(self.pipe, "controlnet") and pp.loop_generation == 1:
                 if os.getenv("SPACES_ZERO_GPU"):
                     self.pipe.controlnet = None
                 else:
                     self.pipe.controlnet.to("cpu")
 
-            if upscaler_model_path not in LATENT_UPSCALERS:
+            if pp.upscaler_model_path not in LATENT_UPSCALERS:
                 self.pipe.vae.to(self.device)
                 release_resources()
                 images.to(self.device)
 
                 with torch.no_grad():
-                    latents = self.pipe._unpack_latents(images, metadata[9], metadata[8], self.pipe.vae_scale_factor)
+                    latents = self.pipe._unpack_latents(images, pp.metadata[9], pp.metadata[8], self.pipe.vae_scale_factor)
                     latents = (latents / self.pipe.vae.config.scaling_factor) + self.pipe.vae.config.shift_factor
                     image = self.pipe.vae.decode(latents, return_dict=False)[0]
                     images = self.pipe.image_processor.postprocess(image, output_type="pil")
@@ -2564,95 +2584,104 @@ class Model_Diffusers(PreviewGenerator):
         if isinstance(images, torch.Tensor):
             images = [tl.unsqueeze(0) for tl in torch.unbind(images, dim=0)]
 
-        if self.task_name not in ["txt2img", "inpaint", "img2img"]:
-            images = [control_image] + images
-
         release_resources()
 
-        if hires_before_adetailer and upscaler_model_path is not None:
+        if pp.hires_before_adetailer and pp.upscaler_model_path is not None:
             logger.debug(
                 "Hires before; same seed for each image (no batch)"
             )
             images = process_images_high_resolution(
                 images,
-                upscaler_model_path,
-                upscaler_increases_size,
-                esrgan_tile, esrgan_tile_overlap,
-                hires_steps, hires_params_config,
+                pp.upscaler_model_path,
+                pp.upscaler_increases_size,
+                pp.upscaler_tile_size, pp.upscaler_tile_overlap,
+                pp.hires_steps, pp.hires_params_config,
                 self.task_name,
                 generators[0],  # pipe_params_config["generator"][0], # no generator
                 hires_pipe,
+                pp.disable_progress_bar,
+            )
+
+        if pp.face_restoration_model:
+            images = batch_process_face_restoration(
+                images,
+                pp.face_restoration_model,
+                pp.face_restoration_visibility,
+                pp.face_restoration_weight,
+                pp.face_restoration_device,
             )
 
             # Adetailer stuff
-        if adetailer_A or adetailer_B:
+        if pp.adetailer_A or pp.adetailer_B:
             # image_pil_list = []
             # for img_single in images:
             # image_ad = img_single.convert("RGB")
             # image_pil_list.append(image_ad)
-            if self.task_name not in ["txt2img", "inpaint", "img2img"]:
-                images = images[1:]
 
-            if adetailer_A:
+            if pp.adetailer_A:
                 images = ad_model_process(
-                    pipe_params_df=post_processing_params["detailfix_params_A"],
-                    detailfix_pipe=post_processing_params["detailfix_pipe"],
+                    pipe_params_df=pp.detailfix_params_A,
+                    detailfix_pipe=detailfix_pipe,
                     image_list_task=images,
-                    **adetailer_A_params,
+                    **pp.adetailer_A_params,
                 )
-            if adetailer_B:
+            if pp.adetailer_B:
                 images = ad_model_process(
-                    pipe_params_df=post_processing_params["detailfix_params_B"],
-                    detailfix_pipe=post_processing_params["detailfix_pipe"],
+                    pipe_params_df=pp.detailfix_params_B,
+                    detailfix_pipe=detailfix_pipe,
                     image_list_task=images,
-                    **adetailer_B_params,
+                    **pp.adetailer_B_params,
                 )
 
-            if self.task_name not in ["txt2img", "inpaint", "img2img"]:
-                images = [control_image] + images
                 # del detailfix_pipe
             release_resources()
 
-        if hires_after_adetailer and upscaler_model_path is not None:
+        if pp.hires_after_adetailer and pp.upscaler_model_path is not None:
             logger.debug(
                 "Hires after; same seed for each image (no batch)"
             )
             images = process_images_high_resolution(
                 images,
-                upscaler_model_path,
-                upscaler_increases_size,
-                esrgan_tile, esrgan_tile_overlap,
-                hires_steps, hires_params_config,
+                pp.upscaler_model_path,
+                pp.upscaler_increases_size,
+                pp.upscaler_tile_size, pp.upscaler_tile_overlap,
+                pp.hires_steps, pp.hires_params_config,
                 self.task_name,
                 generators[0],  # pipe_params_config["generator"][0], # no generator
                 hires_pipe,
+                pp.disable_progress_bar,
             )
 
-        logger.info(f"Seeds: {seeds}")
+        if self.task_name not in ["txt2img", "inpaint", "img2img"]:
+            images = [control_image] + images
+            valid_seeds = [0] + seeds
+        else:
+            valid_seeds = seeds
+
+        logger.info(f"Seeds: {valid_seeds}")
 
         # Show images if loop
-        if display_images:
+        if pp.display_images:
             mediapy.show_images(images)
-            if loop_generation > 1:
+            if pp.loop_generation > 1:
                 time.sleep(0.5)
 
         # List images and save
         image_list = []
         image_metadata = []
 
-        valid_seeds = [0] + seeds if self.task_name not in ["txt2img", "inpaint", "img2img"] else seeds
         for image_, seed_ in zip(images, valid_seeds):
 
-            metadata[7] = seed_
-            image_generation_data = get_string_metadata(metadata)
+            pp.metadata[7] = seed_
+            image_generation_data = get_string_metadata(pp.metadata)
 
             image_path = "not saved in storage"
-            if save_generated_images:
-                sfx = self.filename_pattern
+            if pp.save_generated_images:
+                sfx = pp.filename_pattern
                 if "_STABLEPYSEEDKEY_" in sfx:
                     sfx = sfx.replace("_STABLEPYSEEDKEY_", str(seed_))
                 image_path = save_pil_image_with_metadata(
-                    image_, image_storage_location, image_generation_data, sfx
+                    image_, pp.image_storage_location, image_generation_data, sfx
                 )
 
             image_list.append(image_path)
@@ -2667,60 +2696,17 @@ class Model_Diffusers(PreviewGenerator):
 
     def start_work(
         self,
-        num_images,
-        seed,
-        adetailer_A,
-        adetailer_A_params,
-        adetailer_B,
-        adetailer_B_params,
-        upscaler_model_path,
-        upscaler_increases_size,
-        esrgan_tile,
-        esrgan_tile_overlap,
-        hires_steps,
-        loop_generation,
-        display_images,
-        save_generated_images,
-        image_storage_location,
-        generator_in_cpu,
-        hires_before_adetailer,
-        hires_after_adetailer,
-        retain_compel_previous_load,
         control_image,
         pipe_params_config,
-        post_processing_params,
-        hires_params_config,
+        detailfix_pipe,
         hires_pipe,
-        metadata,
+        pp,
         kwargs,
     ):
-        for i in range(loop_generation):
+        for i in range(pp.loop_generation):
             # number seed
-            if seed == -1:
-                seeds = [random.randint(0, 2147483647)]
-            else:
-                seeds = [seed]
-
-            seeds = [seeds[0] + i for i in range(num_images)]
-
-            # generators
-            generators = []  # List to store all the generators
-            for calculate_seed in seeds:
-                if generator_in_cpu or self.device.type == "cpu":
-                    generator = torch.Generator().manual_seed(calculate_seed)
-                else:
-                    try:
-                        generator = torch.Generator("cuda").manual_seed(calculate_seed)
-                    except Exception as e:
-                        logger.debug(str(e))
-                        logger.warning("Generator in CPU")
-                        generator = torch.Generator().manual_seed(calculate_seed)
-
-                generators.append(generator)
-
-            # fix img2img bug need concat tensor prompts with generator same number (only in batch inference)
-            pipe_params_config["generator"] = generators if self.task_name != "img2img" else generators[0]  # no list
-            seeds = seeds if self.task_name != "img2img" else [seeds[0]] * num_images
+            seeds, generators = get_seeds(pp, self.task_name, self.device)
+            pipe_params_config["generator"] = generators
 
             if self.class_name == FLUX:
                 if os.getenv("SPACES_ZERO_GPU"):
@@ -2763,91 +2749,33 @@ class Model_Diffusers(PreviewGenerator):
                     raise ValueError(e)
 
             images, image_list, image_metadata = self.post_processing(
-                adetailer_A,
-                adetailer_A_params,
-                adetailer_B,
-                adetailer_B_params,
-                upscaler_model_path,
-                upscaler_increases_size,
-                esrgan_tile,
-                esrgan_tile_overlap,
-                hires_steps,
-                loop_generation,
-                display_images,
-                save_generated_images,
-                image_storage_location,
-                hires_before_adetailer,
-                hires_after_adetailer,
                 control_image,
-                post_processing_params,
-                hires_params_config,
+                detailfix_pipe,
                 hires_pipe,
                 seeds,
                 generators,
                 images,
-                metadata,
+                pp,
             )
 
-        if hasattr(self, "compel") and not retain_compel_previous_load:
+        if hasattr(self, "compel") and not pp.retain_compel_previous_load:
             del self.compel
         release_resources()
         return images, [seeds, image_list, image_metadata]
 
     def start_stream(
         self,
-        num_images,
-        seed,
-        adetailer_A,
-        adetailer_A_params,
-        adetailer_B,
-        adetailer_B_params,
-        upscaler_model_path,
-        upscaler_increases_size,
-        esrgan_tile,
-        esrgan_tile_overlap,
-        hires_steps,
-        loop_generation,
-        display_images,
-        save_generated_images,
-        image_storage_location,
-        generator_in_cpu,
-        hires_before_adetailer,
-        hires_after_adetailer,
-        retain_compel_previous_load,
         control_image,
         pipe_params_config,
-        post_processing_params,
-        hires_params_config,
+        detailfix_pipe,
         hires_pipe,
-        metadata,
+        pp,
         kwargs,
     ):
-        for i in range(loop_generation):
+        for i in range(pp.loop_generation):
             # number seed
-            if seed == -1:
-                seeds = [random.randint(0, 2147483647)]
-            else:
-                seeds = [seed]
-
-            seeds = [seeds[0] + i for i in range(num_images)]
-
-            generators = []  # List to store all the generators
-            for calculate_seed in seeds:
-                if generator_in_cpu or self.device.type == "cpu":
-                    generator = torch.Generator().manual_seed(calculate_seed)
-                else:
-                    try:
-                        generator = torch.Generator("cuda").manual_seed(calculate_seed)
-                    except Exception as e:
-                        logger.debug(str(e))
-                        logger.warning("Generator in CPU")
-                        generator = torch.Generator().manual_seed(calculate_seed)
-
-                generators.append(generator)
-
-            # fix img2img bug need concat tensor prompts with generator same number (only in batch inference)
-            pipe_params_config["generator"] = generators if self.task_name != "img2img" else generators[0]  # no list
-            seeds = seeds if self.task_name != "img2img" else [seeds[0]] * num_images
+            seeds, generators = get_seeds(pp, self.task_name, self.device)
+            pipe_params_config["generator"] = generators
 
             if self.class_name == FLUX:
                 if os.getenv("SPACES_ZERO_GPU"):
@@ -2862,7 +2790,7 @@ class Model_Diffusers(PreviewGenerator):
                 release_resources()
                 pipe_params_config["output_type"] = "latent"
                 # self.pipe.__class__._execution_device = property(_execution_device)
-                self.metadata = metadata
+                self.metadata = pp.metadata
 
             validate_and_update_params(self.pipe.__class__, kwargs, pipe_params_config)
 
@@ -2901,32 +2829,16 @@ class Model_Diffusers(PreviewGenerator):
                     raise ValueError(e)
 
             images, image_list, image_metadata = self.post_processing(
-                adetailer_A,
-                adetailer_A_params,
-                adetailer_B,
-                adetailer_B_params,
-                upscaler_model_path,
-                upscaler_increases_size,
-                esrgan_tile,
-                esrgan_tile_overlap,
-                hires_steps,
-                loop_generation,
-                display_images,
-                save_generated_images,
-                image_storage_location,
-                hires_before_adetailer,
-                hires_after_adetailer,
                 control_image,
-                post_processing_params,
-                hires_params_config,
+                detailfix_pipe,
                 hires_pipe,
                 seeds,
                 generators,
                 images,
-                metadata,
+                pp,
             )
 
-        if hasattr(self, "compel") and not retain_compel_previous_load:
+        if hasattr(self, "compel") and not pp.retain_compel_previous_load:
             del self.compel
         release_resources()
 

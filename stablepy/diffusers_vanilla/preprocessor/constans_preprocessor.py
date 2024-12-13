@@ -19,7 +19,7 @@ EXTRA_AUX_TASKS = ["Recolor", "Blur"]
 
 T2I_PREPROCESSOR_NAME = {
     "sdxl_canny_t2i": "Canny",
-    "sdxl_openpose_t2i": "Openpose",
+    "sdxl_openpose_t2i": "Openpose core",
     "sdxl_sketch_t2i": "PidiNet",
     "sdxl_depth-midas_t2i": "Midas",
     "sdxl_lineart_t2i": "Lineart",

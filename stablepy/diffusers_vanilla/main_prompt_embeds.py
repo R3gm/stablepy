@@ -217,19 +217,14 @@ class Promt_Embedder_SDXL(Prompt_Embedder_Base):
 
     def compel_processor(self, prompt, negative_prompt, pipe, clip_skip, syntax_weights, compel):
 
-        if compel is None or clip_skip != self.last_clip_skip:
+        if compel is None:
             compel = Compel(
                 tokenizer=[pipe.tokenizer, pipe.tokenizer_2],
                 text_encoder=[pipe.text_encoder, pipe.text_encoder_2],
                 requires_pooled=[False, True],
                 truncate_long_prompts=False,
-                returned_embeddings_type=(
-                    ReturnedEmbeddingsType.PENULTIMATE_HIDDEN_STATES_NON_NORMALIZED
-                    if clip_skip
-                    else ReturnedEmbeddingsType.LAST_HIDDEN_STATES_NORMALIZED
-                ),
+                returned_embeddings_type=ReturnedEmbeddingsType.PENULTIMATE_HIDDEN_STATES_NON_NORMALIZED,
             )
-            self.last_clip_skip = clip_skip
 
         # Syntax weights
         # pipe.to(device)

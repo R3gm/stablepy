@@ -15,6 +15,46 @@ import hashlib
 from collections import OrderedDict
 import gc
 import inspect
+import random
+
+
+class CURRENT_TASK_PARAMS:
+    def __init__(self, **kwargs):
+        if kwargs:
+            self.set_params(**kwargs)
+
+    def set_params(self, **kwargs):
+        for name_param, value_param in kwargs.items():
+            setattr(self, name_param, value_param)
+
+
+def get_seeds(pp, task_name, device):
+    # number seed
+    if pp.seed == -1:
+        seeds = [random.randint(0, 2147483647)]
+    else:
+        seeds = [pp.seed]
+
+    seeds = [seeds[0] + i for i in range(pp.num_images)]
+
+    generators = []  # List to store all the generators
+    for calculate_seed in seeds:
+        if pp.generator_in_cpu or device.type == "cpu":
+            generator = torch.Generator().manual_seed(calculate_seed)
+        else:
+            try:
+                generator = torch.Generator("cuda").manual_seed(calculate_seed)
+            except Exception as e:
+                logger.debug(str(e))
+                logger.warning("Generator in CPU")
+                generator = torch.Generator().manual_seed(calculate_seed)
+
+        generators.append(generator)
+
+    # fix img2img bug need concat tensor prompts with generator same number (only in batch inference)
+    generators = generators if task_name != "img2img" else generators[0]  # no list
+    seeds = seeds if task_name != "img2img" else [seeds[0]] * pp.num_images
+    return seeds, generators
 
 
 def generate_lora_tags(names_list, scales_list):
@@ -320,6 +360,12 @@ def latents_to_rgb(latents, latent_resize, vae_decoding, pipe):
     return resized_image
 
 
+DEPRECATED_PARAMS = {
+    "esrgan_tile": "upscaler_tile_size",
+    "esrgan_tile_overlap": "upscaler_tile_overlap",
+}
+
+
 def validate_and_update_params(cls, kwargs, config):
     """
     Validates kwargs against the parameters of a given class's `__call__` method
@@ -337,6 +383,11 @@ def validate_and_update_params(cls, kwargs, config):
             if name_param in valid_params:
                 config.update({name_param: value_param})
                 logger.debug(f"Parameter added: '{name_param}': {value_param}.")
+            elif name_param in DEPRECATED_PARAMS:
+                logger.warning(
+                    f"The parameter '{name_param}' is deprecated. Please "
+                    f"use '{DEPRECATED_PARAMS[name_param]}' instead."
+                )
             else:
                 logger.error(
                     f"The pipeline '{cls.__name__}' had an invalid parameter"
