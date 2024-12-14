@@ -39,6 +39,7 @@ from .constants import (
     IP_ADAPTER_MODELS,
     REPO_IMAGE_ENCODER,
     FLASH_AUTO_LOAD_SAMPLER,
+    SDXL_CN_UNION_PROMAX_MODES,
 )
 from diffusers.utils import load_image
 from .prompt_weights import add_comma_after_pattern_ti
@@ -285,7 +286,7 @@ class Model_Diffusers(PreviewGenerator):
             if task_name == "txt2img":
                 from diffusers import FluxPipeline
                 self.pipe = FluxPipeline(**model_components)
-            elif task_name == "inpaint":
+            elif task_name in ["repaint", "inpaint"]:
                 from .extra_pipe.flux.pipeline_flux_inpaint import FluxInpaintPipeline
                 self.pipe = FluxInpaintPipeline(**model_components)
             elif task_name == "img2img":
@@ -335,6 +336,9 @@ class Model_Diffusers(PreviewGenerator):
                     )
                 tk = "controlnet"
 
+                if task_name == "repaint":
+                    tk = "inpaint"
+
         elif class_name == SDXL:
             model_components["text_encoder_2"] = self.pipe.text_encoder_2
             model_components["tokenizer_2"] = self.pipe.tokenizer_2
@@ -343,6 +347,9 @@ class Model_Diffusers(PreviewGenerator):
                 if verbose_info:
                     logger.info(f"Task model: {model_id}")
                 if "t2i" not in task_name:
+
+                    tk = "controlnet"
+
                     if os.path.exists(model_id):
                         model_components["controlnet"] = load_cn_diffusers(
                             model_id,
@@ -350,10 +357,21 @@ class Model_Diffusers(PreviewGenerator):
                             torch.float16,
                         ).to(self.device)
                     else:
-                        model_components["controlnet"] = ControlNetModel.from_pretrained(
+
+                        cls_controlnet = ControlNetModel
+
+                        if all(kw in model_id.lower() for kw in ["union", "promax"]):
+                            from .extra_pipe.sdxl.controlnet_union import ControlNetUnionModel
+                            cls_controlnet = ControlNetUnionModel
+                            tk = "controlnet_union+"
+
+                        model_components["controlnet"] = cls_controlnet.from_pretrained(
                             model_id, torch_dtype=torch.float16, variant=check_variant_file(model_id, "fp16")
                         ).to(self.device)
-                    tk = "controlnet"
+
+                        if task_name == "repaint":
+                            tk += "_inpaint"
+
                 else:
                     model_components["adapter"] = T2IAdapter.from_pretrained(
                         model_id,
@@ -369,10 +387,11 @@ class Model_Diffusers(PreviewGenerator):
             if (
                 tk == "adapter" or
                 task_name == "shuffle" or
-                (task_name in ["inpaint", "img2img"] and "XL" not in class_name)
+                (tk not in CLASS_PAG_DIFFUSERS_TASK[class_name])
+                # (task_name in ["inpaint", "img2img"] and "XL" not in class_name)
             ):
                 logger.warning(
-                    f"PAG is not enabled for {class_name} with {task_name}."
+                    f"PAG is not enabled for {class_name}-{tk} with {task_name}."
                 )
                 enable_pag = False
 
@@ -1930,7 +1949,7 @@ class Model_Diffusers(PreviewGenerator):
         control_image = None
 
         # Run preprocess
-        if self.task_name == "inpaint":
+        if self.task_name in ["inpaint", "repaint"]:
             # Get mask for Inpaint
             control_image, control_mask, tensor_control_image = self.process_inpaint(
                 image=array_rgb,
@@ -1981,7 +2000,7 @@ class Model_Diffusers(PreviewGenerator):
             pipe_params_config["prompt_embeds"] = prompt_emb
             pipe_params_config["negative_prompt_embeds"] = negative_prompt_emb
 
-            if self.task_name == "inpaint":
+            if self.task_name in ["inpaint", "repaint"]:
                 pipe_params_config["strength"] = strength
                 pipe_params_config["mask_image"] = control_mask
                 pipe_params_config["control_image"] = tensor_control_image
@@ -2013,15 +2032,41 @@ class Model_Diffusers(PreviewGenerator):
                 pipe_params_config["height"] = control_image.size[1]
                 pipe_params_config["width"] = control_image.size[0]
             elif self.task_name not in ["txt2img", "inpaint", "img2img"]:
-                if "t2i" not in self.task_name:
+
+                if "t2i" in self.task_name:
+                    pipe_params_config["adapter_conditioning_scale"] = float(t2i_adapter_conditioning_scale)
+                    pipe_params_config["adapter_conditioning_factor"] = float(t2i_adapter_conditioning_factor)
+                else:
                     pipe_params_config[
                         "controlnet_conditioning_scale"
                     ] = float(controlnet_conditioning_scale)
                     pipe_params_config["control_guidance_start"] = float(control_guidance_start)
                     pipe_params_config["control_guidance_end"] = float(control_guidance_end)
-                else:
-                    pipe_params_config["adapter_conditioning_scale"] = float(t2i_adapter_conditioning_scale)
-                    pipe_params_config["adapter_conditioning_factor"] = float(t2i_adapter_conditioning_factor)
+
+                    if self.task_name == "repaint":
+                        pipe_params_config["strength"] = strength
+                        pipe_params_config["mask_image"] = control_mask
+                        pipe_params_config["height"] = control_image.size[1]
+                        pipe_params_config["width"] = control_image.size[0]
+
+                    if "XLControlNetUnion" in self.pipe.__class__.__name__:
+                        pipe_params_config["control_mode"] = SDXL_CN_UNION_PROMAX_MODES[self.task_name]
+
+                    if self.pipe.__class__.__name__ == "StableDiffusionXLControlNetUnionPipeline":
+                        pipe_params_config["control_image"] = pipe_params_config.pop('image')
+                    elif self.pipe.__class__.__name__ == "StableDiffusionXLControlNetUnionInpaintPipeline":
+                        def get_union_cn_img(image_cn, mask_cn):
+                            controlnet_img = image_cn.copy()
+                            controlnet_img_np = np.array(controlnet_img)
+                            mask_np = np.array(mask_cn)
+                            controlnet_img_np[mask_np > 0] = 0
+                            return Image.fromarray(controlnet_img_np)
+                        pipe_params_config["control_image"] = get_union_cn_img(control_image, control_mask)
+                    elif self.pipe.__class__.__name__ == "StableDiffusionXLControlNetInpaintPipeline":
+                        # self.preprocessor.load("Canny", self.image_preprocessor_cuda_active)
+                        # pipe_params_config["control_image"] = self.preprocessor(control_image)
+                        pipe_params_config["control_image"] = control_image
+
             elif self.task_name == "img2img":
                 pipe_params_config["strength"] = strength
 
@@ -2652,7 +2697,7 @@ class Model_Diffusers(PreviewGenerator):
                 pp.disable_progress_bar,
             )
 
-        if self.task_name not in ["txt2img", "inpaint", "img2img"]:
+        if self.task_name not in ["txt2img", "inpaint", "img2img", "repaint"]:
             images = [control_image] + images
             valid_seeds = [0] + seeds
         else:

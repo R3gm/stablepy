@@ -39,16 +39,22 @@ from diffusers import (
     StableDiffusionXLAdapterPipeline,
     StableDiffusionXLPipeline,
     StableDiffusionXLControlNetPipeline,
+    StableDiffusionXLControlNetInpaintPipeline,
+    StableDiffusionXLControlNetImg2ImgPipeline,
+    StableDiffusionControlNetImg2ImgPipeline,
     StableDiffusionPAGPipeline,
-    # StableDiffusionControlNetPAGInpaintPipeline,
+    StableDiffusionControlNetPAGInpaintPipeline,
     StableDiffusionControlNetPAGPipeline,
     # StableDiffusionControlNetImg2ImgPAGPipeline,
     StableDiffusionXLPAGPipeline,
     StableDiffusionXLPAGInpaintPipeline,
     StableDiffusionXLControlNetPAGPipeline,
     # StableDiffusionXLAdapterPAGPipeline,
-    # StableDiffusionXLControlNetImg2ImgPAGPipeline,
+    # StableDiffusionXLControlNetPAGInpaintPipeline,
+    StableDiffusionXLControlNetPAGImg2ImgPipeline,
 )
+from .extra_pipe.sdxl.pipeline_controlnet_union_inpaint_sd_xl import StableDiffusionXLControlNetUnionInpaintPipeline
+from .extra_pipe.sdxl.pipeline_controlnet_union_sd_xl import StableDiffusionXLControlNetUnionPipeline
 
 SD15 = "StableDiffusionPipeline"
 SDXL = "StableDiffusionXLPipeline"
@@ -57,32 +63,40 @@ FLUX = "FluxPipeline"
 CLASS_DIFFUSERS_TASK = {
     SD15: {
         "base": StableDiffusionPipeline,
-        "inpaint": StableDiffusionControlNetInpaintPipeline,
+        "inpaint": StableDiffusionControlNetInpaintPipeline,  # default cn
         "controlnet": StableDiffusionControlNetPipeline,
-        # "controlnet_img2img": StableDiffusionControlNetImg2ImgPipeline,
+        "controlnet_img2img": StableDiffusionControlNetImg2ImgPipeline,
+        "controlnet_inpaint": StableDiffusionControlNetInpaintPipeline,
     },
     SDXL: {
         "base": StableDiffusionXLPipeline,
         "inpaint": StableDiffusionXLInpaintPipeline,
         "controlnet": StableDiffusionXLControlNetPipeline,
         "adapter": StableDiffusionXLAdapterPipeline,
-        # "controlnet_img2img": StableDiffusionXLControlNetImg2ImgPipeline,
+        "controlnet_img2img": StableDiffusionXLControlNetImg2ImgPipeline,
+        "controlnet_inpaint": StableDiffusionXLControlNetInpaintPipeline,
+        "controlnet_union+": StableDiffusionXLControlNetUnionPipeline,
+        "controlnet_union+_inpaint": StableDiffusionXLControlNetUnionInpaintPipeline,
     },
 }
 
 CLASS_PAG_DIFFUSERS_TASK = {
     SD15: {
         "base": StableDiffusionPAGPipeline,
-        "inpaint": StableDiffusionControlNetInpaintPipeline,
+        "inpaint": StableDiffusionControlNetPAGInpaintPipeline,  # default cn
         "controlnet": StableDiffusionControlNetPAGPipeline,
         # "controlnet_img2img": StableDiffusionControlNetImg2ImgPAGPipeline,
+        "controlnet_inpaint": StableDiffusionControlNetPAGInpaintPipeline,
     },
     SDXL: {
         "base": StableDiffusionXLPAGPipeline,
         "inpaint": StableDiffusionXLPAGInpaintPipeline,
         "controlnet": StableDiffusionXLControlNetPAGPipeline,
         # "adapter": StableDiffusionXLAdapterPAGPipeline,
-        # "controlnet_img2img": StableDiffusionXLControlNetImg2ImgPAGPipeline,
+        "controlnet_img2img": StableDiffusionXLControlNetPAGImg2ImgPipeline,
+        # "controlnet_inpaint": StableDiffusionXLControlNetPAGInpaintPipeline,
+        # "controlnet_union+": StableDiffusionXLControlNetUnionPAGPipeline,
+        # "controlnet_union+_inpaint": StableDiffusionXLControlNetUnionPAGInpaintPipeline,
     },
 }
 
@@ -110,6 +124,7 @@ CONTROLNET_MODEL_IDS = {
     "pattern": ["monster-labs/control_v1p_sd15_qrcode_monster", "r3gm/control_v1p_sdxl_qrcode_monster_fp16"],
     "tile": ["lllyasviel/control_v11f1e_sd15_tile", "r3gm/controlnet-tile-sdxl-1.0-fp16"],  # "sdxl_tile_realistic": "Yakonrus/SDXL_Controlnet_Tile_Realistic_v2",
     "recolor": ["latentcat/control_v1p_sd15_brightness", "r3gm/controlnet-recolor-sdxl-fp16"],
+    "repaint": ["lllyasviel/control_v11p_sd15_inpaint", "brad-twinkl/controlnet-union-sdxl-1.0-promax"]
     # "sdxl_depth-zoe_t2i": "TencentARC/t2i-adapter-depth-zoe-sdxl-1.0",
     # "sdxl_recolor_t2i": "TencentARC/t2i-adapter-recolor-sdxl-1.0",
 }
@@ -129,6 +144,24 @@ FLUX_CN_UNION_MODES = {
     # "ip2p": "7",
     "tile": [1, 3, 6],
     "recolor": 5,
+}
+
+SDXL_CN_UNION_PROMAX_MODES = {
+    "openpose": 0,
+    "canny": 3,
+    "mlsd": 3,
+    "scribble": 2,
+    "softedge": 2,
+    "segmentation": 5,
+    "depth": 1,
+    "normalbae": 4,
+    "lineart": 3,
+    "lineart_anime": 3,
+    # "shuffle": 7,
+    # "ip2p": 7,
+    "tile": 6,
+    "recolor": 6,
+    "repaint": 7,
 }
 
 VALID_TASKS = list(CONTROLNET_MODEL_IDS.keys())
