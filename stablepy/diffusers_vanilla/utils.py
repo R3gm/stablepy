@@ -210,6 +210,8 @@ def checkpoint_model_type(checkpoint_path):
 
     # model_type = "v1"
     model_type = "sd1.5"
+    scheduler_config = {}
+    sampling_prediction_type = None
 
     if key_name_v2_1 in checkpoint and checkpoint[key_name_v2_1].shape[-1] == 1024:
         # model_type = "v2"
@@ -217,6 +219,24 @@ def checkpoint_model_type(checkpoint_path):
     elif key_name_sd_xl_base in checkpoint:
         # only base xl has two text embedders
         model_type = "sdxl"
+
+        if 'edm_mean' in checkpoint and 'edm_std' in checkpoint:  # Playground V2.5
+            scheduler_config["sigma_data"] = 0.5
+            scheduler_config["sigma_max"] = 80.0
+            scheduler_config["sigma_min"] = 0.002
+            sampling_prediction_type = "EDM"
+        elif "edm_vpred.sigma_max" in checkpoint:
+            scheduler_config["sigma_max"] = float(checkpoint["edm_vpred.sigma_max"].item())
+            if "edm_vpred.sigma_min" in checkpoint:
+                scheduler_config["sigma_min"] = float(checkpoint["edm_vpred.sigma_min"].item())
+            sampling_prediction_type = "V_PREDICTION_EDM"
+        elif "v_pred" in checkpoint:
+            scheduler_config["prediction_type"] = "v_prediction"
+            scheduler_config["rescale_betas_zero_snr"] = True
+            sampling_prediction_type = "V_PREDICTION"
+        else:
+            sampling_prediction_type = "EPS"
+
     elif key_name_sd_xl_refiner in checkpoint:
         # only refiner xl has embedder and one text embedders
         model_type = "refiner"
@@ -230,7 +250,7 @@ def checkpoint_model_type(checkpoint_path):
 
     del checkpoint
 
-    return model_type
+    return model_type, sampling_prediction_type, scheduler_config
 
 
 def load_cn_diffusers(model_path, base_config, torch_dtype):

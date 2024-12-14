@@ -477,10 +477,12 @@ class Model_Diffusers(PreviewGenerator):
             if os.path.isfile(base_model_id):  # exists or not same # if os.path.exists(base_model_id):
 
                 if base_model_id.endswith(".safetensors"):
-                    model_type = checkpoint_model_type(base_model_id)
+                    model_type, sampling_type, scheduler_config = checkpoint_model_type(base_model_id)
                     logger.debug(f"Infered model type is {model_type}")
                 else:
                     model_type = "sd1.5"
+                    scheduler_config = None
+                    sampling_type = "EPS"
 
                 if model_type == "sdxl":
                     if vae_model is None:
@@ -520,6 +522,13 @@ class Model_Diffusers(PreviewGenerator):
                     class_name = FLUX
                 else:
                     raise ValueError(f"Model type {model_type} not supported.")
+
+                if scheduler_config:
+                    logger.info(
+                        f"Checkpoint schedule prediction type: {sampling_type}"
+                    )
+                    self.pipe.scheduler.register_to_config(**scheduler_config)
+
             else:
                 try:
                     file_config = hf_hub_download(
