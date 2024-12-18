@@ -33,4 +33,9 @@ from .diffusers_vanilla.preprocessor.constans_preprocessor import (
 )
 from .diffusers_vanilla.preprocessor.main_preprocessor import Preprocessor
 from .upscalers.main_upscaler import BUILTIN_UPSCALERS, load_upscaler_model
-from .face_restoration.main_face_restoration import FACE_RESTORATION_MODELS, batch_process_face_restoration
+from .face_restoration.main_face_restoration import (
+    FACE_RESTORATION_MODELS,
+    batch_process_face_restoration,
+    load_face_restoration_model,
+    process_face_restoration,
+)

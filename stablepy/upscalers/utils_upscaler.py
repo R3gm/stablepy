@@ -11,7 +11,6 @@ import spandrel
 import torch
 import torch.nn
 import math
-from torch.cuda.amp import autocast
 
 from stablepy.logging.logging_setup import logger
 
@@ -236,8 +235,7 @@ def upscale_pil_patch(model, img: Image.Image) -> Image.Image:
     with torch.inference_mode():
         tensor = pil_image_to_torch_bgr(img).unsqueeze(0)  # add batch dimension
         tensor = tensor.to(device=param.device, dtype=param.dtype)
-        with autocast(enabled=False):
-            return torch_bgr_to_pil_image(model(tensor))
+        return torch_bgr_to_pil_image(model(tensor))
 
 
 def upscale_with_model(

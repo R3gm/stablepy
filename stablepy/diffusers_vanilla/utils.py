@@ -213,6 +213,8 @@ def checkpoint_model_type(checkpoint_path):
     scheduler_config = {}
     sampling_prediction_type = None
 
+    has_baked_vae = any(k.startswith("first_stage_model.") for k in checkpoint.keys())
+
     if key_name_v2_1 in checkpoint and checkpoint[key_name_v2_1].shape[-1] == 1024:
         # model_type = "v2"
         model_type = "sd2.1"
@@ -250,7 +252,7 @@ def checkpoint_model_type(checkpoint_path):
 
     del checkpoint
 
-    return model_type, sampling_prediction_type, scheduler_config
+    return model_type, sampling_prediction_type, scheduler_config, has_baked_vae
 
 
 def load_cn_diffusers(model_path, base_config, torch_dtype):

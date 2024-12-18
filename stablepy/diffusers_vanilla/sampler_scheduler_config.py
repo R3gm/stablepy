@@ -65,7 +65,13 @@ def configure_scheduler(pipe, schedule_type, schedule_prediction_type):
         )
 
 
-def verify_schedule_integrity(model_scheduler):
+def verify_schedule_integrity(model_scheduler, base_model_id):
+    # noobai v-pred repo id
+    if base_model_id.lower().startswith("laxhar/noobai-xl-vpred-"):
+        model_scheduler.register_to_config(
+            prediction_type="v_prediction",
+        )
+
     if (
         hasattr(model_scheduler.config, "prediction_type")
         and model_scheduler.config.prediction_type == "v_prediction"

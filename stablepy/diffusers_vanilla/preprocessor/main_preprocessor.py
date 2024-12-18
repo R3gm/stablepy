@@ -1,6 +1,8 @@
 import numpy as np
-from ..utils import release_resources
 import PIL
+import torch
+
+from ..utils import release_resources
 from .image_utils import (
     HWC3,
     resize_image,
@@ -129,7 +131,7 @@ class Preprocessor:
 
     def to(self, device):
         if hasattr(self.model, "to"):
-            self.model.to("cuda")
+            self.model.to(device)
 
     def load(self, name: str, use_cuda: bool = False) -> None:
         """Load the specified preprocessor model."""

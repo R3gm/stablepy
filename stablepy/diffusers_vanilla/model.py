@@ -18,6 +18,7 @@ from diffusers import (
     AutoPipelineForImage2Image,
     FluxTransformer2DModel,
 )
+from accelerate import init_on_device
 from huggingface_hub import hf_hub_download
 import torch
 import random
@@ -322,6 +323,8 @@ class Model_Diffusers(PreviewGenerator):
             model_components["requires_safety_checker"] = self.pipe.config.requires_safety_checker
 
             if task_name not in ["txt2img", "img2img"]:
+                release_resources()
+
                 if verbose_info:
                     logger.info(f"ControlNet model: {model_id}")
                 if os.path.exists(model_id):
@@ -346,16 +349,32 @@ class Model_Diffusers(PreviewGenerator):
             if task_name not in ["txt2img", "inpaint", "img2img"]:
                 if verbose_info:
                     logger.info(f"Task model: {model_id}")
+                release_resources()
+
+                # with init_on_device(self.device):
+
                 if "t2i" not in task_name:
 
                     tk = "controlnet"
 
                     if os.path.exists(model_id):
-                        model_components["controlnet"] = load_cn_diffusers(
-                            model_id,
-                            "r3gm/controlnet-lineart-anime-sdxl-fp16",
-                            torch.float16,
-                        ).to(self.device)
+                        if (
+                            hasattr(self.pipe, "controlnet")
+                            and hasattr(self.pipe.controlnet, "config")
+                            and self.pipe.controlnet.config._name_or_path == model_id
+                        ):
+                            model_components["controlnet"] = self.pipe.controlnet
+                        else:
+                            if hasattr(self.pipe, "controlnet"):
+                                # self.pipe.controlnet.to_empty(device=self.device)
+                                self.pipe.__delattr__("controlnet")
+                                self.pipe.controlnet = None
+                                release_resources()
+                            model_components["controlnet"] = load_cn_diffusers(
+                                model_id,
+                                "r3gm/controlnet-lineart-anime-sdxl-fp16",
+                                torch.float16,
+                            ).to(self.device)
                     else:
 
                         cls_controlnet = ControlNetModel
@@ -365,9 +384,22 @@ class Model_Diffusers(PreviewGenerator):
                             cls_controlnet = ControlNetUnionModel
                             tk = "controlnet_union+"
 
-                        model_components["controlnet"] = cls_controlnet.from_pretrained(
-                            model_id, torch_dtype=torch.float16, variant=check_variant_file(model_id, "fp16")
-                        ).to(self.device)
+                        if (
+                            hasattr(self.pipe, "controlnet")
+                            and hasattr(self.pipe.controlnet, "config")
+                            and self.pipe.controlnet.config._name_or_path == model_id
+                            and self.pipe.controlnet.__class__.__name__ == cls_controlnet.__name__
+                        ):
+                            model_components["controlnet"] = self.pipe.controlnet
+                        else:
+                            if hasattr(self.pipe, "controlnet"):
+                                # self.pipe.controlnet.to_empty(device=self.device)
+                                self.pipe.__delattr__("controlnet")
+                                self.pipe.controlnet = None
+                                release_resources()
+                            model_components["controlnet"] = cls_controlnet.from_pretrained(
+                                model_id, torch_dtype=torch.float16, variant=check_variant_file(model_id, "fp16")
+                            ).to(self.device)
 
                         if task_name == "repaint":
                             tk += "_inpaint"
@@ -396,6 +428,7 @@ class Model_Diffusers(PreviewGenerator):
                 enable_pag = False
 
         # Load Pipeline
+        # with init_on_device(self.device):
         if enable_pag:
             model_components["pag_applied_layers"] = "mid"
             self.pipe = CLASS_PAG_DIFFUSERS_TASK[class_name][tk](**model_components).to(self.device)
@@ -460,7 +493,15 @@ class Model_Diffusers(PreviewGenerator):
             class_name = self.class_name
         else:
             # Unload previous model and stuffs
+            if hasattr(self, "pipe") and self.pipe is not None:
+                for k_com, v_com in self.pipe.components.items():
+                    if hasattr(v_com, "to_empty"):
+                        v_com.to_empty(device=self.device)
+                        self.pipe.__delattr__(k_com)
+                        self.pipe.k_com = None
+
             self.pipe = None
+            # release_resources()
             self.task_name = ""
             self.model_memory = {}
             self.lora_memory = [None] * self.num_loras
@@ -477,7 +518,7 @@ class Model_Diffusers(PreviewGenerator):
             if os.path.isfile(base_model_id):  # exists or not same # if os.path.exists(base_model_id):
 
                 if base_model_id.endswith(".safetensors"):
-                    model_type, sampling_type, scheduler_config = checkpoint_model_type(base_model_id)
+                    model_type, sampling_type, scheduler_config, has_baked_vae = checkpoint_model_type(base_model_id)
                     logger.debug(f"Infered model type is {model_type}")
                 else:
                     model_type = "sd1.5"
@@ -496,10 +537,23 @@ class Model_Diffusers(PreviewGenerator):
                     )
                     class_name = SDXL
                 elif model_type == "sd1.5":
+                    default_components = {}
+                    if not has_baked_vae:
+                        sd_vae = "stabilityai/sd-vae-ft-ema"
+                        logger.info(
+                            "The checkpoint doesn't include a baked VAE, "
+                            f"so '{sd_vae}' is being loaded instead."
+                        )
+                        default_components["vae"] = AutoencoderKL.from_pretrained(
+                            sd_vae, torch_dtype=self.type_model_precision
+                        )
+
                     self.pipe = StableDiffusionPipeline.from_single_file(
                         base_model_id,
                         torch_dtype=self.type_model_precision,
+                        **default_components,
                     )
+
                     class_name = SD15
                 elif model_type in ["flux-dev", "flux-schnell"]:
 
@@ -660,7 +714,7 @@ class Model_Diffusers(PreviewGenerator):
             # Define base scheduler
             scheduler_copy = copy.deepcopy(self.pipe.scheduler)
             self.default_scheduler = (
-                verify_schedule_integrity(scheduler_copy)
+                verify_schedule_integrity(scheduler_copy, base_model_id)
                 if self.class_name == SDXL
                 else scheduler_copy
             )
@@ -1763,7 +1817,7 @@ class Model_Diffusers(PreviewGenerator):
             self.class_name == FLUX
             and (self.pipe.text_encoder is None or self.pipe.transformer is None)
         ):
-            logger.info("Realoading flux pipeline")
+            logger.info("Reloading flux pipeline")
             original_device = self.device
             self.device = torch.device("cpu")
             self.load_pipe(
