@@ -185,7 +185,7 @@ class Model_Diffusers(PreviewGenerator):
         task_name: str = "txt2img",
         vae_model=None,
         type_model_precision=torch.float16,
-        retain_task_model_in_cache=True,
+        retain_task_model_in_cache=False,
         device=None,
         controlnet_model="Automatic",
         env_components=None,
@@ -369,6 +369,7 @@ class Model_Diffusers(PreviewGenerator):
                                 # self.pipe.controlnet.to_empty(device=self.device)
                                 self.pipe.__delattr__("controlnet")
                                 self.pipe.controlnet = None
+                                self.model_memory = {}
                                 release_resources()
                             model_components["controlnet"] = load_cn_diffusers(
                                 model_id,
@@ -396,6 +397,7 @@ class Model_Diffusers(PreviewGenerator):
                                 # self.pipe.controlnet.to_empty(device=self.device)
                                 self.pipe.__delattr__("controlnet")
                                 self.pipe.controlnet = None
+                                self.model_memory = {}
                                 release_resources()
                             model_components["controlnet"] = cls_controlnet.from_pretrained(
                                 model_id, torch_dtype=torch.float16, variant=check_variant_file(model_id, "fp16")
@@ -449,7 +451,7 @@ class Model_Diffusers(PreviewGenerator):
         vae_model=None,
         type_model_precision=torch.float16,
         reload=False,
-        retain_task_model_in_cache=True,
+        retain_task_model_in_cache=False,
         controlnet_model="Automatic",
     ) -> DiffusionPipeline:
         if not controlnet_model or task_name in ["txt2img", "img2img"]:
@@ -496,9 +498,13 @@ class Model_Diffusers(PreviewGenerator):
             if hasattr(self, "pipe") and self.pipe is not None:
                 for k_com, v_com in self.pipe.components.items():
                     if hasattr(v_com, "to_empty"):
-                        v_com.to_empty(device=self.device)
-                        self.pipe.__delattr__(k_com)
-                        self.pipe.k_com = None
+
+                        if "Flux" in self.pipe.__class__.__name__ and isinstance(self.env_components, dict) and k_com in self.env_components:
+                            pass
+                        else:
+                            v_com.to_empty(device=self.device)
+                            self.pipe.__delattr__(k_com)
+                        setattr(self.pipe, k_com, None)
 
             self.pipe = None
             # release_resources()
@@ -632,21 +638,16 @@ class Model_Diffusers(PreviewGenerator):
                                 logger.debug(e)
 
                         if self.env_components is not None:
-                            from diffusers import FluxPipeline
-
                             logger.debug(
-                                f"Env components: {self.env_components.keys()}"
+                                f"Env components > {self.env_components.keys()}"
                             )
-                            self.pipe = FluxPipeline(
-                                transformer=transformer,
-                                **self.env_components,
-                            )
-                        else:
-                            self.pipe = DiffusionPipeline.from_pretrained(
-                                repo_flux_model,
-                                transformer=transformer,
-                                torch_dtype=self.type_model_precision,
-                            )
+
+                        self.pipe = DiffusionPipeline.from_pretrained(
+                            repo_flux_model,
+                            transformer=transformer,
+                            torch_dtype=self.type_model_precision,
+                            **(self.env_components if isinstance(self.env_components, dict) else {}),
+                        )
 
                         if not self.pipe.transformer.config.guidance_embeds:
                             self.pipe.scheduler.register_to_config(
@@ -844,6 +845,10 @@ class Model_Diffusers(PreviewGenerator):
 
         # Get mask for Inpaint
         if gui_active or image_mask:
+            if image_mask is None:
+                raise ValueError(
+                    f"The 'image_mask' parameter is required for the {self.task_name} task."
+                )
             array_rgb_mask = convert_image_to_numpy_array(image_mask, gui_active)
         elif not gui_active:
             # Convert control image to draw
@@ -1740,7 +1745,7 @@ class Model_Diffusers(PreviewGenerator):
             )
         if self.task_name != "txt2img" and image is None:
             raise ValueError(
-                "You need to specify the <image> for this task."
+                f"The 'image' parameter is required for the {self.task_name} task."
             )
         if hires_steps < 2 and upscaler_model_path in LATENT_UPSCALERS:
             raise ValueError("Latent upscaler requires hires_steps. Use at least 2 steps.")
