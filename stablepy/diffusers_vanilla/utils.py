@@ -16,6 +16,26 @@ from collections import OrderedDict
 import gc
 import inspect
 import random
+from huggingface_hub import hf_hub_download
+
+MAIN_REPO_FLUX = [
+    "camenduru/FLUX.1-dev-diffusers",
+    "black-forest-labs/FLUX.1-dev",
+    "multimodalart/FLUX.1-dev2pro-full",
+]
+
+
+def get_flux_components_info():
+    for repo_ in MAIN_REPO_FLUX:
+        try:
+            config = hf_hub_download(
+                repo_id=repo_,
+                filename="model_index.json",
+            )
+            return repo_, config
+        except Exception as e:
+            logger.debug(e)
+    raise RuntimeError(f"Can't get components info of the Flux repos: {MAIN_REPO_FLUX}")
 
 
 class CURRENT_TASK_PARAMS:

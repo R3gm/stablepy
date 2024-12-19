@@ -59,6 +59,7 @@ from .utils import (
     release_resources,
     validate_and_update_params,
     get_seeds,
+    get_flux_components_info,
     CURRENT_TASK_PARAMS,
 )
 from .lora_loader import lora_mix_load, load_no_fused_lora
@@ -192,7 +193,11 @@ class Model_Diffusers(PreviewGenerator):
     ):
         super().__init__()
 
-        self.env_components = env_components
+        if isinstance(env_components, dict):
+            self.env_components = env_components
+            self.env_components.pop("transformer", None)
+        else:
+            self.env_components = None
 
         self.device = (
             torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -564,21 +569,35 @@ class Model_Diffusers(PreviewGenerator):
                 elif model_type in ["flux-dev", "flux-schnell"]:
 
                     if "dev" in model_type:
-                        repo_flux_model = "camenduru/FLUX.1-dev-diffusers"
+                        repo_flux_conf_transformer = get_flux_components_info()[0]
                     else:
-                        repo_flux_model = "black-forest-labs/FLUX.1-schnell"
+                        repo_flux_conf_transformer = "black-forest-labs/FLUX.1-schnell"
 
                     transformer = FluxTransformer2DModel.from_single_file(
                         base_model_id,
                         subfolder="transformer",
                         torch_dtype=self.type_model_precision,
-                        config=repo_flux_model,
+                        config=repo_flux_conf_transformer,
                     )
-                    self.pipe = DiffusionPipeline.from_pretrained(
-                        repo_flux_model,
-                        transformer=transformer,
-                        torch_dtype=self.type_model_precision,
-                    )
+
+                    if self.env_components is not None:
+                        from diffusers import FluxPipeline
+
+                        logger.debug(
+                            f"Env components > {self.env_components.keys()}"
+                        )
+                        self.pipe = FluxPipeline(
+                            transformer=transformer,
+                            **self.env_components,
+                        )
+                    else:
+                        repo_flux_model = get_flux_components_info()[0]
+                        self.pipe = DiffusionPipeline.from_pretrained(
+                            repo_flux_model,
+                            transformer=transformer,
+                            torch_dtype=self.type_model_precision,
+                        )
+
                     class_name = FLUX
                 else:
                     raise ValueError(f"Model type {model_type} not supported.")
@@ -621,38 +640,23 @@ class Model_Diffusers(PreviewGenerator):
                             torch_dtype=self.type_model_precision,
                         )
 
-                        repo_flux = [
-                            "camenduru/FLUX.1-dev-diffusers",
-                            "black-forest-labs/FLUX.1-dev",
-                            "multimodalart/FLUX.1-dev2pro-full",
-                        ]
-                        for repo_ in repo_flux:
-                            try:
-                                _ = hf_hub_download(
-                                    repo_id=repo_,
-                                    filename="model_index.json",
-                                )
-                                repo_flux_model = repo_
-                                break
-                            except Exception as e:
-                                logger.debug(e)
-
                         if self.env_components is not None:
+                            from diffusers import FluxPipeline
+
                             logger.debug(
                                 f"Env components > {self.env_components.keys()}"
                             )
+                            self.pipe = FluxPipeline(
+                                transformer=transformer,
+                                **self.env_components,
+                            )
+                        else:
+                            repo_flux_model = get_flux_components_info()[0]
 
-                        self.pipe = DiffusionPipeline.from_pretrained(
-                            repo_flux_model,
-                            transformer=transformer,
-                            torch_dtype=self.type_model_precision,
-                            **(self.env_components if isinstance(self.env_components, dict) else {}),
-                        )
-
-                        if not self.pipe.transformer.config.guidance_embeds:
-                            self.pipe.scheduler.register_to_config(
-                                shift=1.0,
-                                use_dynamic_shifting=False,
+                            self.pipe = DiffusionPipeline.from_pretrained(
+                                repo_flux_model,
+                                transformer=transformer,
+                                torch_dtype=self.type_model_precision,
                             )
 
                     case "StableDiffusionPipeline":
@@ -712,8 +716,19 @@ class Model_Diffusers(PreviewGenerator):
                     logger.warning(f"VAE: not in {self.type_model_precision}")
             self.vae_model = vae_model
 
-            # Define base scheduler
+            # Define base scheduler config
+            if self.class_name == FLUX:
+                self.pipe.scheduler.register_to_config(
+                    shift=(
+                        3.0 if self.pipe.transformer.config.guidance_embeds else 1.0
+                    ),
+                    use_dynamic_shifting=(
+                        True if self.pipe.transformer.config.guidance_embeds else False
+                    ),
+                )
+
             scheduler_copy = copy.deepcopy(self.pipe.scheduler)
+
             self.default_scheduler = (
                 verify_schedule_integrity(scheduler_copy, base_model_id)
                 if self.class_name == SDXL
