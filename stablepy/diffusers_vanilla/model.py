@@ -180,6 +180,19 @@ class PreviewGenerator:
 
 
 class Model_Diffusers(PreviewGenerator):
+    """
+    Model_Diffusers class for generating images using diffusers.
+
+    Args:
+        base_model_id (str): ID of the base model. Default is "Lykon/dreamshaper-8".
+        task_name (str): Name of the task. Default is "txt2img".
+        vae_model: The VAE model to use. Default is None. To use the BakedVAE in the model, use the same base_model_id here.
+        type_model_precision: Precision type for the model. Default is torch.float16.
+        retain_task_model_in_cache (bool): Whether to retain the task model in cache. Default is False.
+        device: Device to use for computation. Default is None (Automatic).
+        controlnet_model (str): ControlNet model to use. Default is "Automatic".
+        env_components (dict): Environment components. Default is None.
+    """
     def __init__(
         self,
         base_model_id: str = "Lykon/dreamshaper-8",
@@ -459,6 +472,20 @@ class Model_Diffusers(PreviewGenerator):
         retain_task_model_in_cache=False,
         controlnet_model="Automatic",
     ) -> DiffusionPipeline:
+        """
+        Load a diffusion pipeline model.
+        Args:
+            base_model_id (str): The ID of the base model to load.
+            task_name (str, optional): The task name for the model. Defaults to "txt2img".
+            vae_model (str, optional): The VAE model to use. Defaults to None. To use the BakedVAE in the model, use the same base_model_id here.
+            type_model_precision (torch.dtype, optional): The precision type for the model. Defaults to torch.float16.
+            reload (bool, optional): Whether to reload the model even if it is already loaded. Defaults to False.
+            retain_task_model_in_cache (bool, optional): Whether to retain the task model in cache. Defaults to False.
+            controlnet_model (str, optional): The controlnet model to use. Defaults to "Automatic".
+        Returns:
+            DiffusionPipeline: The loaded diffusion pipeline model.
+        """
+
         if not controlnet_model or task_name in ["txt2img", "img2img"]:
             controlnet_model = "Automatic"
 

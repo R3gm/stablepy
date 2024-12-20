@@ -437,7 +437,21 @@ def validate_and_update_params(cls, kwargs, config):
 
 
 def cachebox(max_cache_size=None, hash_func=hashlib.md5):
-    """Alternative to lru_cache"""
+    """
+    A decorator to cache the results of a function call, similar to `functools.lru_cache`.
+    Args:
+        max_cache_size (int, optional): The maximum number of items to store in the cache. If None, the cache size is unlimited.
+        hash_func (callable, optional): A hash function to compute the cache keys. Defaults to `hashlib.md5`.
+    Returns:
+        callable: A decorator that caches the results of the decorated function.
+    The decorated function will have an additional `memory` attribute, which is an `OrderedDict` storing the cached results.
+    Example:
+        @cachebox(max_cache_size=100)
+        def expensive_function(x, y):
+            # Expensive computation here
+            return x + y
+        result = expensive_function(1, 2)
+    """
 
     def decorator(func):
         func.memory = OrderedDict()

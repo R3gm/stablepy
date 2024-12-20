@@ -134,7 +134,19 @@ class Preprocessor:
             self.model.to(device)
 
     def load(self, name: str, use_cuda: bool = False) -> None:
-        """Load the specified preprocessor model."""
+        """
+        Load the specified preprocessor model.
+        Parameters:
+        name (str): The name of the preprocessor model to load.
+        use_cuda (bool, optional): If True, the model will be moved to GPU. Defaults to False.
+        Raises:
+        ValueError: If the specified preprocessor name is not recognized.
+        Notes:
+        - If the specified model is already loaded, the function will return early.
+        - The function will release any previously held resources before loading a new model.
+        - The model can be loaded from different sources based on the name provided.
+        """
+
         if name == self.name:
             if use_cuda:
                 self.to("cuda")
@@ -159,7 +171,30 @@ class Preprocessor:
             self.to("cuda")
 
     def __call__(self, image: PIL.Image.Image, **kwargs) -> PIL.Image.Image:
-        """Process an image using the loaded preprocessor model."""
+        """
+        Process an image using the preprocessor function or model.
+
+        Args:
+            image (PIL.Image.Image): The input image.
+            **kwargs: Additional parameters for preprocessing, which may include:
+                - image_resolution (int): The proportional maximum resolution of the input image while preserving the aspect ratio (applicable for all tasks).
+                - detect_resolution (int): The resolution to preprocess to (applicable for all tasks).
+                - low_threshold (int): Low threshold for edge detection (applicable for Canny).
+                - high_threshold (int): High threshold for edge detection (applicable for Canny).
+                - thr_v (float): Threshold for MLSD value detection (applicable for MLSD).
+                - thr_d (float): Threshold for MLSD distance detection (applicable for MLSD).
+                - mode (str): Mode for Recolor (e.g., 'intensity' or 'luminance') (applicable for Recolor).
+                - gamma_correction (float): Gamma correction value for Recolor (applicable for Recolor).
+                - blur_sigma (int): Sigma value for Blur (applicable for Blur).
+                - hand_and_face (bool): Whether to include hand and face detection (applicable for Openpose).
+                - scribble (bool): Whether to use scribble mode (applicable for HED).
+                - safe (bool): Whether to use safe mode (applicable for PidiNet).
+                - coarse (bool): Whether to use coarse mode (applicable for Lineart).
+
+        Returns:
+            PIL.Image.Image: The processed image.
+        """
+
         if not self.model:
             raise RuntimeError("No model is loaded. Please call `load()` first.")
 

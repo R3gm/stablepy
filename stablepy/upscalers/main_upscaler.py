@@ -27,6 +27,37 @@ BUILTIN_UPSCALERS = list(UPSCALER_MAP.keys())
 
 
 def load_upscaler_model(**kwargs):
+    """
+    Loads and returns an upscaler model class instance based on the provided keyword arguments.
+
+    Keyword Args:
+        model (str): The name or path of the model to load. It can be any of the BUILTIN_UPSCALERS.
+        tile (int, optional): The size of the tiles to use for upscaling. Default is 192.
+        tile_overlap (int, optional): The overlap between tiles. Default is 8.
+        device (str, optional): The device to use for computation, e.g., "cuda" or "cpu". Default is "cuda".
+        half (bool, optional): Whether to use half-precision floats. Default is False.
+        **kwargs: Additional keyword arguments to pass to the model class constructor.
+
+    Returns:
+        object: An instance of the upscaler model class.
+
+    Example:
+        from PIL import Image
+
+        # Load the upscaler model
+        upscaler = load_upscaler_model(model="your_model_name_or_path", tile=192, tile_overlap=8, device="cuda", half=False)
+
+        # Open an image using PIL
+        img_pre_up = Image.open("path_to_your_image.jpg")
+
+        # Define the upscaling parameters
+        upscaler_increases_size = 1.4
+        disable_progress_bar = False
+
+        # Use the upscaler to upscale the image
+        image_pos_up = upscaler.upscale(img_pre_up, upscaler_increases_size, disable_progress_bar)
+    """
+
     model = kwargs.get("model", None)
 
     # Get the module and class model based on `model`
