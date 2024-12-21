@@ -360,7 +360,9 @@ IP_ADAPTER_MODELS = {
         "faceid": ["h94/IP-Adapter-FaceID", "", "ip-adapter-faceid_sd15.bin", None],
         "faceid_portrait_v2": ["h94/IP-Adapter-FaceID", "", "ip-adapter-faceid-portrait-v11_sd15.bin", None],
         "faceid_portrait": ["h94/IP-Adapter-FaceID", "", "ip-adapter-faceid-portrait_sd15.bin", None],
-        "composition_plus": ["ostris/ip-composition-adapter", "", "ip_plus_composition_sd15.safetensors", "H"]
+        "composition_plus": ["ostris/ip-composition-adapter", "", "ip_plus_composition_sd15.safetensors", "H"],
+        "ipa_anime": ["r3gm/ip-adapter-anime", "", "ipAdapterAnimeFine_v10.safetensors", "H"],
+        "ipa_anime_plus": ["r3gm/ip-adapter-anime", "", "ipAdapterPlusAnime_v10.safetensors", "H"],
     },
     SDXL: {
         # "img_encoder": ["h94/IP-Adapter", "sdxl_models/image_encoder"],
@@ -372,7 +374,9 @@ IP_ADAPTER_MODELS = {
         "faceid": ["h94/IP-Adapter-FaceID", "", "ip-adapter-faceid_sdxl.bin", None],
         "faceid_portrait": ["h94/IP-Adapter-FaceID", "", "ip-adapter-faceid-portrait_sdxl.bin", None],
         "faceid_portrait_v2": ["h94/IP-Adapter-FaceID", "", "ip-adapter-faceid-portrait_sdxl_unnorm.bin", None],
-        "composition_plus": ["ostris/ip-composition-adapter", "", "ip_plus_composition_sdxl.safetensors", "H"]
+        "composition_plus": ["ostris/ip-composition-adapter", "", "ip_plus_composition_sdxl.safetensors", "H"],
+        "noob-ipa": ["r3gm/noob-ipa", "model_H", "pytorch_model.bin", "H"],
+        "noob-ipa_vit_G": ["r3gm/noob-ipa", "model_G", "noobIPAMARK1_mark1.safetensors", "G"],
     }
 }  # no suffix lora
 
@@ -388,8 +392,8 @@ IP_ADAPTERS_SD = name_list_ip_adapters(SD15)
 IP_ADAPTERS_SDXL = name_list_ip_adapters(SDXL)
 
 REPO_IMAGE_ENCODER = {
-    "H": "laion/CLIP-ViT-H-14-laion2B-s32B-b79K",
-    "G": "laion/CLIP-ViT-bigG-14-laion2B-39B-b160k",
+    "H": ["h94/IP-Adapter", "models/image_encoder"],
+    "G": ["h94/IP-Adapter", "sdxl_models/image_encoder"],
 }
 
 VALID_FILENAME_PATTERNS = [

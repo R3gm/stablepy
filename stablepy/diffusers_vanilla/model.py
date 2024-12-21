@@ -1124,7 +1124,9 @@ class Model_Diffusers(PreviewGenerator):
             vit_repo = REPO_IMAGE_ENCODER[vit_model[0]]
 
             self.image_encoder_module = CLIPVisionModelWithProjection.from_pretrained(
-                vit_repo,
+                vit_repo[0],
+                subfolder=vit_repo[1],
+                use_safetensors=True,
                 torch_dtype=self.type_model_precision,
             ).to(self.device)
             self.image_encoder_name = vit_model[0]
