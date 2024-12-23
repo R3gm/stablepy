@@ -171,7 +171,6 @@ class PreviewGenerator:
 
             logger.debug("finish")
             self.new_image_event.set()  # Result image
-
         except Exception as e:
             traceback.print_exc()
             self.fail_work = str(e)
