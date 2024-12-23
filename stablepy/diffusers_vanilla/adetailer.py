@@ -10,6 +10,14 @@ from PIL import Image
 import torch, copy, gc
 from ..logging.logging_setup import logger
 
+FIXED_SIZE_CLASS = [
+    "StableDiffusionControlNetInpaintPipeline",
+    "StableDiffusionXLInpaintPipeline",
+    "FluxImg2ImgPipeline",
+    "FluxInpaintPipeline",
+]
+
+
 def ad_model_process(
     detailfix_pipe,
     pipe_params_df,
@@ -31,7 +39,7 @@ def ad_model_process(
     detailfix_pipe.to("cuda" if torch.cuda.is_available() else "cpu")
 
     # detailfi resolution param
-    if str(detailfix_pipe.__class__.__name__) in ["StableDiffusionControlNetInpaintPipeline", "StableDiffusionXLInpaintPipeline"]:
+    if str(detailfix_pipe.__class__.__name__) in FIXED_SIZE_CLASS:
         pipe_params_df["height"] = image_list_task[0].size[1]
         pipe_params_df["width"] = image_list_task[0].size[0]
         logger.debug(f"detailfix inpaint only")

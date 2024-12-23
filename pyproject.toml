@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "stablepy"
-version = "0.5.2"
+version = "0.6.0"
 description = "A tool for easy use of stable diffusion"
 authors = ["Roger Condori(R3gm) <rocondoriflores@gmail.com>"]
 readme = "README.md"
@@ -11,18 +11,18 @@ torch = {version = "*", source = "pytorch-gpu-src"}
 torchvision = {version = "*", source = "pytorch-gpu-src"}
 torchaudio = {version = "*", source = "pytorch-gpu-src"}
 omegaconf = ">=2.3.0"
-diffusers = "0.30.2"
+diffusers = "0.31.0"
 compel = "2.0.2"
 invisible-watermark = "0.2.0"
 transformers = ">=4.41.2"
-accelerate = ">=0.31.0"
+accelerate = "1.2.1"
 safetensors = ">=0.4.3"
 mediapy = ">=1.1.9"
 ipywidgets = "7.7.1"
 controlnet-aux = "0.0.6"
-mediapipe = ">=0.10.1"
+mediapipe = ">=0.10.5"
 pytorch-lightning = ">=2.0.9.post0"
-ultralytics = ">=8.0.0"
+ultralytics = "<=8.3.48"
 huggingface_hub = ">=0.23.1"
 peft = ">=0.11.1"
 torchsde = ">=0.2.6"
@@ -31,6 +31,10 @@ insightface = ">=0.7.3"
 opencv-contrib-python = ">=4.8.0.76"
 sentencepiece = "*"
 numpy = "<=1.26.4"
+lark = "*"
+spandrel = "0.3.4"
+spandrel-extra-arches = "0.1.1"
+facexlib = "0.3.0"
 
 [[tool.poetry.source]]
 name = "pytorch-gpu-src"

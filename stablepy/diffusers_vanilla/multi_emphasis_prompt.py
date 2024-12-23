@@ -1,5 +1,6 @@
 from __future__ import annotations
 import math
+from transformers import CLIPTextModelWithProjection
 from collections import namedtuple
 import torch
 import gc
@@ -7,23 +8,21 @@ import re
 
 re_attention = re.compile(r"""
 \\\(|
-\\\{|
 \\\)|
-\\\}|
 \\\[|
 \\]|
 \\\\|
 \\|
 \(|
-\{|
 \[|
-:([+-]?[.\d]+)\)|
+:\s*([+-]?[.\d]+)\s*\)|
 \)|
-\}|
 ]|
-[^\\()\\{}\[\]:]+|
+[^\\()\[\]:]+|
 :
 """, re.X)
+
+re_break = re.compile(r"\s*\bBREAK\b\s*", re.S)
 
 
 def parse_prompt_attention(text):
@@ -44,18 +43,22 @@ def parse_prompt_attention(text):
 
         if text.startswith('\\'):
             res.append([text[1:], 1.0])
-        elif text == '(' or text == '{':
+        elif text == '(':
             round_brackets.append(len(res))
         elif text == '[':
             square_brackets.append(len(res))
-        elif weight is not None and len(round_brackets) > 0:
+        elif weight is not None and round_brackets:
             multiply_range(round_brackets.pop(), float(weight))
-        elif (text == ')' or text == '}') and len(round_brackets) > 0:
+        elif text == ')' and round_brackets:
             multiply_range(round_brackets.pop(), round_bracket_multiplier)
-        elif text == ']' and len(square_brackets) > 0:
+        elif text == ']' and square_brackets:
             multiply_range(square_brackets.pop(), square_bracket_multiplier)
         else:
-            res.append([text, 1.0])
+            parts = re.split(re_break, text)
+            for i, part in enumerate(parts):
+                if i > 0:
+                    res.append(["BREAK", -1])
+                res.append([part, 1.0])
 
     for pos in round_brackets:
         multiply_range(pos, round_bracket_multiplier)
@@ -166,24 +169,70 @@ chunk. Those objects are found in PromptChunk.fixes and, are placed into FrozenC
 are applied by sd_hijack.EmbeddingsWithFixes's forward function."""
 
 
-class FrozenCLIPEmbedderWithCustomWordsBase(torch.nn.Module):
-    """A pytorch module that is a wrapper for FrozenCLIPEmbedder module. it enhances FrozenCLIPEmbedder, making it possible to
-    have unlimited prompt length and assign weights to tokens in prompt.
-    """
-
-    def __init__(self, wrapped):
+class ClassicTextProcessingEngine:
+    def __init__(
+            self,
+            text_encoder,
+            tokenizer,
+            chunk_length=75,
+            emphasis_name="Original",
+            text_projection=False,
+            minimal_clip_skip=1,
+            clip_skip=1,
+            return_pooled=False,
+            final_layer_norm=True,
+    ):
         super().__init__()
 
-        self.wrapped = wrapped
-        """Original FrozenCLIPEmbedder module; can also be FrozenOpenCLIPEmbedder or xlmr.BertSeriesModelWithTransformation,
-        depending on model."""
+        self.text_encoder = text_encoder
+        self.tokenizer = tokenizer
 
-        # self.hijack: sd_hijack.StableDiffusionModelHijack = hijack
-        self.chunk_length = 75
+        self.device = text_encoder.device.type
+        self.emphasis = get_current_option(emphasis_name)()
+        self.text_projection = text_projection
+        self.map_to_projected_space = None
 
-        self.is_trainable = getattr(wrapped, 'is_trainable', False)
-        self.input_key = getattr(wrapped, 'input_key', 'txt')
-        self.legacy_ucg_val = None
+        if self.text_projection:
+            if isinstance(self.text_encoder, CLIPTextModelWithProjection):
+                self.map_to_projected_space = self.text_encoder.text_projection
+            else:
+                embed_dim = self.text_encoder.config.hidden_size
+                self.map_to_projected_space = torch.nn.Linear(
+                    embed_dim, embed_dim, bias=False
+                ).to(self.device, dtype=self.text_encoder.dtype)
+
+        self.minimal_clip_skip = minimal_clip_skip
+        self.clip_skip = clip_skip
+        self.return_pooled = return_pooled
+        self.final_layer_norm = final_layer_norm
+
+        self.chunk_length = chunk_length
+
+        self.id_start = self.tokenizer.bos_token_id
+        self.id_end = self.tokenizer.eos_token_id
+        self.id_pad = self.tokenizer.pad_token_id
+
+        vocab = self.tokenizer.get_vocab()
+
+        self.comma_token = vocab.get(',</w>', None)
+
+        self.token_mults = {}
+
+        tokens_with_parens = [(k, v) for k, v in vocab.items() if '(' in k or ')' in k or '[' in k or ']' in k]
+        for text, ident in tokens_with_parens:
+            mult = 1.0
+            for c in text:
+                if c == '[':
+                    mult /= 1.1
+                if c == ']':
+                    mult *= 1.1
+                if c == '(':
+                    mult *= 1.1
+                if c == ')':
+                    mult /= 1.1
+
+            if mult != 1.0:
+                self.token_mults[ident] = mult
 
     def empty_chunk(self):
         """creates an empty PromptChunk and returns it"""
@@ -200,8 +249,9 @@ class FrozenCLIPEmbedderWithCustomWordsBase(torch.nn.Module):
 
     def tokenize(self, texts):
         """Converts a batch of texts into a batch of token ids"""
+        tokenized = self.tokenizer(texts, truncation=False, add_special_tokens=False)["input_ids"]
 
-        raise NotImplementedError
+        return tokenized
 
     def encode_with_transformers(self, tokens):
         """
@@ -212,21 +262,31 @@ class FrozenCLIPEmbedderWithCustomWordsBase(torch.nn.Module):
         Among other things, this call will read self.hijack.fixes, apply it to its inputs, and clear it (setting it to None).
         """
 
-        raise NotImplementedError
+        tokens = tokens.to(self.device)
 
-    def encode_embedding_init_text(self, init_text, nvpt):
-        """Converts text into a tensor with this text's tokens' embeddings. Note that those are embeddings before they are passed through
-        transformers. nvpt is used as a maximum length in tokens. If text produces less teokens than nvpt, only this many is returned."""
+        outputs = self.text_encoder.text_model(input_ids=tokens, output_hidden_states=True)
 
-        raise NotImplementedError
+        layer_id = - max(self.clip_skip, self.minimal_clip_skip)
+        z = outputs.hidden_states[layer_id]
+
+        if self.final_layer_norm:
+            z = self.text_encoder.text_model.final_layer_norm(z)
+
+        if self.return_pooled:
+            pooled_output = outputs.pooler_output
+
+            if self.text_projection:
+                pooled_output = self.map_to_projected_space(pooled_output)
+
+            z.pooled = pooled_output
+        return z
 
     def tokenize_line(self, line):
 
-        if self.emphasis != "None":
+        if self.emphasis.name != "None":
             parsed = parse_prompt_attention(line)
         else:
             parsed = [[line, 1.0]]
-        # print(parsed)
 
         tokenized = self.tokenize([text for text, _ in parsed])
 
@@ -268,12 +328,14 @@ class FrozenCLIPEmbedderWithCustomWordsBase(torch.nn.Module):
             while position < len(tokens):
                 token = tokens[position]
 
+                comma_padding_backtrack = 20
+
                 if token == self.comma_token:
                     last_comma = len(chunk.tokens)
 
                 # this is when we are at the end of allotted 75 tokens for the current chunk, and the current token is not a comma. opts.comma_padding_backtrack
                 # is a setting that specifies that if there is a comma nearby, the text after the comma should be moved out of this chunk and into the next.
-                elif self.comma_padding_backtrack != 0 and len(chunk.tokens) == self.chunk_length and last_comma != -1 and len(chunk.tokens) - last_comma <= self.comma_padding_backtrack:
+                elif comma_padding_backtrack != 0 and len(chunk.tokens) == self.chunk_length and last_comma != -1 and len(chunk.tokens) - last_comma <= comma_padding_backtrack:
                     break_location = last_comma + 1
 
                     reloc_tokens = chunk.tokens[break_location:]
@@ -292,7 +354,6 @@ class FrozenCLIPEmbedderWithCustomWordsBase(torch.nn.Module):
                 chunk.tokens.append(token)
                 chunk.multipliers.append(weight)
                 position += 1
-                continue
 
         if chunk.tokens or not chunks:
             next_chunk(is_last=True)
@@ -318,13 +379,9 @@ class FrozenCLIPEmbedderWithCustomWordsBase(torch.nn.Module):
 
         return batch_chunks, token_count
 
-    def forward(self, texts, get_pooled=False):
-        self.get_pooled = get_pooled
-
-        if isinstance(texts, str):
+    def __call__(self, texts):
+        if not isinstance(texts, list):
             texts = [texts]
-        # print("starting forward")
-        # print(texts)
 
         batch_chunks, token_count = self.process_texts(texts)
 
@@ -340,33 +397,29 @@ class FrozenCLIPEmbedderWithCustomWordsBase(torch.nn.Module):
             z = self.process_tokens(tokens, multipliers)
             zs.append(z)
 
-        if self.get_pooled:  # hasattr(zs, "pooled"): # if zs.shape[-1] == 1280:
-            return torch.hstack(zs), zs[0].pooled  # self.pooled
+        if self.return_pooled:
+            return torch.hstack(zs), zs[0].pooled
         else:
             return torch.hstack(zs)
 
     def process_tokens(self, remade_batch_tokens, batch_multipliers):
-        tokens = torch.asarray(remade_batch_tokens).to(self.device)
+        tokens = torch.asarray(remade_batch_tokens)
 
         # this is for SD2: SD1 uses the same token for padding and end of text, while SD2 uses different ones.
         if self.id_end != self.id_pad:
             for batch_pos in range(len(remade_batch_tokens)):
                 index = remade_batch_tokens[batch_pos].index(self.id_end)
-                tokens[batch_pos, index+1:tokens.shape[1]] = self.id_pad
+                tokens[batch_pos, index + 1:tokens.shape[1]] = self.id_pad
 
-        if hasattr(self.wrapped, "text_encoder_2"):
-            z, pooled = self.encode_with_transformers_xl(tokens)
-        else:
-            z, pooled = self.encode_with_transformers(tokens)
+        z = self.encode_with_transformers(tokens)
 
-        emphasis = get_current_option(self.emphasis)()
-        emphasis.tokens = remade_batch_tokens
-        emphasis.multipliers = torch.asarray(batch_multipliers).to(self.device)
-        emphasis.z = z
+        pooled = getattr(z, 'pooled', None)
 
-        emphasis.after_transformers()
-
-        z = emphasis.z
+        self.emphasis.tokens = remade_batch_tokens
+        self.emphasis.multipliers = torch.asarray(batch_multipliers).to(z)
+        self.emphasis.z = z
+        self.emphasis.after_transformers()
+        z = self.emphasis.z
 
         if pooled is not None:
             z.pooled = pooled
@@ -374,78 +427,22 @@ class FrozenCLIPEmbedderWithCustomWordsBase(torch.nn.Module):
         return z
 
 
-class StableDiffusionLongPromptProcessor(FrozenCLIPEmbedderWithCustomWordsBase):
-    def __init__(self, wrapped, tokenizer_1, text_encoder_1, clip_skip=2, emphasis="Original", comma_padding_backtrack=20):
-        super().__init__(wrapped)
-        self.device = wrapped.device
-        self.tokenizer = tokenizer_1
-        self.text_encoder = text_encoder_1
-        self.get_pooled = False
-        if hasattr(wrapped, "text_encoder_2"):
-            self.layer = "hidden"
-            self.layer_idx = -2
+def pad_equal_len(text_embedder, cond_embeddings, uncond_embeddings):
 
-        self.emphasis = emphasis
-        self.CLIP_stop_at_last_layers = clip_skip
-        self.comma_padding_backtrack = comma_padding_backtrack
+    cond_len = cond_embeddings.shape[1]
+    uncond_len = uncond_embeddings.shape[1]
 
-        vocab = self.tokenizer.get_vocab()
-
-        self.comma_token = vocab.get(',</w>', None)
-
-        self.token_mults = {}
-        tokens_with_parens = [(k, v) for k, v in vocab.items() if '(' in k or ')' in k or '[' in k or ']' in k]
-        for text, ident in tokens_with_parens:
-            mult = 1.0
-            for c in text:
-                if c == '[':
-                    mult /= 1.1
-                if c == ']':
-                    mult *= 1.1
-                if c == '(':
-                    mult *= 1.1
-                if c == ')':
-                    mult /= 1.1
-
-            if mult != 1.0:
-                self.token_mults[ident] = mult
-
-        self.id_start = self.wrapped.tokenizer.bos_token_id
-        self.id_end = self.wrapped.tokenizer.eos_token_id
-        self.id_pad = self.id_end
-
-    def tokenize(self, texts):
-        tokenized = self.wrapped.tokenizer(texts, truncation=False, add_special_tokens=False)["input_ids"]
-
-        return tokenized
-
-    # sd1.5
-    def encode_with_transformers(self, tokens):
-        outputs = self.text_encoder(input_ids=tokens, output_hidden_states=-self.CLIP_stop_at_last_layers)
-
-        if self.CLIP_stop_at_last_layers > 1:
-            z = outputs.hidden_states[-self.CLIP_stop_at_last_layers]
-            z = self.text_encoder.text_model.final_layer_norm(z)
+    if cond_len == uncond_len:
+        all_embeddings = [cond_embeddings, uncond_embeddings]
+    else:
+        if cond_len > uncond_len:
+            n = (cond_len - uncond_len) // 77
+            all_embeddings = [cond_embeddings, torch.cat([uncond_embeddings] + [text_embedder([""])] * n, dim=1)]
         else:
-            z = outputs.last_hidden_state
+            n = (uncond_len - cond_len) // 77
+            all_embeddings = [torch.cat([cond_embeddings] + [text_embedder([""])] * n, dim=1), uncond_embeddings]
 
-        return z, None  # no pooled
-
-    # sdxl no clip skip
-    def encode_with_transformers_xl(self, tokens):
-        outputs = self.text_encoder.text_model(input_ids=tokens, output_hidden_states=self.layer == "hidden")
-
-        pooled = None
-        if outputs[0].shape[-1] == 1280:
-            pooled = outputs.pooler_output
-            pooled = self.text_encoder.text_projection(pooled)
-
-        if self.layer == "last":
-            z = outputs.last_hidden_state
-        else:
-            z = outputs.hidden_states[self.layer_idx]
-
-        return z, pooled
+    return all_embeddings
 
 
 def text_embeddings_equal_len(text_embedder, prompt, negative_prompt, get_pooled=False):
@@ -460,60 +457,18 @@ def text_embeddings_equal_len(text_embedder, prompt, negative_prompt, get_pooled
 
     cond_len = cond_embeddings.shape[1]
     uncond_len = uncond_embeddings.shape[1]
-    # print(cond_embeddings.shape, uncond_embeddings.shape)
+
     if cond_len == uncond_len:
         all_embeddings = [cond_embeddings, uncond_embeddings]
     else:
         if cond_len > uncond_len:
             n = (cond_len - uncond_len) // 77
-            all_embeddings = [cond_embeddings, torch.cat([uncond_embeddings] + [text_embedder([""])]*n, dim=1)]
+            all_embeddings = [cond_embeddings, torch.cat([uncond_embeddings] + [text_embedder([""])] * n, dim=1)]
         else:
             n = (uncond_len - cond_len) // 77
-            all_embeddings = [torch.cat([cond_embeddings] + [text_embedder([""])]*n, dim=1), uncond_embeddings]
+            all_embeddings = [torch.cat([cond_embeddings] + [text_embedder([""])] * n, dim=1), uncond_embeddings]
 
     if get_pooled:
         return all_embeddings + [pooled_cond, pooled_neg_cond]
     else:
         return all_embeddings
-
-@torch.no_grad()
-def long_prompts_with_weighting(pipe, prompt, negative_prompt, clip_skip=2, emphasis="Original", comma_padding_backtrack=20):
-    text_embedder = StableDiffusionLongPromptProcessor(
-        pipe,
-        pipe.tokenizer,
-        pipe.text_encoder,
-        clip_skip,
-        emphasis,
-        comma_padding_backtrack
-    )
-
-    cond_embeddings, uncond_embeddings = text_embeddings_equal_len(text_embedder, prompt, negative_prompt)
-
-    if not hasattr(pipe, "text_encoder_2"):
-        torch.cuda.empty_cache()
-        gc.collect()
-        return cond_embeddings, uncond_embeddings
-
-    text_embedder_2 = StableDiffusionLongPromptProcessor(
-        pipe,
-        pipe.tokenizer_2,
-        pipe.text_encoder_2,
-        clip_skip,
-        emphasis,
-        comma_padding_backtrack
-    )
-
-    (
-        cond_embeddings_2,
-        uncond_embeddings_2,
-        cond_pooled,
-        uncond_pooled
-    ) = text_embeddings_equal_len(text_embedder_2, prompt, negative_prompt, get_pooled=True)
-
-    cond_embed = torch.cat((cond_embeddings, cond_embeddings_2), dim=2)
-    neg_uncond_embed = torch.cat((uncond_embeddings, uncond_embeddings_2), dim=2)
-
-    torch.cuda.empty_cache()
-    gc.collect()
-
-    return [cond_embed, cond_pooled], [neg_uncond_embed, uncond_pooled]

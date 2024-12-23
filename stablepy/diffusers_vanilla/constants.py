@@ -1,5 +1,15 @@
+from stablepy.diffusers_vanilla.extra_scheduler.scheduling_euler_discrete_variants import (
+    EulerDiscreteSchedulerNegative,
+    EulerDiscreteSchedulerMax,
+)
+from .extra_scheduler.scheduling_dpmsolver_multistep import (
+    DPMSolverMultistepScheduler
+)
+from .extra_scheduler.scheduling_flow_match_dpmsolver_multistep import (
+    FlowMatchDPMSolverMultistepScheduler
+)
 from diffusers import (
-    DPMSolverMultistepScheduler,
+    # DPMSolverMultistepScheduler,
     DPMSolverSinglestepScheduler,
     KDPM2DiscreteScheduler,
     EulerDiscreteScheduler,
@@ -17,6 +27,9 @@ from diffusers import (
     DDPMScheduler,
     EDMEulerScheduler,
     TCDScheduler,
+    SASolverScheduler,
+    FlowMatchEulerDiscreteScheduler,
+    # FlowMatchHeunDiscreteScheduler,
 )
 from diffusers import (
     StableDiffusionControlNetPipeline,
@@ -26,46 +39,64 @@ from diffusers import (
     StableDiffusionXLAdapterPipeline,
     StableDiffusionXLPipeline,
     StableDiffusionXLControlNetPipeline,
+    StableDiffusionXLControlNetInpaintPipeline,
+    StableDiffusionXLControlNetImg2ImgPipeline,
+    StableDiffusionControlNetImg2ImgPipeline,
     StableDiffusionPAGPipeline,
-    # StableDiffusionControlNetPAGInpaintPipeline,
+    StableDiffusionControlNetPAGInpaintPipeline,
     StableDiffusionControlNetPAGPipeline,
     # StableDiffusionControlNetImg2ImgPAGPipeline,
     StableDiffusionXLPAGPipeline,
     StableDiffusionXLPAGInpaintPipeline,
     StableDiffusionXLControlNetPAGPipeline,
     # StableDiffusionXLAdapterPAGPipeline,
-    # StableDiffusionXLControlNetImg2ImgPAGPipeline,
+    # StableDiffusionXLControlNetPAGInpaintPipeline,
+    StableDiffusionXLControlNetPAGImg2ImgPipeline,
 )
+from .extra_pipe.sdxl.pipeline_controlnet_union_inpaint_sd_xl import StableDiffusionXLControlNetUnionInpaintPipeline
+from .extra_pipe.sdxl.pipeline_controlnet_union_sd_xl import StableDiffusionXLControlNetUnionPipeline
+
+SD15 = "StableDiffusionPipeline"
+SDXL = "StableDiffusionXLPipeline"
+FLUX = "FluxPipeline"
 
 CLASS_DIFFUSERS_TASK = {
-    "StableDiffusionPipeline": {
+    SD15: {
         "base": StableDiffusionPipeline,
-        "inpaint": StableDiffusionControlNetInpaintPipeline,
+        "inpaint": StableDiffusionControlNetInpaintPipeline,  # default cn
         "controlnet": StableDiffusionControlNetPipeline,
-        # "controlnet_img2img": StableDiffusionControlNetImg2ImgPipeline,
+        "controlnet_img2img": StableDiffusionControlNetImg2ImgPipeline,
+        "controlnet_inpaint": StableDiffusionControlNetInpaintPipeline,
     },
-    "StableDiffusionXLPipeline": {
+    SDXL: {
         "base": StableDiffusionXLPipeline,
         "inpaint": StableDiffusionXLInpaintPipeline,
         "controlnet": StableDiffusionXLControlNetPipeline,
         "adapter": StableDiffusionXLAdapterPipeline,
-        # "controlnet_img2img": StableDiffusionXLControlNetImg2ImgPipeline,
+        "controlnet_img2img": StableDiffusionXLControlNetImg2ImgPipeline,
+        "controlnet_inpaint": StableDiffusionXLControlNetInpaintPipeline,
+        "controlnet_union+": StableDiffusionXLControlNetUnionPipeline,
+        "controlnet_union+_inpaint": StableDiffusionXLControlNetUnionInpaintPipeline,
     },
 }
 
 CLASS_PAG_DIFFUSERS_TASK = {
-    "StableDiffusionPipeline": {
+    SD15: {
         "base": StableDiffusionPAGPipeline,
-        "inpaint": StableDiffusionControlNetInpaintPipeline,
+        "inpaint": StableDiffusionControlNetPAGInpaintPipeline,  # default cn
         "controlnet": StableDiffusionControlNetPAGPipeline,
         # "controlnet_img2img": StableDiffusionControlNetImg2ImgPAGPipeline,
+        "controlnet_inpaint": StableDiffusionControlNetPAGInpaintPipeline,
     },
-    "StableDiffusionXLPipeline": {
+    SDXL: {
         "base": StableDiffusionXLPAGPipeline,
         "inpaint": StableDiffusionXLPAGInpaintPipeline,
         "controlnet": StableDiffusionXLControlNetPAGPipeline,
         # "adapter": StableDiffusionXLAdapterPAGPipeline,
-        # "controlnet_img2img": StableDiffusionXLControlNetImg2ImgPAGPipeline,
+        "controlnet_img2img": StableDiffusionXLControlNetPAGImg2ImgPipeline,
+        # "controlnet_inpaint": StableDiffusionXLControlNetPAGInpaintPipeline,
+        # "controlnet_union+": StableDiffusionXLControlNetUnionPAGPipeline,
+        # "controlnet_union+_inpaint": StableDiffusionXLControlNetUnionPAGInpaintPipeline,
     },
 }
 
@@ -93,8 +124,44 @@ CONTROLNET_MODEL_IDS = {
     "pattern": ["monster-labs/control_v1p_sd15_qrcode_monster", "r3gm/control_v1p_sdxl_qrcode_monster_fp16"],
     "tile": ["lllyasviel/control_v11f1e_sd15_tile", "r3gm/controlnet-tile-sdxl-1.0-fp16"],  # "sdxl_tile_realistic": "Yakonrus/SDXL_Controlnet_Tile_Realistic_v2",
     "recolor": ["latentcat/control_v1p_sd15_brightness", "r3gm/controlnet-recolor-sdxl-fp16"],
+    "repaint": ["lllyasviel/control_v11p_sd15_inpaint", "brad-twinkl/controlnet-union-sdxl-1.0-promax"]
     # "sdxl_depth-zoe_t2i": "TencentARC/t2i-adapter-depth-zoe-sdxl-1.0",
     # "sdxl_recolor_t2i": "TencentARC/t2i-adapter-recolor-sdxl-1.0",
+}
+
+FLUX_CN_UNION_MODES = {
+    "openpose": 4,
+    "canny": 0,
+    # "mlsd": 7,
+    "scribble": 0,
+    "softedge": 0,
+    "segmentation": 6,
+    "depth": 2,
+    # "normalbae": 7,
+    "lineart": 0,
+    "lineart_anime": 0,
+    # "shuffle": 7,
+    # "ip2p": "7",
+    "tile": [1, 3, 6],
+    "recolor": 5,
+}
+
+SDXL_CN_UNION_PROMAX_MODES = {
+    "openpose": 0,
+    "canny": 3,
+    "mlsd": 3,
+    "scribble": 2,
+    "softedge": 2,
+    "segmentation": 5,
+    "depth": 1,
+    "normalbae": 4,
+    "lineart": 3,
+    "lineart_anime": 3,
+    # "shuffle": 7,
+    # "ip2p": 7,
+    "tile": 6,
+    "recolor": 6,
+    "repaint": 7,
 }
 
 VALID_TASKS = list(CONTROLNET_MODEL_IDS.keys())
@@ -108,94 +175,178 @@ SDXL_TASKS = [
     )
 ]
 
-T2I_PREPROCESSOR_NAME = {
-    "sdxl_canny_t2i": "Canny",
-    "sdxl_openpose_t2i": "Openpose",
-    "sdxl_sketch_t2i": "PidiNet",
-    "sdxl_depth-midas_t2i": "Midas",
-    "sdxl_lineart_t2i": "Lineart",
-}
-
-FLASH_LORA = {
-    "StableDiffusionPipeline": {
-        "LCM Auto-Loader": "latent-consistency/lcm-lora-sdv1-5",
-        "TCD Auto-Loader": "h1t/TCD-SD15-LoRA",
-    },
-    "StableDiffusionXLPipeline": {
-        "LCM Auto-Loader": "latent-consistency/lcm-lora-sdxl",
-        "TCD Auto-Loader": "h1t/TCD-SDXL-LoRA",
-    },
-}
-
-PROMPT_WEIGHT_OPTIONS = {
+OLD_PROMPT_WEIGHT_OPTIONS = {
     "Compel": "Compel",
     "Classic": "Classic",
+}
+
+SD_EMBED = {
+    "Classic-sd_embed": "sd_embed",
+}
+
+CLASSIC_VARIANT = {
     "Classic-original": "Original",
     "Classic-no_norm": "No norm",
     "Classic-ignore": "Ignore",
-    "None": "None"
+    "None": "None",
+}
+
+PROMPT_WEIGHT_OPTIONS = {
+    **OLD_PROMPT_WEIGHT_OPTIONS,
+    **SD_EMBED,
+    **CLASSIC_VARIANT
 }
 
 ALL_PROMPT_WEIGHT_OPTIONS = list(PROMPT_WEIGHT_OPTIONS.keys())
-OLD_PROMPT_WEIGHT_OPTIONS = ALL_PROMPT_WEIGHT_OPTIONS[0:2]
 
+# Sampler: DPM++ 2M, Schedule type: Exponential
 SCHEDULER_CONFIG_MAP = {
     "DPM++ 2M": (DPMSolverMultistepScheduler, {"algorithm_type": "dpmsolver++", "use_karras_sigmas": False}),
-    "DPM++ 2M Karras": (DPMSolverMultistepScheduler, {"algorithm_type": "dpmsolver++", "use_karras_sigmas": True}),
     "DPM++ 2M SDE": (DPMSolverMultistepScheduler, {"use_karras_sigmas": False, "algorithm_type": "sde-dpmsolver++"}),
-    "DPM++ 2M SDE Karras": (DPMSolverMultistepScheduler, {"use_karras_sigmas": True, "algorithm_type": "sde-dpmsolver++"}),
     "DPM++ 2S": (DPMSolverSinglestepScheduler, {"algorithm_type": "dpmsolver++", "use_karras_sigmas": False}),
-    "DPM++ 2S Karras": (DPMSolverSinglestepScheduler, {"algorithm_type": "dpmsolver++", "use_karras_sigmas": True}),
     "DPM++ 1S": (DPMSolverMultistepScheduler, {"algorithm_type": "dpmsolver++", "solver_order": 1}),
-    "DPM++ 1S Karras": (DPMSolverMultistepScheduler, {"algorithm_type": "dpmsolver++", "solver_order": 1, "use_karras_sigmas": True}),
-    "DPM++ 3M": (DPMSolverMultistepScheduler, {"algorithm_type": "dpmsolver++", "solver_order": 3}),
-    "DPM++ 3M Karras": (DPMSolverMultistepScheduler, {"algorithm_type": "dpmsolver++", "solver_order": 3, "use_karras_sigmas": True}),
     "DPM 3M": (DPMSolverMultistepScheduler, {"algorithm_type": "dpmsolver", "final_sigmas_type": "sigma_min", "solver_order": 3}),
+    "DPM++ 3M": (DPMSolverMultistepScheduler, {"algorithm_type": "dpmsolver++", "solver_order": 3}),
+    "DPM++ 3M SDE": (DPMSolverMultistepScheduler, {"solver_order": 3, "algorithm_type": "sde-dpmsolver++"}),
     "DPM++ SDE": (DPMSolverSDEScheduler, {"use_karras_sigmas": False}),
-    "DPM++ SDE Karras": (DPMSolverSDEScheduler, {"use_karras_sigmas": True}),
     "DPM2": (KDPM2DiscreteScheduler, {}),
-    "DPM2 Karras": (KDPM2DiscreteScheduler, {"use_karras_sigmas": True}),
     "DPM2 a": (KDPM2AncestralDiscreteScheduler, {}),
-    "DPM2 a Karras": (KDPM2AncestralDiscreteScheduler, {"use_karras_sigmas": True}),
     "Euler": (EulerDiscreteScheduler, {}),
     "Euler a": (EulerAncestralDiscreteScheduler, {}),
-    "Euler trailing": (EulerDiscreteScheduler, {"timestep_spacing": "trailing"}),
-    "Euler trailing sample": (EulerDiscreteScheduler, {"timestep_spacing": "trailing", "prediction_type": "sample"}),
-    "Euler a trailing": (EulerAncestralDiscreteScheduler, {"timestep_spacing": "trailing"}),
     "Heun": (HeunDiscreteScheduler, {}),
-    "Heun Karras": (HeunDiscreteScheduler, {"use_karras_sigmas": True}),
     "LMS": (LMSDiscreteScheduler, {}),
-    "LMS Karras": (LMSDiscreteScheduler, {"use_karras_sigmas": True}),
     "DDIM": (DDIMScheduler, {}),
-    "DDIM trailing": (DDIMScheduler, {"timestep_spacing": "trailing"}),
     "DEIS": (DEISMultistepScheduler, {}),
     "UniPC": (UniPCMultistepScheduler, {}),
-    "UniPC Karras": (UniPCMultistepScheduler, {"use_karras_sigmas": True}),
     "PNDM": (PNDMScheduler, {}),
     "Euler EDM": (EDMEulerScheduler, {}),
-    "Euler EDM Karras": (EDMEulerScheduler, {"use_karras_sigmas": True}),
     "DPM++ 2M EDM": (EDMDPMSolverMultistepScheduler, {"solver_order": 2, "solver_type": "midpoint", "final_sigmas_type": "zero", "algorithm_type": "dpmsolver++"}),
-    "DPM++ 2M EDM Karras": (EDMDPMSolverMultistepScheduler, {"use_karras_sigmas": True, "solver_order": 2, "solver_type": "midpoint", "final_sigmas_type": "zero", "algorithm_type": "dpmsolver++"}),
     "DDPM": (DDPMScheduler, {}),
-
-    "DPM++ 2M Lu": (DPMSolverMultistepScheduler, {"algorithm_type": "dpmsolver++", "use_lu_lambdas": True}),
+    "SA Solver": (SASolverScheduler, {"use_karras_sigmas": False, "timestep_spacing": "linspace"}),
+    # "DPM++ 2M Lu": (DPMSolverMultistepScheduler, {"algorithm_type": "dpmsolver++", "use_lu_lambdas": True}),
     "DPM++ 2M Ef": (DPMSolverMultistepScheduler, {"algorithm_type": "dpmsolver++", "euler_at_final": True}),
-    "DPM++ 2M SDE Lu": (DPMSolverMultistepScheduler, {"use_lu_lambdas": True, "algorithm_type": "sde-dpmsolver++"}),
+    # "DPM++ 2M SDE Lu": (DPMSolverMultistepScheduler, {"use_lu_lambdas": True, "algorithm_type": "sde-dpmsolver++"}),
     "DPM++ 2M SDE Ef": (DPMSolverMultistepScheduler, {"algorithm_type": "sde-dpmsolver++", "euler_at_final": True}),
+    "DPM 3M Ef": (DPMSolverMultistepScheduler, {"algorithm_type": "dpmsolver", "final_sigmas_type": "sigma_min", "solver_order": 3, "euler_at_final": True}),
+    # "Euler Negative": (EulerDiscreteSchedulerNegative, {}),
+    # "Euler Max": (EulerDiscreteSchedulerMax, {}),
 
     "LCM": (LCMScheduler, {}),
     "TCD": (TCDScheduler, {}),
-    "LCM trailing": (LCMScheduler, {"timestep_spacing": "trailing"}),
-    "TCD trailing": (TCDScheduler, {"timestep_spacing": "trailing"}),
     "LCM Auto-Loader": (LCMScheduler, {}),
     "TCD Auto-Loader": (TCDScheduler, {}),
+
+    "FlowMatch Euler": (FlowMatchEulerDiscreteScheduler, {}),
+    # "FlowMatch Heun": (FlowMatchHeunDiscreteScheduler, {}),
+    "FlowMatch DPM2": (FlowMatchDPMSolverMultistepScheduler, {"algorithm_type": "dpmsolver2", "eta": 1.0, "s_noise": 1.0, "use_noise_sampler": True}),
+    "FlowMatch DPM++ 2M": (FlowMatchDPMSolverMultistepScheduler, {"algorithm_type": "dpmsolver++2M", "eta": 1.0, "s_noise": 1.0, "use_noise_sampler": True}),
+    "FlowMatch DPM++ 2S": (FlowMatchDPMSolverMultistepScheduler, {"algorithm_type": "dpmsolver++2S", "eta": 1.0, "s_noise": 1.0, "use_noise_sampler": True}),
+    "FlowMatch DPM++ SDE": (FlowMatchDPMSolverMultistepScheduler, {"algorithm_type": "dpmsolver++sde", "eta": 1.0, "s_noise": 1.0, "use_noise_sampler": True}),
+    "FlowMatch DPM++ 2M SDE": (FlowMatchDPMSolverMultistepScheduler, {"algorithm_type": "dpmsolver++2Msde", "eta": 1.0, "s_noise": 1.0, "use_noise_sampler": True}),
+    "FlowMatch DPM++ 3M SDE": (FlowMatchDPMSolverMultistepScheduler, {"algorithm_type": "dpmsolver++3Msde", "eta": 1.0, "s_noise": 1.0, "use_noise_sampler": True}),
 }
 
 scheduler_names = list(SCHEDULER_CONFIG_MAP.keys())
-FLASH_AUTO_LOAD_SAMPLER = scheduler_names[-2:]
+
+FLASH_AUTO_LOAD_SAMPLER = ["LCM Auto-Loader", "TCD Auto-Loader"]
+
+FLASH_LORA = {
+    SD15: {
+        FLASH_AUTO_LOAD_SAMPLER[0]: "latent-consistency/lcm-lora-sdv1-5",
+        FLASH_AUTO_LOAD_SAMPLER[1]: "h1t/TCD-SD15-LoRA",
+    },
+    SDXL: {
+        FLASH_AUTO_LOAD_SAMPLER[0]: "latent-consistency/lcm-lora-sdxl",
+        FLASH_AUTO_LOAD_SAMPLER[1]: "h1t/TCD-SDXL-LoRA",
+    },
+}
+
+
+AYS_SCHEDULES = {
+    "AYS timesteps": [[999, 850, 736, 645, 545, 455, 343, 233, 124, 24], [999, 845, 730, 587, 443, 310, 193, 116, 53, 13]],
+    "AYS 10 steps": [[999, 850, 736, 645, 545, 455, 343, 233, 124, 24], [999, 845, 730, 587, 443, 310, 193, 116, 53, 13]],  # [sd1.5, sdxl]
+    "AYS sigmas": [[14.615, 6.475, 3.861, 2.697, 1.886, 1.396, 0.963, 0.652, 0.399, 0.152, 0.029], [14.615, 6.315, 3.771, 2.181, 1.342, 0.862, 0.555, 0.380, 0.234, 0.113, 0.029]],  # [sd1.5, sdxl] # sampler Euler
+    "AYS sigmas 10 steps": [[14.615, 6.475, 3.861, 2.697, 1.886, 1.396, 0.963, 0.652, 0.399, 0.152, 0.0], [14.615, 6.315, 3.771, 2.181, 1.342, 0.862, 0.555, 0.380, 0.234, 0.113, 0.0]],  # [sd1.5, sdxl] # sampler Euler
+}
+
+SCHEDULE_TYPES = {
+    "Automatic": "",
+    "Karras": {"use_karras_sigmas": True},
+    "Exponential": {"timestep_spacing": "linspace", "use_exponential_sigmas": True},
+    "Beta": {"timestep_spacing": "linspace", "use_beta_sigmas": True},
+    "SGM Uniform": {"timestep_spacing": "trailing"},
+    "Normal": {"use_karras_sigmas": False},  # check
+    "Simple": {"timestep_spacing": "trailing", "use_karras_sigmas": False},
+    "Lambdas": {"use_lu_lambdas": True},
+    "AYS timesteps": {"use_karras_sigmas": False},
+    "AYS 10 steps": {"use_karras_sigmas": False},
+    # "AYS sigmas": {"use_karras_sigmas": False},  # Euler
+    # "AYS sigmas 10 steps": {"use_karras_sigmas": False},  # Euler
+}
+
+SCHEDULE_TYPE_OPTIONS = list(SCHEDULE_TYPES.keys())
+
+SCHEDULE_PREDICTION_TYPE = {
+    "Automatic": "",
+    "Epsilon": {"prediction_type": "epsilon"},
+    "Sample": {"prediction_type": "sample"},
+    "V prediction": {"prediction_type": "v_prediction", "rescale_betas_zero_snr": True},
+}
+
+SCHEDULE_PREDICTION_TYPE_OPTIONS = list(SCHEDULE_PREDICTION_TYPE.keys())
+
+FLUX_SCHEDULE_TYPES = {
+    "Automatic": "",
+    "Karras": {"sigma_schedule": "karras"},
+    "Exponential": {"sigma_schedule": "exponential"},
+    "Beta": {"sigma_schedule": "lambdas"},  # change key
+}
+
+FLUX_SCHEDULE_TYPE_OPTIONS = list(FLUX_SCHEDULE_TYPES.keys())
+
+# Mixes that need fixing.
+NOISE_IMAGE_STATUS = {}  # EDM
+
+BLACK_IMAGE_STATUS = {
+    "DPM 3M": ["Karras", "Exponential", "Beta", "Lambdas"],  #
+}
+
+ERROR_IMAGE_STATUS = {
+    "DPM++ 2S": ["Exponential", "Beta"],
+    "DEIS": ["Exponential", "Beta", "AYS timesteps", "AYS 10 steps"],
+    "UniPC": ["Exponential", "Beta", "AYS timesteps", "AYS 10 steps"],
+    "SA Solver": ["Exponential", "Beta", "AYS timesteps", "AYS 10 steps"],
+    "DPM++ SDE": ["AYS timesteps", "AYS 10 steps"],
+    "DPM2": ["AYS timesteps", "AYS 10 steps"],
+    "DPM2 a": ["AYS timesteps", "AYS 10 steps"],
+    "Euler a": ["AYS timesteps", "AYS 10 steps"],
+    "LMS": ["AYS timesteps", "AYS 10 steps"],
+    "DDIM": ["AYS timesteps", "AYS 10 steps"],
+    "PNDM": ["AYS timesteps", "AYS 10 steps"],
+    "Euler EDM": ["AYS timesteps", "AYS 10 steps"],
+    "DPM++ 2M EDM": ["AYS timesteps", "AYS 10 steps"],
+    # "DPM++ 2M Lu": ["AYS timesteps", "AYS 10 steps"],
+    # "DPM++ 2M SDE Lu": ["AYS timesteps", "AYS 10 steps"],
+}
+
+INCOMPATIBILITY_SAMPLER_SCHEDULE = {}
+
+
+# Function to merge each dictionary into the global dictionary
+def merge_dicts(source_dict):
+    for key, value in source_dict.items():
+        if key not in INCOMPATIBILITY_SAMPLER_SCHEDULE:
+            INCOMPATIBILITY_SAMPLER_SCHEDULE[key] = []
+        INCOMPATIBILITY_SAMPLER_SCHEDULE[key].extend(value)
+
+
+# Merge each dictionary
+merge_dicts(NOISE_IMAGE_STATUS)
+merge_dicts(BLACK_IMAGE_STATUS)
+merge_dicts(ERROR_IMAGE_STATUS)
 
 IP_ADAPTER_MODELS = {
-    "StableDiffusionPipeline": {
+    SD15: {
         # "img_encoder": ["h94/IP-Adapter", "models/image_encoder"],
         "full_face": ["h94/IP-Adapter", "models", "ip-adapter-full-face_sd15.safetensors", "H"],
         "plus_face": ["h94/IP-Adapter", "models", "ip-adapter-plus-face_sd15.safetensors", "H"],
@@ -206,22 +357,26 @@ IP_ADAPTER_MODELS = {
         "base_light_v2": ["h94/IP-Adapter", "models", "ip-adapter_sd15_light_v11.bin", "H"],
         "faceid_plus": ["h94/IP-Adapter-FaceID", "", "ip-adapter-faceid-plus_sd15.bin", "H"],
         "faceid_plus_v2": ["h94/IP-Adapter-FaceID", "", "ip-adapter-faceid-plusv2_sd15.bin", "H"],
-        "faceid": ["h94/IP-Adapter-FaceID", "", "ip-adapter-faceid_sd15.bin", "H"],  # None
-        "faceid_portrait_v2": ["h94/IP-Adapter-FaceID", "", "ip-adapter-faceid-portrait-v11_sd15.bin", "H"],  # None
-        "faceid_portrait": ["h94/IP-Adapter-FaceID", "", "ip-adapter-faceid-portrait_sd15.bin", "H"],  # None
-        "composition_plus": ["ostris/ip-composition-adapter", "", "ip_plus_composition_sd15.safetensors", "H"]
+        "faceid": ["h94/IP-Adapter-FaceID", "", "ip-adapter-faceid_sd15.bin", None],
+        "faceid_portrait_v2": ["h94/IP-Adapter-FaceID", "", "ip-adapter-faceid-portrait-v11_sd15.bin", None],
+        "faceid_portrait": ["h94/IP-Adapter-FaceID", "", "ip-adapter-faceid-portrait_sd15.bin", None],
+        "composition_plus": ["ostris/ip-composition-adapter", "", "ip_plus_composition_sd15.safetensors", "H"],
+        "ipa_anime": ["r3gm/ip-adapter-anime", "", "ipAdapterAnimeFine_v10.safetensors", "H"],
+        "ipa_anime_plus": ["r3gm/ip-adapter-anime", "", "ipAdapterPlusAnime_v10.safetensors", "H"],
     },
-    "StableDiffusionXLPipeline": {
+    SDXL: {
         # "img_encoder": ["h94/IP-Adapter", "sdxl_models/image_encoder"],
         "plus_face": ["h94/IP-Adapter", "sdxl_models", "ip-adapter-plus-face_sdxl_vit-h.safetensors", "H"],
         "plus": ["h94/IP-Adapter", "sdxl_models", "ip-adapter-plus_sdxl_vit-h.safetensors", "H"],
         "base_vit_G": ["h94/IP-Adapter", "sdxl_models", "ip-adapter_sdxl.safetensors", "G"],
         "base": ["h94/IP-Adapter", "sdxl_models", "ip-adapter_sdxl_vit-h.safetensors", "H"],
         "faceid_plus_v2": ["h94/IP-Adapter-FaceID", "", "ip-adapter-faceid-plusv2_sdxl.bin", "H"],
-        "faceid": ["h94/IP-Adapter-FaceID", "", "ip-adapter-faceid_sdxl.bin", "H"],  # None
-        "faceid_portrait": ["h94/IP-Adapter-FaceID", "", "ip-adapter-faceid-portrait_sdxl.bin", "H"],  # None
-        "faceid_portrait_v2": ["h94/IP-Adapter-FaceID", "", "ip-adapter-faceid-portrait_sdxl_unnorm.bin", "H"],  # None
-        "composition_plus": ["ostris/ip-composition-adapter", "", "ip_plus_composition_sdxl.safetensors", "H"]
+        "faceid": ["h94/IP-Adapter-FaceID", "", "ip-adapter-faceid_sdxl.bin", None],
+        "faceid_portrait": ["h94/IP-Adapter-FaceID", "", "ip-adapter-faceid-portrait_sdxl.bin", None],
+        "faceid_portrait_v2": ["h94/IP-Adapter-FaceID", "", "ip-adapter-faceid-portrait_sdxl_unnorm.bin", None],
+        "composition_plus": ["ostris/ip-composition-adapter", "", "ip_plus_composition_sdxl.safetensors", "H"],
+        "noob-ipa": ["r3gm/noob-ipa", "model_H", "pytorch_model.bin", "H"],
+        "noob-ipa_vit_G": ["r3gm/noob-ipa", "model_G", "noobIPAMARK1_mark1.safetensors", "G"],
     }
 }  # no suffix lora
 
@@ -233,13 +388,27 @@ def name_list_ip_adapters(model_key):
     return adapters
 
 
-IP_ADAPTERS_SD = name_list_ip_adapters("StableDiffusionPipeline")
-IP_ADAPTERS_SDXL = name_list_ip_adapters("StableDiffusionXLPipeline")
+IP_ADAPTERS_SD = name_list_ip_adapters(SD15)
+IP_ADAPTERS_SDXL = name_list_ip_adapters(SDXL)
 
 REPO_IMAGE_ENCODER = {
-    "H": "laion/CLIP-ViT-H-14-laion2B-s32B-b79K",
-    "G": "laion/CLIP-ViT-bigG-14-laion2B-39B-b160k",
+    "H": ["h94/IP-Adapter", "models/image_encoder"],
+    "G": ["h94/IP-Adapter", "sdxl_models/image_encoder"],
 }
+
+VALID_FILENAME_PATTERNS = [
+    "prompt_section",
+    "neg_prompt_section",
+    "model",
+    "vae",
+    "num_steps",
+    "guidance_scale",
+    "sampler",
+    "schedule_type",
+    "img_width",
+    "img_height",
+    "seed",
+]
 
 BETA_STYLE_LIST = [
     {

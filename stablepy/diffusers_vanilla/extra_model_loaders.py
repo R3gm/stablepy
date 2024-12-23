@@ -20,6 +20,19 @@ def custom_task_model_loader(
 ):
     # Pipe detailfix_pipe
     if model_category == "detailfix":
+
+        if hasattr(pipe, "transformer"):
+            from .extra_pipe.flux.pipeline_flux_inpaint import FluxInpaintPipeline
+            return FluxInpaintPipeline(
+                vae=pipe.vae,
+                text_encoder=pipe.text_encoder,
+                tokenizer=pipe.tokenizer,
+                scheduler=pipe.scheduler,
+                text_encoder_2=pipe.text_encoder_2,
+                tokenizer_2=pipe.tokenizer_2,
+                transformer=pipe.transformer,
+            )
+
         if not hasattr(pipe, "text_encoder_2"):
             # sd df
             if torch_dtype == torch.float16:
@@ -63,6 +76,19 @@ def custom_task_model_loader(
         return detailfix_pipe
 
     elif model_category in ["hires", "detailfix_img2img"]:
+
+        if hasattr(pipe, "transformer"):
+            from .extra_pipe.flux.pipeline_flux_img2img import FluxImg2ImgPipeline
+            return FluxImg2ImgPipeline(
+                vae=pipe.vae,
+                text_encoder=pipe.text_encoder,
+                tokenizer=pipe.tokenizer,
+                scheduler=pipe.scheduler,
+                text_encoder_2=pipe.text_encoder_2,
+                tokenizer_2=pipe.tokenizer_2,
+                transformer=pipe.transformer,
+            )
+
         # Pipe hires detailfix_pipe img2img
         if task_name != "txt2img" or hasattr(pipe, "set_pag_applied_layers"):
             if not hasattr(pipe, "text_encoder_2"):

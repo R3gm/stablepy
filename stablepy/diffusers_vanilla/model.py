@@ -1,5 +1,11 @@
-import gc
 import time
+import os
+import copy
+import warnings
+import traceback
+import threading
+import json
+
 import numpy as np
 import PIL.Image
 from diffusers import (
@@ -10,55 +16,53 @@ from diffusers import (
     T2IAdapter,
     StableDiffusionXLPipeline,
     AutoPipelineForImage2Image,
+    FluxTransformer2DModel,
 )
+from accelerate import init_on_device
 from huggingface_hub import hf_hub_download
 import torch
 import random
-import threading
-import json
-from controlnet_aux import (
-    CannyDetector,
-    ContentShuffleDetector,
-    HEDdetector,
-    LineartAnimeDetector,
-    LineartDetector,
-    MidasDetector,
-    MLSDdetector,
-    NormalBaeDetector,
-    OpenposeDetector,
-    PidiNetDetector,
-)
-from transformers import pipeline
-from controlnet_aux.util import HWC3, ade_palette
-from transformers import AutoImageProcessor, UperNetForSemanticSegmentation
 import cv2
 from diffusers import (
     DDIMScheduler,
 )
 from .constants import (
+    SD15,
+    SDXL,
+    FLUX,
     CLASS_DIFFUSERS_TASK,
     CLASS_PAG_DIFFUSERS_TASK,
     CONTROLNET_MODEL_IDS,
-    VALID_TASKS,
-    SD15_TASKS,
-    SDXL_TASKS,
-    T2I_PREPROCESSOR_NAME,
+    FLUX_CN_UNION_MODES,
     FLASH_LORA,
     SCHEDULER_CONFIG_MAP,
     scheduler_names,
     IP_ADAPTER_MODELS,
-    IP_ADAPTERS_SD,
-    IP_ADAPTERS_SDXL,
     REPO_IMAGE_ENCODER,
-    PROMPT_WEIGHT_OPTIONS,
-    OLD_PROMPT_WEIGHT_OPTIONS,
     FLASH_AUTO_LOAD_SAMPLER,
+    SDXL_CN_UNION_PROMAX_MODES,
 )
-from .multi_emphasis_prompt import long_prompts_with_weighting
 from diffusers.utils import load_image
-from .prompt_weights import get_embed_new, add_comma_after_pattern_ti
-from .utils import save_pil_image_with_metadata, checkpoint_model_type, get_string_metadata
-from .lora_loader import lora_mix_load
+from .prompt_weights import add_comma_after_pattern_ti
+from .utils import (
+    save_pil_image_with_metadata,
+    checkpoint_model_type,
+    get_string_metadata,
+    extra_string_metadata,
+    assemble_filename_pattern,
+    process_prompts_valid,
+    convert_image_to_numpy_array,
+    latents_to_rgb,
+    load_cn_diffusers,
+    check_variant_file,
+    cachebox,
+    release_resources,
+    validate_and_update_params,
+    get_seeds,
+    get_flux_components_info,
+    CURRENT_TASK_PARAMS,
+)
+from .lora_loader import lora_mix_load, load_no_fused_lora
 from .inpainting_canvas import draw, make_inpaint_condition
 from .adetailer import ad_model_process
 from ..logging.logging_setup import logger
@@ -68,263 +72,37 @@ from .style_prompt_config import (
     styles_data,
     STYLE_NAMES,
     get_json_content,
-    apply_style
+    apply_style,
 )
-import os
-from compel import Compel, ReturnedEmbeddingsType
 import mediapy
-from IPython.display import display
 from PIL import Image
 from typing import Union, Optional, List, Tuple, Dict, Any, Callable # noqa
 import logging
 import diffusers
-import copy
-import warnings
-import traceback
+from .main_prompt_embeds import (
+    Promt_Embedder_SD1,
+    Promt_Embedder_SDXL,
+    Promt_Embedder_FLUX,
+)
+from .sampler_scheduler_config import (
+    configure_scheduler,
+    verify_schedule_integrity,
+    check_scheduler_compatibility,
+    ays_timesteps,
+)
+from .preprocessor.main_preprocessor import (
+    Preprocessor,
+    process_basic_task,
+    get_preprocessor_params,
+)
+from .preprocessor.constans_preprocessor import T2I_PREPROCESSOR_NAME
+from ..face_restoration.main_face_restoration import batch_process_face_restoration
+
 logging.getLogger("diffusers").setLevel(logging.ERROR)
 logging.getLogger("transformers").setLevel(logging.ERROR)
 diffusers.utils.logging.set_verbosity(40)
 warnings.filterwarnings(action="ignore", category=FutureWarning, module="diffusers")
 warnings.filterwarnings(action="ignore", category=FutureWarning, module="transformers")
-
-# =====================================
-# Utils preprocessor
-# =====================================
-
-
-def resize_image(input_image, resolution, interpolation=None):
-    H, W, C = input_image.shape
-    H = float(H)
-    W = float(W)
-    k = float(resolution) / max(H, W)
-    H *= k
-    W *= k
-    H = int(np.round(H / 64.0)) * 64
-    W = int(np.round(W / 64.0)) * 64
-    if interpolation is None:
-        interpolation = cv2.INTER_LANCZOS4 if k > 1 else cv2.INTER_AREA
-    img = cv2.resize(input_image, (W, H), interpolation=interpolation)
-    return img
-
-
-class DepthEstimator:
-    def __init__(self):
-        self.model = pipeline("depth-estimation")
-
-    def __call__(self, image: np.ndarray, **kwargs) -> PIL.Image.Image:
-        detect_resolution = kwargs.pop("detect_resolution", 512)
-        image_resolution = kwargs.pop("image_resolution", 512)
-        image = np.array(image)
-        image = HWC3(image)
-        image = resize_image(image, resolution=detect_resolution)
-        image = PIL.Image.fromarray(image)
-        image = self.model(image)
-        image = image["depth"]
-        image = np.array(image)
-        image = HWC3(image)
-        image = resize_image(image, resolution=image_resolution)
-        return PIL.Image.fromarray(image)
-
-
-class ImageSegmentor:
-    def __init__(self):
-        self.image_processor = AutoImageProcessor.from_pretrained(
-            "openmmlab/upernet-convnext-small"
-        )
-        self.image_segmentor = UperNetForSemanticSegmentation.from_pretrained(
-            "openmmlab/upernet-convnext-small"
-        )
-
-    @torch.inference_mode()
-    def __call__(self, image: np.ndarray, **kwargs) -> PIL.Image.Image:
-        detect_resolution = kwargs.pop("detect_resolution", 512)
-        image_resolution = kwargs.pop("image_resolution", 512)
-        image = HWC3(image)
-        image = resize_image(image, resolution=detect_resolution)
-        image = PIL.Image.fromarray(image)
-
-        pixel_values = self.image_processor(image, return_tensors="pt").pixel_values
-        outputs = self.image_segmentor(pixel_values)
-        seg = self.image_processor.post_process_semantic_segmentation(
-            outputs, target_sizes=[image.size[::-1]]
-        )[0]
-        color_seg = np.zeros((seg.shape[0], seg.shape[1], 3), dtype=np.uint8)
-        for label, color in enumerate(ade_palette()):
-            color_seg[seg == label, :] = color
-        color_seg = color_seg.astype(np.uint8)
-
-        color_seg = resize_image(
-            color_seg, resolution=image_resolution, interpolation=cv2.INTER_NEAREST
-        )
-        return PIL.Image.fromarray(color_seg)
-
-
-def apply_gaussian_blur(image_np, ksize=5):
-    sigmaX = ksize / 2
-    ksize = int(ksize)
-    if ksize % 2 == 0:
-        ksize += 1
-    blurred_image_np = cv2.GaussianBlur(image_np, (ksize, ksize), sigmaX=sigmaX)
-    return blurred_image_np
-
-
-def recolor_luminance(img, thr_a=1.0, **kwargs):
-    result = cv2.cvtColor(HWC3(img), cv2.COLOR_BGR2LAB)
-    result = result[:, :, 0].astype(np.float32) / 255.0
-    result = result ** thr_a
-    result = (result * 255.0).clip(0, 255).astype(np.uint8)
-    result = cv2.cvtColor(result, cv2.COLOR_GRAY2RGB)
-    return result
-
-
-def recolor_intensity(img, thr_a=1.0, **kwargs):
-    result = cv2.cvtColor(HWC3(img), cv2.COLOR_BGR2HSV)
-    result = result[:, :, 2].astype(np.float32) / 255.0
-    result = result ** thr_a
-    result = (result * 255.0).clip(0, 255).astype(np.uint8)
-    result = cv2.cvtColor(result, cv2.COLOR_GRAY2RGB)
-    return result
-
-
-class Preprocessor:
-    MODEL_ID = "lllyasviel/Annotators"
-
-    def __init__(self):
-        self.model = None
-        self.name = ""
-
-    def load(self, name: str) -> None:
-        if name == self.name:
-            return
-        if name == "HED":
-            self.model = HEDdetector.from_pretrained(self.MODEL_ID)
-        elif name == "Midas":
-            self.model = MidasDetector.from_pretrained(self.MODEL_ID)
-        elif name == "MLSD":
-            self.model = MLSDdetector.from_pretrained(self.MODEL_ID)
-        elif name == "Openpose":
-            self.model = OpenposeDetector.from_pretrained(self.MODEL_ID)
-        elif name == "PidiNet":
-            self.model = PidiNetDetector.from_pretrained(self.MODEL_ID)
-        elif name == "NormalBae":
-            self.model = NormalBaeDetector.from_pretrained(self.MODEL_ID)
-        elif name == "Lineart":
-            self.model = LineartDetector.from_pretrained(self.MODEL_ID)
-        elif name == "LineartAnime":
-            self.model = LineartAnimeDetector.from_pretrained(self.MODEL_ID)
-        elif name == "Canny":
-            self.model = CannyDetector()
-        elif name == "ContentShuffle":
-            self.model = ContentShuffleDetector()
-        elif name == "DPT":
-            self.model = DepthEstimator()
-        elif name == "UPerNet":
-            self.model = ImageSegmentor()
-        else:
-            raise ValueError
-        torch.cuda.empty_cache()
-        gc.collect()
-        self.name = name
-
-    def __call__(self, image: PIL.Image.Image, **kwargs) -> PIL.Image.Image:
-        if self.name == "Canny":
-            if "detect_resolution" in kwargs:
-                detect_resolution = kwargs.pop("detect_resolution")
-                image = np.array(image)
-                image = HWC3(image)
-                image = resize_image(image, resolution=detect_resolution)
-            image = self.model(image, **kwargs)
-            return PIL.Image.fromarray(image)
-        elif self.name == "Midas":
-            detect_resolution = kwargs.pop("detect_resolution", 512)
-            image_resolution = kwargs.pop("image_resolution", 512)
-            image = np.array(image)
-            image = HWC3(image)
-            image = resize_image(image, resolution=detect_resolution)
-            image = self.model(image, **kwargs)
-            image = HWC3(image)
-            image = resize_image(image, resolution=image_resolution)
-            return PIL.Image.fromarray(image)
-        else:
-            return self.model(image, **kwargs)
-
-
-# =====================================
-# Base Model
-# =====================================
-
-
-def process_prompts_valid(specific_prompt, specific_negative_prompt, prompt, negative_prompt):
-    specific_prompt_empty = (specific_prompt in [None, ""])
-    specific_negative_prompt_empty = (specific_negative_prompt in [None, ""])
-
-    prompt_valid = prompt if specific_prompt_empty else specific_prompt
-    negative_prompt_valid = negative_prompt if specific_negative_prompt_empty else specific_negative_prompt
-
-    return specific_prompt_empty, specific_negative_prompt_empty, prompt_valid, negative_prompt_valid
-
-
-def convert_image_to_numpy_array(image, gui_active=False):
-    if isinstance(image, str):
-        # If the input is a string (file path), open it as an image
-        image_pil = Image.open(image)
-        if image_pil.mode != 'RGB':
-            image_pil = image_pil.convert('RGB')
-        numpy_array = np.array(image_pil, dtype=np.uint8)
-    elif isinstance(image, Image.Image):
-        # If the input is already a PIL Image, convert it to a NumPy array
-        if image.mode != 'RGB':
-            image = image.convert('RGB')
-        numpy_array = np.array(image, dtype=np.uint8)
-    elif isinstance(image, np.ndarray):
-        # If the input is a NumPy array, ensure it's np.uint8
-        numpy_array = image.astype(np.uint8)
-    else:
-        if gui_active:
-            logger.info("Not found image")
-            return None
-        else:
-            raise ValueError(
-                "Unsupported image type or not control image found; Bug report to https://github.com/R3gm/stablepy or https://github.com/R3gm/SD_diffusers_interactive"
-            )
-
-    # Extract the RGB channels
-    try:
-        array_rgb = numpy_array[:, :, :3]
-    except Exception as e:
-        logger.error(str(e))
-        logger.error("Unsupported image type")
-        raise ValueError(
-            "Unsupported image type; Bug report to https://github.com/R3gm/stablepy or https://github.com/R3gm/SD_diffusers_interactive"
-        )
-
-    return array_rgb
-
-
-def latents_to_rgb(latents, latent_resize, vae_decoding, pipe):
-    weights = (
-        (60, -60, 25, -70),
-        (60, -5, 15, -50),
-        (60, 10, -5, -35)
-    )
-    if vae_decoding:
-        with torch.no_grad():
-            latents = [tl.unsqueeze(0) for tl in torch.unbind(latents, dim=0)][0]
-            image = pipe.vae.decode(latents / pipe.vae.config.scaling_factor, return_dict=False)[0]
-
-        resized_image = pipe.image_processor.postprocess(image, output_type="pil")
-    else:
-        weights_tensor = torch.tensor(weights, dtype=latents.dtype, device=latents.device).T
-        biases_tensor = torch.tensor((150, 140, 130), dtype=latents.dtype, device=latents.device)
-        rgb_tensor = torch.einsum("...lxy,lr -> ...rxy", latents, weights_tensor) + biases_tensor.view(-1, 1, 1)
-        image_array = rgb_tensor.clamp(0, 255)[0].byte().cpu().numpy()
-        image_array = image_array.transpose(1, 2, 0)  # Change the order of dimensions
-
-        pil_image = Image.fromarray(image_array)
-
-        resized_image = pil_image.resize((pil_image.size[0] * latent_resize, pil_image.size[1] * latent_resize), Image.LANCZOS)  # Resize 128x128 * ...
-
-    return resized_image
 
 
 class PreviewGenerator:
@@ -333,7 +111,18 @@ class PreviewGenerator:
         self.fail_work = None
         self.stream_config(5, 8, False)
 
-    def stream_config(self, concurrency, latent_resize_by, vae_decoding):
+    def stream_config(self, concurrency=5, latent_resize_by=8, vae_decoding=False):
+        """
+        Configures the streaming settings for the model.
+
+        Args:
+            concurrency (int): Controls how often the preview images are generated and displayed in relation to the steps.
+                               For example, a value of 2 displays an image every 2 steps. Default is 5.
+            latent_resize_by (int): Controls the scaling size of the latent images. A value of 1 is useful for achieving
+                                    high performance. Default is 8.
+            vae_decoding (bool): Use the VAE to decode the preview images. If set to True, it may negatively impact
+                                 performance. Default is False.
+        """
         self.concurrency = concurrency
         self.latent_resize_by = latent_resize_by
         self.vae_decoding = vae_decoding
@@ -342,6 +131,14 @@ class PreviewGenerator:
         latents = callback_kwargs["latents"]
         if step % self.concurrency == 0:  # every how many steps
             logger.debug(step)
+            if self.class_name == FLUX:
+                latents = self.pipe._unpack_latents(latents, self.metadata[9], self.metadata[8], self.pipe.vae_scale_factor)
+                latents = (latents / self.pipe.vae.config.scaling_factor) + self.pipe.vae.config.shift_factor
+                batch_size, channels, height, width = latents.shape
+                target_channels = 4
+                group_size = channels // target_channels
+                latents = latents.view(batch_size, target_channels, group_size, height, width).mean(dim=2)
+
             self.image_step = latents_to_rgb(latents, self.latent_resize_by, self.vae_decoding, self.pipe)
             self.new_image_event.set()  # Signal that a new image is available
         return callback_kwargs
@@ -393,16 +190,38 @@ class PreviewGenerator:
 
 
 class Model_Diffusers(PreviewGenerator):
+    """
+    Model_Diffusers class for generating images using diffusers.
+
+    Args:
+        base_model_id (str): ID of the base model. Default is "Lykon/dreamshaper-8".
+        task_name (str): Name of the task. Default is "txt2img".
+        vae_model: The VAE model to use. Default is None. To use the BakedVAE in the model, use the same base_model_id here.
+        type_model_precision: Precision type for the model. Default is torch.float16.
+        retain_task_model_in_cache (bool): Whether to retain the task model in cache. Default is False.
+        device: Device to use for computation. Default is None (Automatic).
+        controlnet_model (str): ControlNet model to use. Default is "Automatic".
+        env_components (dict): Environment components. Default is None.
+    """
     def __init__(
         self,
         base_model_id: str = "Lykon/dreamshaper-8",
         task_name: str = "txt2img",
         vae_model=None,
         type_model_precision=torch.float16,
-        retain_task_model_in_cache=True,
+        retain_task_model_in_cache=False,
         device=None,
+        controlnet_model="Automatic",
+        env_components=None,
     ):
         super().__init__()
+
+        if isinstance(env_components, dict):
+            self.env_components = env_components
+            self.env_components.pop("transformer", None)
+        else:
+            self.env_components = None
+
         self.device = (
             torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
             if device is None
@@ -410,10 +229,18 @@ class Model_Diffusers(PreviewGenerator):
         )
         self.base_model_id = ""
         self.task_name = ""
+        self.model_id_task = "Automatic"
         self.vae_model = None
         self.type_model_precision = (
             type_model_precision if torch.cuda.is_available() else torch.float32
         )  # For SD 1.5
+
+        self.image_encoder_name = None
+        self.image_encoder_module = None
+        self.ip_adapter_config = None
+
+        self.last_lora_error = ""
+        self.num_loras = 7
 
         reload = False
         self.load_pipe(
@@ -423,15 +250,20 @@ class Model_Diffusers(PreviewGenerator):
             type_model_precision,
             reload,
             retain_task_model_in_cache,
+            controlnet_model,
         )
         self.preprocessor = Preprocessor()
+        self.advanced_params()
 
         self.styles_data = styles_data
         self.STYLE_NAMES = STYLE_NAMES
         self.style_json_file = ""
 
-        self.image_encoder_name = None
-        self.image_encoder_module = None
+    def advanced_params(
+        self,
+        image_preprocessor_cuda_active: bool = False,
+    ):
+        self.image_preprocessor_cuda_active = image_preprocessor_cuda_active
 
     def switch_pipe_class(
         self,
@@ -439,6 +271,7 @@ class Model_Diffusers(PreviewGenerator):
         task_name,
         model_id,
         enable_pag,
+        verbose_info=False,
     ):
 
         if hasattr(self.pipe, "set_pag_applied_layers"):
@@ -472,31 +305,136 @@ class Model_Diffusers(PreviewGenerator):
             vae=self.pipe.vae,
             text_encoder=self.pipe.text_encoder,
             tokenizer=self.pipe.tokenizer,
-            unet=self.pipe.unet,
             scheduler=self.pipe.scheduler,
-            feature_extractor=self.pipe.feature_extractor,
-            image_encoder=self.pipe.image_encoder,
         )
-        if class_name == "StableDiffusionPipeline":
+
+        if class_name == FLUX:
+            model_components["text_encoder_2"] = self.pipe.text_encoder_2
+            model_components["tokenizer_2"] = self.pipe.tokenizer_2
+            model_components["transformer"] = self.pipe.transformer
+
+            if task_name == "txt2img":
+                from diffusers import FluxPipeline
+                self.pipe = FluxPipeline(**model_components)
+            elif task_name in ["repaint", "inpaint"]:
+                from .extra_pipe.flux.pipeline_flux_inpaint import FluxInpaintPipeline
+                self.pipe = FluxInpaintPipeline(**model_components)
+            elif task_name == "img2img":
+                from .extra_pipe.flux.pipeline_flux_img2img import FluxImg2ImgPipeline
+                self.pipe = FluxImg2ImgPipeline(**model_components)
+            else:
+                from .extra_pipe.flux.pipeline_flux_controlnet import FluxControlNetPipeline
+                from .extra_pipe.flux.controlnet_flux import FluxControlNetModel
+
+                if verbose_info:
+                    logger.info(f"ControlNet model: {model_id}")
+
+                if hasattr(self.pipe, "controlnet"):
+                    model_components["controlnet"] = self.pipe.controlnet
+                else:
+                    model_components["controlnet"] = FluxControlNetModel.from_pretrained(
+                        model_id,
+                        torch_dtype=torch.bfloat16
+                    )
+
+                self.pipe = FluxControlNetPipeline(
+                    **model_components
+                )
+            return None
+
+        else:
+            model_components["unet"] = self.pipe.unet
+            model_components["feature_extractor"] = self.pipe.feature_extractor
+            model_components["image_encoder"] = self.pipe.image_encoder
+
+        if class_name == SD15:
             model_components["safety_checker"] = self.pipe.safety_checker
             model_components["requires_safety_checker"] = self.pipe.config.requires_safety_checker
 
             if task_name not in ["txt2img", "img2img"]:
-                model_components["controlnet"] = ControlNetModel.from_pretrained(
-                    model_id, torch_dtype=self.type_model_precision
-                )
+                release_resources()
+
+                if verbose_info:
+                    logger.info(f"ControlNet model: {model_id}")
+                if os.path.exists(model_id):
+                    model_components["controlnet"] = load_cn_diffusers(
+                        model_id,
+                        "lllyasviel/control_v11p_sd15s2_lineart_anime",
+                        self.type_model_precision,
+                    )
+                else:
+                    model_components["controlnet"] = ControlNetModel.from_pretrained(
+                        model_id, torch_dtype=self.type_model_precision
+                    )
                 tk = "controlnet"
 
-        elif class_name == "StableDiffusionXLPipeline":
+                if task_name == "repaint":
+                    tk = "inpaint"
+
+        elif class_name == SDXL:
             model_components["text_encoder_2"] = self.pipe.text_encoder_2
             model_components["tokenizer_2"] = self.pipe.tokenizer_2
 
             if task_name not in ["txt2img", "inpaint", "img2img"]:
+                if verbose_info:
+                    logger.info(f"Task model: {model_id}")
+                release_resources()
+
+                # with init_on_device(self.device):
+
                 if "t2i" not in task_name:
-                    model_components["controlnet"] = ControlNetModel.from_pretrained(
-                        model_id, torch_dtype=torch.float16, variant="fp16"
-                    ).to(self.device)
+
                     tk = "controlnet"
+
+                    if os.path.exists(model_id):
+                        if (
+                            hasattr(self.pipe, "controlnet")
+                            and hasattr(self.pipe.controlnet, "config")
+                            and self.pipe.controlnet.config._name_or_path == model_id
+                        ):
+                            model_components["controlnet"] = self.pipe.controlnet
+                        else:
+                            if hasattr(self.pipe, "controlnet"):
+                                # self.pipe.controlnet.to_empty(device=self.device)
+                                self.pipe.__delattr__("controlnet")
+                                self.pipe.controlnet = None
+                                self.model_memory = {}
+                                release_resources()
+                            model_components["controlnet"] = load_cn_diffusers(
+                                model_id,
+                                "r3gm/controlnet-lineart-anime-sdxl-fp16",
+                                torch.float16,
+                            ).to(self.device)
+                    else:
+
+                        cls_controlnet = ControlNetModel
+
+                        if all(kw in model_id.lower() for kw in ["union", "promax"]):
+                            from .extra_pipe.sdxl.controlnet_union import ControlNetUnionModel
+                            cls_controlnet = ControlNetUnionModel
+                            tk = "controlnet_union+"
+
+                        if (
+                            hasattr(self.pipe, "controlnet")
+                            and hasattr(self.pipe.controlnet, "config")
+                            and self.pipe.controlnet.config._name_or_path == model_id
+                            and self.pipe.controlnet.__class__.__name__ == cls_controlnet.__name__
+                        ):
+                            model_components["controlnet"] = self.pipe.controlnet
+                        else:
+                            if hasattr(self.pipe, "controlnet"):
+                                # self.pipe.controlnet.to_empty(device=self.device)
+                                self.pipe.__delattr__("controlnet")
+                                self.pipe.controlnet = None
+                                self.model_memory = {}
+                                release_resources()
+                            model_components["controlnet"] = cls_controlnet.from_pretrained(
+                                model_id, torch_dtype=torch.float16, variant=check_variant_file(model_id, "fp16")
+                            ).to(self.device)
+
+                        if task_name == "repaint":
+                            tk += "_inpaint"
+
                 else:
                     model_components["adapter"] = T2IAdapter.from_pretrained(
                         model_id,
@@ -511,14 +449,17 @@ class Model_Diffusers(PreviewGenerator):
         if enable_pag:
             if (
                 tk == "adapter" or
-                (task_name in ["inpaint", "img2img"] and "XL" not in class_name)
+                task_name == "shuffle" or
+                (tk not in CLASS_PAG_DIFFUSERS_TASK[class_name])
+                # (task_name in ["inpaint", "img2img"] and "XL" not in class_name)
             ):
                 logger.warning(
-                    f"PAG is not enabled for {class_name} with {task_name}."
+                    f"PAG is not enabled for {class_name}-{tk} with {task_name}."
                 )
                 enable_pag = False
 
         # Load Pipeline
+        # with init_on_device(self.device):
         if enable_pag:
             model_components["pag_applied_layers"] = "mid"
             self.pipe = CLASS_PAG_DIFFUSERS_TASK[class_name][tk](**model_components).to(self.device)
@@ -530,8 +471,7 @@ class Model_Diffusers(PreviewGenerator):
 
         # Create new base values
         self.pipe.to(self.device)
-        torch.cuda.empty_cache()
-        gc.collect()
+        release_resources()
 
     def load_pipe(
         self,
@@ -540,11 +480,30 @@ class Model_Diffusers(PreviewGenerator):
         vae_model=None,
         type_model_precision=torch.float16,
         reload=False,
-        retain_task_model_in_cache=True,
+        retain_task_model_in_cache=False,
+        controlnet_model="Automatic",
     ) -> DiffusionPipeline:
+        """
+        Load a diffusion pipeline model.
+        Args:
+            base_model_id (str): The ID of the base model to load.
+            task_name (str, optional): The task name for the model. Defaults to "txt2img".
+            vae_model (str, optional): The VAE model to use. Defaults to None. To use the BakedVAE in the model, use the same base_model_id here.
+            type_model_precision (torch.dtype, optional): The precision type for the model. Defaults to torch.float16.
+            reload (bool, optional): Whether to reload the model even if it is already loaded. Defaults to False.
+            retain_task_model_in_cache (bool, optional): Whether to retain the task model in cache. Defaults to False.
+            controlnet_model (str, optional): The controlnet model to use. Defaults to "Automatic".
+        Returns:
+            DiffusionPipeline: The loaded diffusion pipeline model.
+        """
+
+        if not controlnet_model or task_name in ["txt2img", "img2img"]:
+            controlnet_model = "Automatic"
+
         if (
             base_model_id == self.base_model_id
             and task_name == self.task_name
+            and controlnet_model == self.model_id_task
             and hasattr(self, "pipe")
             and self.vae_model == vae_model
             and self.pipe is not None
@@ -579,30 +538,52 @@ class Model_Diffusers(PreviewGenerator):
             class_name = self.class_name
         else:
             # Unload previous model and stuffs
+            self.image_encoder_module = None
+            self.image_encoder_name = None
+            if self.ip_adapter_config:
+                self.pipe.unload_ip_adapter()
+                self.ip_adapter_config = None
+            release_resources()
+
+            if hasattr(self, "pipe") and self.pipe is not None:
+                for k_com, v_com in self.pipe.components.items():
+                    if hasattr(v_com, "to_empty"):
+
+                        if "Flux" in self.pipe.__class__.__name__ and isinstance(self.env_components, dict) and k_com in self.env_components:
+                            pass
+                        else:
+                            v_com.to_empty(device=self.device)
+                            self.pipe.__delattr__(k_com)
+                        setattr(self.pipe, k_com, None)
+
             self.pipe = None
+            # release_resources()
             self.task_name = ""
             self.model_memory = {}
-            self.lora_memory = [None, None, None, None, None]
-            self.lora_scale_memory = [1.0, 1.0, 1.0, 1.0, 1.0]
-            self.lora_status = [None] * 5
+            self.lora_memory = [None] * self.num_loras
+            self.lora_scale_memory = [1.0] * self.num_loras
+            self.lora_status = [None] * self.num_loras
             self.flash_config = None
             self.ip_adapter_config = None
             self.embed_loaded = []
             self.FreeU = False
-            torch.cuda.empty_cache()
-            gc.collect()
+            self.create_prompt_embeds.memory.clear()
+            release_resources()
 
             # Load new model
             if os.path.isfile(base_model_id):  # exists or not same # if os.path.exists(base_model_id):
 
                 if base_model_id.endswith(".safetensors"):
-                    model_type = checkpoint_model_type(base_model_id)
+                    model_type, sampling_type, scheduler_config, has_baked_vae = checkpoint_model_type(base_model_id)
                     logger.debug(f"Infered model type is {model_type}")
                 else:
                     model_type = "sd1.5"
+                    scheduler_config = None
+                    sampling_type = "EPS"
 
                 if model_type == "sdxl":
-                    logger.info("Default VAE: madebyollin/sdxl-vae-fp16-fix")
+                    if vae_model is None:
+                        logger.info("Default VAE: madebyollin/sdxl-vae-fp16-fix")
                     self.pipe = StableDiffusionXLPipeline.from_single_file(
                         base_model_id,
                         vae=AutoencoderKL.from_pretrained(
@@ -610,22 +591,81 @@ class Model_Diffusers(PreviewGenerator):
                         ),
                         torch_dtype=self.type_model_precision,
                     )
-                    class_name = "StableDiffusionXLPipeline"
+                    class_name = SDXL
                 elif model_type == "sd1.5":
+                    default_components = {}
+                    if not has_baked_vae:
+                        sd_vae = "stabilityai/sd-vae-ft-ema"
+                        logger.info(
+                            "The checkpoint doesn't include a baked VAE, "
+                            f"so '{sd_vae}' is being loaded instead."
+                        )
+                        default_components["vae"] = AutoencoderKL.from_pretrained(
+                            sd_vae, torch_dtype=self.type_model_precision
+                        )
+
                     self.pipe = StableDiffusionPipeline.from_single_file(
                         base_model_id,
-                        # vae=None
-                        # if vae_model == None
-                        # else AutoencoderKL.from_single_file(
-                        #     vae_model
-                        # ),
                         torch_dtype=self.type_model_precision,
+                        **default_components,
                     )
-                    class_name = "StableDiffusionPipeline"
+
+                    class_name = SD15
+                elif model_type in ["flux-dev", "flux-schnell"]:
+
+                    if "dev" in model_type:
+                        repo_flux_conf_transformer = get_flux_components_info()[0]
+                    else:
+                        repo_flux_conf_transformer = "black-forest-labs/FLUX.1-schnell"
+
+                    transformer = FluxTransformer2DModel.from_single_file(
+                        base_model_id,
+                        subfolder="transformer",
+                        torch_dtype=self.type_model_precision,
+                        config=repo_flux_conf_transformer,
+                    )
+
+                    if self.env_components is not None:
+                        from diffusers import FluxPipeline
+
+                        logger.debug(
+                            f"Env components > {self.env_components.keys()}"
+                        )
+                        self.pipe = FluxPipeline(
+                            transformer=transformer,
+                            **self.env_components,
+                        )
+                    else:
+                        repo_flux_model = get_flux_components_info()[0]
+                        self.pipe = DiffusionPipeline.from_pretrained(
+                            repo_flux_model,
+                            transformer=transformer,
+                            torch_dtype=self.type_model_precision,
+                        )
+
+                    class_name = FLUX
                 else:
                     raise ValueError(f"Model type {model_type} not supported.")
+
+                if scheduler_config:
+                    logger.info(
+                        f"Checkpoint schedule prediction type: {sampling_type}"
+                    )
+                    self.pipe.scheduler.register_to_config(**scheduler_config)
+
             else:
-                file_config = hf_hub_download(repo_id=base_model_id, filename="model_index.json")
+                try:
+                    file_config = hf_hub_download(
+                        repo_id=base_model_id,
+                        filename="model_index.json",
+                    )
+                except Exception as e:
+                    logger.error(
+                        "Unable to obtain the configuration file. Make sure "
+                        "you have access to the repository and that it is in"
+                        " the diffusers format."
+                    )
+                    raise e
 
                 # Reading data from the JSON file
                 with open(file_config, 'r') as json_config:
@@ -636,6 +676,34 @@ class Model_Diffusers(PreviewGenerator):
                     class_name = data_config['_class_name']
 
                 match class_name:
+
+                    case "FluxPipeline":
+
+                        transformer = FluxTransformer2DModel.from_pretrained(
+                            base_model_id,
+                            subfolder="transformer",
+                            torch_dtype=self.type_model_precision,
+                        )
+
+                        if self.env_components is not None:
+                            from diffusers import FluxPipeline
+
+                            logger.debug(
+                                f"Env components > {self.env_components.keys()}"
+                            )
+                            self.pipe = FluxPipeline(
+                                transformer=transformer,
+                                **self.env_components,
+                            )
+                        else:
+                            repo_flux_model = get_flux_components_info()[0]
+
+                            self.pipe = DiffusionPipeline.from_pretrained(
+                                repo_flux_model,
+                                transformer=transformer,
+                                torch_dtype=self.type_model_precision,
+                            )
+
                     case "StableDiffusionPipeline":
                         self.pipe = StableDiffusionPipeline.from_pretrained(
                             base_model_id,
@@ -643,7 +711,8 @@ class Model_Diffusers(PreviewGenerator):
                         )
 
                     case "StableDiffusionXLPipeline":
-                        logger.info("Default VAE: madebyollin/sdxl-vae-fp16-fix")
+                        if vae_model is None:
+                            logger.info("Default VAE: madebyollin/sdxl-vae-fp16-fix")
                         try:
                             self.pipe = DiffusionPipeline.from_pretrained(
                                 base_model_id,
@@ -675,9 +744,10 @@ class Model_Diffusers(PreviewGenerator):
                 logger.debug("Default VAE")
                 pass
             else:
+                logger.info(f"VAE: {vae_model}")
                 if os.path.isfile(vae_model):
                     self.pipe.vae = AutoencoderKL.from_single_file(
-                        vae_model
+                        vae_model,
                     )
                 else:
                     self.pipe.vae = AutoencoderKL.from_pretrained(
@@ -691,27 +761,32 @@ class Model_Diffusers(PreviewGenerator):
                     logger.warning(f"VAE: not in {self.type_model_precision}")
             self.vae_model = vae_model
 
-            # Define base scheduler
-            self.default_scheduler = copy.deepcopy(self.pipe.scheduler)
+            # Define base scheduler config
+            if self.class_name == FLUX:
+                self.pipe.scheduler.register_to_config(
+                    shift=(
+                        3.0 if self.pipe.transformer.config.guidance_embeds else 1.0
+                    ),
+                    use_dynamic_shifting=(
+                        True if self.pipe.transformer.config.guidance_embeds else False
+                    ),
+                )
+
+            scheduler_copy = copy.deepcopy(self.pipe.scheduler)
+
+            self.default_scheduler = (
+                verify_schedule_integrity(scheduler_copy, base_model_id)
+                if self.class_name == SDXL
+                else scheduler_copy
+            )
             logger.debug(f"Base sampler: {self.default_scheduler}")
 
-        if task_name in self.model_memory:
-            self.pipe = self.model_memory[task_name]
-            # Create new base values
-            # self.pipe.to(self.device)
-            # torch.cuda.empty_cache()
-            # gc.collect()
-            self.base_model_id = base_model_id
-            self.task_name = task_name
-            self.vae_model = vae_model
-            self.class_name = class_name
-            self.pipe.watermark = None
-            return
-
-        # if class_name == "StableDiffusionPipeline" and task_name not in SD15_TASKS:
-        #     logger.error(f"The selected task: {task_name} is not implemented for SD 1.5")
-        # elif class_name == "StableDiffusionXLPipeline" and task_name not in SDXL_TASKS:
-        #     logger.error(f"The selected task: {task_name} is not implemented for SDXL")
+            if class_name == SD15:
+                self.prompt_embedder = Promt_Embedder_SD1()
+            elif class_name == SDXL:
+                self.prompt_embedder = Promt_Embedder_SDXL()
+            elif class_name == FLUX:
+                self.prompt_embedder = Promt_Embedder_FLUX()
 
         # Load task
         model_id = CONTROLNET_MODEL_IDS[task_name]
@@ -720,16 +795,36 @@ class Model_Diffusers(PreviewGenerator):
                 model_id = model_id[1]
             else:
                 model_id = model_id[0]
+        if class_name == FLUX:
+            model_id = "Shakker-Labs/FLUX.1-dev-ControlNet-Union-Pro"
+        if controlnet_model != "Automatic":
+            model_id = controlnet_model
+
+        if task_name in self.model_memory:
+            if controlnet_model != "Automatic":
+                logger.warning(
+                    "The controlnet_model parameter does not support "
+                    "retain_task_model_in_cache = True"
+                )
+            self.pipe = self.model_memory[task_name]
+            self.base_model_id = base_model_id
+            self.task_name = task_name
+            self.vae_model = vae_model
+            self.class_name = class_name
+            self.pipe.watermark = None
+            return
 
         if (
             (self.task_name != task_name)
             or (self.class_name != class_name)
+            or (self.model_id_task != model_id)
         ):
             self.switch_pipe_class(
                 class_name,
                 task_name,
                 model_id,
                 enable_pag=False,
+                verbose_info=True,
             )
 
         self.model_id_task = model_id
@@ -739,7 +834,7 @@ class Model_Diffusers(PreviewGenerator):
         self.vae_model = vae_model
         self.class_name = class_name
 
-        if self.class_name == "StableDiffusionXLPipeline":
+        if self.class_name == SDXL:
             self.pipe.enable_vae_slicing()
             self.pipe.enable_vae_tiling()
             self.pipe.watermark = None
@@ -749,22 +844,7 @@ class Model_Diffusers(PreviewGenerator):
 
         return
 
-    def load_controlnet_weight(self, task_name: str) -> None:
-        torch.cuda.empty_cache()
-        gc.collect()
-        model_id = CONTROLNET_MODEL_IDS[task_name]
-        if isinstance(model_id, list):
-            # SD1.5 model
-            model_id = model_id[0]
-        controlnet = ControlNetModel.from_pretrained(
-            model_id, torch_dtype=self.type_model_precision
-        )
-        controlnet.to(self.device)
-        torch.cuda.empty_cache()
-        gc.collect()
-        self.pipe.controlnet = controlnet
-        # self.task_name = task_name
-
+    @cachebox(max_cache_size=2)
     @torch.inference_mode()
     def get_image_preprocess(
         self,
@@ -778,136 +858,41 @@ class Model_Diffusers(PreviewGenerator):
         distance_threshold: float,
         t2i_adapter_preprocessor: bool,
         recolor_gamma_correction: float,
+        tile_blur_sigma: int,
     ) -> list[PIL.Image.Image]:
         if image is None:
             raise ValueError("No reference image found.")
 
-        # if self.class_name == "StableDiffusionPipeline" and self.task_name in ["lineart", "lineart_anime"]:
-        #     if "anime" in preprocessor_name:
-        #         self.load_controlnet_weight("lineart_anime")
-        #         logger.info("Linear anime")
-        #     else:
-        #         self.load_controlnet_weight("lineart")
-
         if "t2i" in self.task_name:
             preprocessor_name = T2I_PREPROCESSOR_NAME[self.task_name] if t2i_adapter_preprocessor else "None"
 
-        params_preprocessor = {
-            "image": image,
-            "image_resolution": image_resolution,
-            "detect_resolution": preprocess_resolution,
-        }
-
         if preprocessor_name in ["None", "None (anime)"] or self.task_name in ["ip2p", "img2img", "pattern", "sdxl_tile_realistic"]:
-            image = HWC3(image)
-            image = resize_image(image, resolution=image_resolution)
-            control_image = PIL.Image.fromarray(image)
-        elif self.task_name in ["canny", "sdxl_canny_t2i"]:
-            self.preprocessor.load("Canny")
-            control_image = self.preprocessor(
-                low_threshold=low_threshold,
-                high_threshold=high_threshold,
-                **params_preprocessor
-            )
-        elif self.task_name in ["openpose", "sdxl_openpose_t2i"]:
-            self.preprocessor.load("Openpose")
-            control_image = self.preprocessor(
-                hand_and_face=True,
-                **params_preprocessor
-            )
-        elif self.task_name in ["depth", "sdxl_depth-midas_t2i"]:
-            self.preprocessor.load(preprocessor_name)
-            control_image = self.preprocessor(
-                **params_preprocessor
-            )
-        elif self.task_name == "mlsd":
-            self.preprocessor.load("MLSD")
-            control_image = self.preprocessor(
-                thr_v=value_threshold,
-                thr_d=distance_threshold,
-                **params_preprocessor
-            )
-        elif self.task_name in ["scribble", "sdxl_sketch_t2i"]:
-            if preprocessor_name == "HED":
-                self.preprocessor.load(preprocessor_name)
-                control_image = self.preprocessor(
-                    scribble=False,
-                    **params_preprocessor
-                )
-            elif preprocessor_name == "PidiNet":
-                self.preprocessor.load(preprocessor_name)
-                control_image = self.preprocessor(
-                    safe=False,
-                    **params_preprocessor
-                )
-        elif self.task_name == "softedge":
-            if preprocessor_name in ["HED", "HED safe"]:
-                safe = "safe" in preprocessor_name
-                self.preprocessor.load("HED")
-                control_image = self.preprocessor(
-                    scribble=safe,
-                    **params_preprocessor
-                )
-            elif preprocessor_name in ["PidiNet", "PidiNet safe"]:
-                safe = "safe" in preprocessor_name
-                self.preprocessor.load("PidiNet")
-                control_image = self.preprocessor(
-                    safe=safe,
-                    **params_preprocessor
-                )
-        elif self.task_name == "segmentation":
-            self.preprocessor.load(preprocessor_name)
-            control_image = self.preprocessor(
-                **params_preprocessor
-            )
-        elif self.task_name == "normalbae":
-            self.preprocessor.load("NormalBae")
-            control_image = self.preprocessor(
-                **params_preprocessor
-            )
-        elif self.task_name in ["lineart", "lineart_anime", "sdxl_lineart_t2i"]:
-            if preprocessor_name in ["Lineart", "Lineart coarse"]:
-                coarse = "coarse" in preprocessor_name
-                self.preprocessor.load("Lineart")
-                control_image = self.preprocessor(
-                    coarse=coarse,
-                    **params_preprocessor
-                )
-            elif preprocessor_name == "Lineart (anime)":
-                self.preprocessor.load("LineartAnime")
-                control_image = self.preprocessor(
-                    **params_preprocessor
-                )
-        elif self.task_name == "shuffle":
-            self.preprocessor.load(preprocessor_name)
-            control_image = self.preprocessor(
-                image=image,
-                image_resolution=image_resolution,
-            )
-        elif self.task_name == "tile":
-            image_np = resize_image(image, resolution=image_resolution)
-            blur_names = {
-                "Mild Blur": 5,
-                "Moderate Blur": 15,
-                "Heavy Blur": 27,
-            }
-            image_np = apply_gaussian_blur(
-                image_np, ksize=blur_names[preprocessor_name]
-            )
-            control_image = PIL.Image.fromarray(image_np)
-        elif self.task_name == "recolor":
-            image_np = resize_image(image, resolution=image_resolution)
+            return process_basic_task(image, image_resolution)
 
-            if preprocessor_name == "Recolor luminance":
-                image_np = recolor_luminance(image_np, thr_a=recolor_gamma_correction)
-            elif preprocessor_name == "Recolor intensity":
-                image_np = recolor_intensity(image_np, thr_a=recolor_gamma_correction)
+        params_preprocessor, model_name = get_preprocessor_params(
+            image,
+            self.task_name,
+            preprocessor_name,
+            image_resolution,
+            preprocess_resolution,
+            low_threshold,
+            high_threshold,
+            value_threshold,
+            distance_threshold,
+            recolor_gamma_correction,
+            tile_blur_sigma,
+        )
 
-            control_image = PIL.Image.fromarray(image_np)
-        else:
-            raise ValueError("No valid preprocessor name")
+        if not model_name:
+            raise ValueError(
+                "Unsupported task name or configuration: "
+                f"{self.task_name} - {preprocessor_name}"
+            )
 
-        return control_image
+        logger.debug(f"Preprocessor: {model_name}")
+
+        self.preprocessor.load(model_name, self.image_preprocessor_cuda_active)
+        return self.preprocessor(**params_preprocessor)
 
     @torch.inference_mode()
     def process_inpaint(
@@ -920,6 +905,10 @@ class Model_Diffusers(PreviewGenerator):
 
         # Get mask for Inpaint
         if gui_active or image_mask:
+            if image_mask is None:
+                raise ValueError(
+                    f"The 'image_mask' parameter is required for the {self.task_name} task."
+                )
             array_rgb_mask = convert_image_to_numpy_array(image_mask, gui_active)
         elif not gui_active:
             # Convert control image to draw
@@ -962,19 +951,18 @@ class Model_Diffusers(PreviewGenerator):
         else:
             raise ValueError("No image mask was found.")
 
-        image = HWC3(image)
-        image = resize_image(image, resolution=image_resolution)
-        init_image = PIL.Image.fromarray(image)
-
-        image_mask_hwc = HWC3(array_rgb_mask)
-        image_mask = resize_image(image_mask_hwc, resolution=image_resolution)
-        control_mask = PIL.Image.fromarray(image_mask)
-
+        init_image = process_basic_task(image, image_resolution)
+        control_mask = process_basic_task(array_rgb_mask, image_resolution)
         control_image = make_inpaint_condition(init_image, control_mask)
 
         return init_image, control_mask, control_image
 
     def get_scheduler(self, name):
+        if "Flow" in name and self.class_name != FLUX:
+            name = name.replace("FlowMatch ", "")
+        elif "Flow" not in name and self.class_name == FLUX:
+            name = "FlowMatch DPM++ 2M"
+
         if name in SCHEDULER_CONFIG_MAP:
             scheduler_class, config = SCHEDULER_CONFIG_MAP[name]
             # return scheduler_class.from_config(self.pipe.scheduler.config, **config)
@@ -983,66 +971,7 @@ class Model_Diffusers(PreviewGenerator):
         else:
             raise ValueError(f"Scheduler with name {name} not found. Valid schedulers: {', '.join(scheduler_names)}")
 
-    def emphasis_prompt(
-        self,
-        pipe,
-        prompt,
-        negative_prompt,
-        clip_skip=2,  # disabled with sdxl
-        emphasis="Original",
-        comma_padding_backtrack=20,
-    ):
-
-        if hasattr(pipe, "text_encoder_2"):
-            # Prompt weights for textual inversion
-            try:
-                prompt_ti = pipe.maybe_convert_prompt(prompt, pipe.tokenizer)
-                negative_prompt_ti = pipe.maybe_convert_prompt(negative_prompt, pipe.tokenizer)
-            except Exception as e:
-                logger.debug(str(e))
-                prompt_ti = prompt
-                negative_prompt_ti = negative_prompt
-                logger.error("FAILED: Convert prompt for textual inversion")
-
-            cond, uncond = long_prompts_with_weighting(
-                pipe,
-                prompt_ti,
-                negative_prompt_ti,
-                clip_skip=clip_skip,  # disabled with sdxl
-                emphasis=emphasis,
-                comma_padding_backtrack=comma_padding_backtrack
-            )
-
-            cond_tensor = [cond[0], uncond[0]]
-            all_cond = torch.cat(cond_tensor)
-
-            pooled_tensor = [cond[1], uncond[1]]
-            all_pooled = torch.cat(pooled_tensor)
-
-            assert torch.equal(all_cond[0:1], cond[0]), "Tensors are not equal"
-
-            return all_cond, all_pooled
-        else:
-            # Prompt weights for textual inversion
-            prompt_ti = self.pipe.maybe_convert_prompt(prompt, self.pipe.tokenizer)
-            negative_prompt_ti = self.pipe.maybe_convert_prompt(
-                negative_prompt, self.pipe.tokenizer
-            )
-
-            # separate the multi-vector textual inversion by comma
-            if self.embed_loaded != []:
-                prompt_ti = add_comma_after_pattern_ti(prompt_ti)
-                negative_prompt_ti = add_comma_after_pattern_ti(negative_prompt_ti)
-
-            return long_prompts_with_weighting(
-                pipe,
-                prompt_ti,
-                negative_prompt_ti,
-                clip_skip=clip_skip,
-                emphasis=emphasis,
-                comma_padding_backtrack=comma_padding_backtrack
-            )
-
+    @cachebox(max_cache_size=2)
     def create_prompt_embeds(
         self,
         prompt,
@@ -1051,160 +980,41 @@ class Model_Diffusers(PreviewGenerator):
         clip_skip,
         syntax_weights,
     ):
-        if self.class_name == "StableDiffusionPipeline":
-            if self.embed_loaded != textual_inversion and textual_inversion != []:
-                # Textual Inversion
-                for name, directory_name in textual_inversion:
-                    try:
-                        if directory_name.endswith(".pt"):
-                            model = torch.load(directory_name, map_location=self.device)
-                            model_tensors = model.get("string_to_param").get("*")
-                            s_model = {"emb_params": model_tensors}
-                            # save_file(s_model, directory_name[:-3] + '.safetensors')
-                            self.pipe.load_textual_inversion(s_model, token=name)
+        if self.embed_loaded != textual_inversion and textual_inversion != []:
+            self.prompt_embedder.apply_ti(
+                self.class_name,
+                textual_inversion,
+                self.pipe,
+                self.device,
+                self.gui_active
+            )
+            self.embed_loaded = textual_inversion
 
-                        else:
-                            # self.pipe.text_encoder.resize_token_embeddings(len(self.pipe.tokenizer),pad_to_multiple_of=128)
-                            # self.pipe.load_textual_inversion("./bad_prompt.pt", token="baddd")
-                            self.pipe.load_textual_inversion(directory_name, token=name)
-                        if not self.gui_active:
-                            logger.info(f"Applied : {name}")
-
-                    except Exception as e:
-                        exception = str(e)
-                        if name in exception:
-                            logger.debug(f"Previous loaded embed {name}")
-                        else:
-                            logger.error(exception)
-                            logger.error(f"Can't apply embed {name}")
-                self.embed_loaded = textual_inversion
-
-            if syntax_weights not in OLD_PROMPT_WEIGHT_OPTIONS:
-                emphasis = PROMPT_WEIGHT_OPTIONS[syntax_weights]
-                return self.emphasis_prompt(
-                    self.pipe,
-                    prompt,
-                    negative_prompt,
-                    clip_skip=2 if clip_skip else 1,  # disabled with sdxl
-                    emphasis=emphasis,
-                    comma_padding_backtrack=20,
-                )
-
-            # Clip skip
-            # clip_skip_diffusers = None #clip_skip - 1 # future update
-            if not hasattr(self, "compel"):
-                self.compel = Compel(
-                    tokenizer=self.pipe.tokenizer,
-                    text_encoder=self.pipe.text_encoder,
-                    truncate_long_prompts=False,
-                    returned_embeddings_type=ReturnedEmbeddingsType.PENULTIMATE_HIDDEN_STATES_NORMALIZED if clip_skip else ReturnedEmbeddingsType.LAST_HIDDEN_STATES_NORMALIZED,
-                )
-
-            # Prompt weights for textual inversion
+        # Prompt weights for textual inversion
+        if hasattr(self.pipe, "maybe_convert_prompt"):
             prompt_ti = self.pipe.maybe_convert_prompt(prompt, self.pipe.tokenizer)
             negative_prompt_ti = self.pipe.maybe_convert_prompt(
                 negative_prompt, self.pipe.tokenizer
             )
-
-            # separate the multi-vector textual inversion by comma
-            if self.embed_loaded != []:
-                prompt_ti = add_comma_after_pattern_ti(prompt_ti)
-                negative_prompt_ti = add_comma_after_pattern_ti(negative_prompt_ti)
-
-            # Syntax weights
-            self.pipe.to(self.device)
-            if syntax_weights == "Classic":
-                prompt_emb = get_embed_new(prompt_ti, self.pipe, self.compel)
-                negative_prompt_emb = get_embed_new(negative_prompt_ti, self.pipe, self.compel)
-            else:
-                prompt_emb = get_embed_new(prompt_ti, self.pipe, self.compel, compel_process_sd=True)
-                negative_prompt_emb = get_embed_new(negative_prompt_ti, self.pipe, self.compel, compel_process_sd=True)
-
-            # Fix error shape
-            if prompt_emb.shape != negative_prompt_emb.shape:
-                (
-                    prompt_emb,
-                    negative_prompt_emb,
-                ) = self.compel.pad_conditioning_tensors_to_same_length(
-                    [prompt_emb, negative_prompt_emb]
-                )
-
-            return prompt_emb, negative_prompt_emb
-
         else:
-            # SDXL embed
-            if self.embed_loaded != textual_inversion and textual_inversion != []:
-                # Textual Inversion
-                for name, directory_name in textual_inversion:
-                    try:
-                        from safetensors.torch import load_file
-                        state_dict = load_file(directory_name)
-                        self.pipe.load_textual_inversion(state_dict["clip_g"], token=name, text_encoder=self.pipe.text_encoder_2, tokenizer=self.pipe.tokenizer_2)
-                        self.pipe.load_textual_inversion(state_dict["clip_l"], token=name, text_encoder=self.pipe.text_encoder, tokenizer=self.pipe.tokenizer)
-                        if not self.gui_active:
-                            logger.info(f"Applied : {name}")
-                    except Exception as e:
-                        exception = str(e)
-                        if name in exception:
-                            logger.debug(f"Previous loaded embed {name}")
-                        else:
-                            logger.error(exception)
-                            logger.error(f"Can't apply embed {name}")
-                self.embed_loaded = textual_inversion
+            prompt_ti = prompt
+            negative_prompt_ti = negative_prompt
 
-            if syntax_weights not in OLD_PROMPT_WEIGHT_OPTIONS:
-                emphasis = PROMPT_WEIGHT_OPTIONS[syntax_weights]
-                return self.emphasis_prompt(
-                    self.pipe,
-                    prompt,
-                    negative_prompt,
-                    clip_skip=2 if clip_skip else 1,  # disabled with sdxl
-                    emphasis=emphasis,
-                    comma_padding_backtrack=20,
-                )
+        # separate the multi-vector textual inversion by comma
+        if self.embed_loaded != []:
+            prompt_ti = add_comma_after_pattern_ti(prompt_ti)
+            negative_prompt_ti = add_comma_after_pattern_ti(negative_prompt_ti)
 
-            if not hasattr(self, "compel"):
-                # Clip skip
-                if clip_skip:
-                    # clip_skip_diffusers = None #clip_skip - 1 # future update
-                    self.compel = Compel(
-                        tokenizer=[self.pipe.tokenizer, self.pipe.tokenizer_2],
-                        text_encoder=[self.pipe.text_encoder, self.pipe.text_encoder_2],
-                        returned_embeddings_type=ReturnedEmbeddingsType.PENULTIMATE_HIDDEN_STATES_NON_NORMALIZED,
-                        requires_pooled=[False, True],
-                        truncate_long_prompts=False,
-                    )
-                else:
-                    # clip_skip_diffusers = None # clip_skip = None # future update
-                    self.compel = Compel(
-                        tokenizer=[self.pipe.tokenizer, self.pipe.tokenizer_2],
-                        text_encoder=[self.pipe.text_encoder, self.pipe.text_encoder_2],
-                        requires_pooled=[False, True],
-                        truncate_long_prompts=False,
-                    )
+        prompt_emb, negative_prompt_emb, compel = self.prompt_embedder(
+            prompt_ti,
+            negative_prompt_ti,
+            syntax_weights,
+            self.pipe,
+            clip_skip,
+            self.compel if hasattr(self, "compel") else None,
+        )
 
-            # Prompt weights for textual inversion
-            try:
-                prompt_ti = self.pipe.maybe_convert_prompt(prompt, self.pipe.tokenizer)
-                negative_prompt_ti = self.pipe.maybe_convert_prompt(negative_prompt, self.pipe.tokenizer)
-            except Exception as e:
-                logger.debug(str(e))
-                prompt_ti = prompt
-                negative_prompt_ti = negative_prompt
-                logger.error("FAILED: Convert prompt for textual inversion")
-
-            # prompt syntax style a1...
-            if syntax_weights == "Classic":
-                # self.pipe.to("cuda")
-                prompt_ti = get_embed_new(prompt_ti, self.pipe, self.compel, only_convert_string=True)
-                negative_prompt_ti = get_embed_new(negative_prompt_ti, self.pipe, self.compel, only_convert_string=True)
-            else:
-                prompt_ti = prompt
-                negative_prompt_ti = negative_prompt
-
-            conditioning, pooled = self.compel([prompt_ti, negative_prompt_ti])
-
-            return conditioning, pooled
+        return prompt_emb, negative_prompt_emb
 
     def process_lora(self, select_lora, lora_weights_scale, unload=False):
         device = "cuda" if self.device.type != "cpu" else "cpu"
@@ -1226,6 +1036,7 @@ class Model_Diffusers(PreviewGenerator):
                         traceback.print_exc()
                     logger.error(f"ERROR: LoRA not compatible: {select_lora}")
                     logger.debug(f"{str(e)}")
+                    self.last_lora_error = str(e)
                     status_lora = False
         else:
             # Unload numerically unstable but fast and need less memory
@@ -1275,8 +1086,8 @@ class Model_Diffusers(PreviewGenerator):
         self.style_json_file = ""
 
         logger.info(
-                    f"Beta styles loaded with {len(self.STYLE_NAMES)} styles"
-                )
+            f"Beta styles loaded with {len(self.STYLE_NAMES)} styles"
+        )
 
     def set_ip_adapter_multimode_scale(self, ip_scales, ip_adapter_mode):
         mode_scales = []
@@ -1331,9 +1142,11 @@ class Model_Diffusers(PreviewGenerator):
             vit_repo = REPO_IMAGE_ENCODER[vit_model[0]]
 
             self.image_encoder_module = CLIPVisionModelWithProjection.from_pretrained(
-                vit_repo,
+                vit_repo[0],
+                subfolder=vit_repo[1],
+                use_safetensors=True,
                 torch_dtype=self.type_model_precision,
-            ).to(self.device)
+            ).to(self.device, dtype=self.type_model_precision)
             self.image_encoder_name = vit_model[0]
             self.pipe.register_modules(image_encoder=self.image_encoder_module)  # automatic change
 
@@ -1415,8 +1228,7 @@ class Model_Diffusers(PreviewGenerator):
                         do_classifier_free_guidance
                     )[0]
 
-                    gc.collect()
-                    torch.cuda.empty_cache()
+                    release_resources()
 
                     self.pipe.unet.encoder_hid_proj.image_projection_layers[i].clip_embeds = clip_embeds.to(dtype=self.type_model_precision)
                     if "plusv2" in ip_weight:
@@ -1424,8 +1236,7 @@ class Model_Diffusers(PreviewGenerator):
                     else:
                         self.pipe.unet.encoder_hid_proj.image_projection_layers[i].shortcut = False
 
-                gc.collect()
-                torch.cuda.empty_cache()
+                release_resources()
 
             # average_embedding = torch.mean(torch.stack(faceid_all_embeds, dim=0), dim=0)
 
@@ -1451,6 +1262,71 @@ class Model_Diffusers(PreviewGenerator):
 
         return image_embeds, processed_masks
 
+    def load_lora_on_the_fly(
+        self,
+        lora_A=None, lora_scale_A=1.0,
+        lora_B=None, lora_scale_B=1.0,
+        lora_C=None, lora_scale_C=1.0,
+        lora_D=None, lora_scale_D=1.0,
+        lora_E=None, lora_scale_E=1.0,
+        lora_F=None, lora_scale_F=1.0,
+        lora_G=None, lora_scale_G=1.0,
+    ):
+        """
+        Dynamically applies LoRA weights without fusing them.
+        LoRAs load quickly, but they need more RAM and can make the inference process take longer.
+
+        Note:
+            Ensure any merged LoRA with `model.lora_merge()` remains loaded before using this method.
+        """
+
+        current_lora_list = [
+            lora_A,
+            lora_B,
+            lora_C,
+            lora_D,
+            lora_E,
+            lora_F,
+            lora_G
+        ]
+
+        current_lora_scale_list = [
+            lora_scale_A,
+            lora_scale_B,
+            lora_scale_C,
+            lora_scale_D,
+            lora_scale_E,
+            lora_scale_F,
+            lora_scale_G
+        ]
+
+        lora_status = [None] * self.num_loras
+
+        if self.lora_memory == current_lora_list and self.lora_scale_memory == current_lora_scale_list:
+            for single_lora in self.lora_memory:
+                if single_lora is not None:
+                    logger.info(f"LoRA in memory: {single_lora}")
+            pass
+        elif (
+            self.lora_memory == [None] * self.num_loras
+            and current_lora_list == [None] * self.num_loras
+        ):
+            pass
+        else:
+            self.create_prompt_embeds.memory.clear()
+
+            lora_status = load_no_fused_lora(
+                self.pipe, self.num_loras,
+                current_lora_list, current_lora_scale_list
+            )
+
+        logger.debug(str(self.pipe.get_active_adapters()))
+
+        self.lora_memory = current_lora_list
+        self.lora_scale_memory = current_lora_scale_list
+
+        return lora_status
+
     def lora_merge(
         self,
         lora_A=None, lora_scale_A=1.0,
@@ -1458,61 +1334,54 @@ class Model_Diffusers(PreviewGenerator):
         lora_C=None, lora_scale_C=1.0,
         lora_D=None, lora_scale_D=1.0,
         lora_E=None, lora_scale_E=1.0,
+        lora_F=None, lora_scale_F=1.0,
+        lora_G=None, lora_scale_G=1.0,
     ):
-
-        lora_status = [None] * 5
-
-        if self.lora_memory == [
+        current_lora_list = [
             lora_A,
             lora_B,
             lora_C,
             lora_D,
             lora_E,
-        ] and self.lora_scale_memory == [
+            lora_F,
+            lora_G
+        ]
+
+        current_lora_scale_list = [
             lora_scale_A,
             lora_scale_B,
             lora_scale_C,
             lora_scale_D,
             lora_scale_E,
-        ]:
+            lora_scale_F,
+            lora_scale_G
+        ]
+
+        lora_status = [None] * self.num_loras
+
+        if self.lora_memory == current_lora_list and self.lora_scale_memory == current_lora_scale_list:
             for single_lora in self.lora_memory:
                 if single_lora is not None:
                     logger.info(f"LoRA in memory: {single_lora}")
             pass
-
+        elif (
+            self.lora_memory == [None] * self.num_loras
+            and current_lora_list == [None] * self.num_loras
+        ):
+            pass
         else:
+            self.create_prompt_embeds.memory.clear()
+
             logger.debug("_un, re and load_ lora")
 
-            self.process_lora(
-                self.lora_memory[0], self.lora_scale_memory[0], unload=True
-            )
-            self.process_lora(
-                self.lora_memory[1], self.lora_scale_memory[1], unload=True
-            )
-            self.process_lora(
-                self.lora_memory[2], self.lora_scale_memory[2], unload=True
-            )
-            self.process_lora(
-                self.lora_memory[3], self.lora_scale_memory[3], unload=True
-            )
-            self.process_lora(
-                self.lora_memory[4], self.lora_scale_memory[4], unload=True
-            )
+            for l_memory, scale_memory in zip(self.lora_memory, self.lora_scale_memory):
+                self.process_lora(l_memory, scale_memory, unload=True)
 
-            lora_status[0] = self.process_lora(lora_A, lora_scale_A)
-            lora_status[1] = self.process_lora(lora_B, lora_scale_B)
-            lora_status[2] = self.process_lora(lora_C, lora_scale_C)
-            lora_status[3] = self.process_lora(lora_D, lora_scale_D)
-            lora_status[4] = self.process_lora(lora_E, lora_scale_E)
+            for i, (l_new, scale_new) in enumerate(zip(current_lora_list, current_lora_scale_list)):
+                lora_status[i] = self.process_lora(l_new, scale_new)
 
-        self.lora_memory = [lora_A, lora_B, lora_C, lora_D, lora_E]
-        self.lora_scale_memory = [
-            lora_scale_A,
-            lora_scale_B,
-            lora_scale_C,
-            lora_scale_D,
-            lora_scale_E,
-        ]
+        self.lora_memory = current_lora_list
+        self.lora_scale_memory = current_lora_scale_list
 
         return lora_status
 
@@ -1528,6 +1397,8 @@ class Model_Diffusers(PreviewGenerator):
         clip_skip: Optional[bool] = True,
         seed: int = -1,
         sampler: str = "DPM++ 2M",
+        schedule_type: str = "Automatic",
+        schedule_prediction_type: str = "Automatic",
         syntax_weights: str = "Classic",
 
         lora_A: Optional[str] = None,
@@ -1540,6 +1411,10 @@ class Model_Diffusers(PreviewGenerator):
         lora_scale_D: float = 1.0,
         lora_E: Optional[str] = None,
         lora_scale_E: float = 1.0,
+        lora_F: Optional[str] = None,
+        lora_scale_F: float = 1.0,
+        lora_G: Optional[str] = None,
+        lora_scale_G: float = 1.0,
         textual_inversion: List[Tuple[str, str]] = [],
         FreeU: bool = False,
         adetailer_A: bool = False,
@@ -1561,6 +1436,7 @@ class Model_Diffusers(PreviewGenerator):
         value_threshold: float = 0.1,
         distance_threshold: float = 0.1,
         recolor_gamma_correction: float = 1.0,
+        tile_blur_sigma: int = 9,
         controlnet_conditioning_scale: float = 1.0,
         control_guidance_start: float = 0.0,
         control_guidance_end: float = 1.0,
@@ -1568,15 +1444,21 @@ class Model_Diffusers(PreviewGenerator):
         t2i_adapter_conditioning_scale: float = 1.0,
         t2i_adapter_conditioning_factor: float = 1.0,
 
-        upscaler_model_path: Optional[str] = None,  # add latent
+        upscaler_model_path: Optional[str] = None,
         upscaler_increases_size: float = 1.5,
-        esrgan_tile: int = 100,
-        esrgan_tile_overlap: int = 10,
+        upscaler_tile_size: int = 192,  # max 512, step 16
+        upscaler_tile_overlap: int = 8,  # max 48
         hires_steps: int = 25,
         hires_denoising_strength: float = 0.35,
         hires_prompt: str = "",
         hires_negative_prompt: str = "",
         hires_sampler: str = "Use same sampler",
+        hires_schedule_type: str = "Use same schedule type",
+        hires_guidance_scale: float = -1.,
+
+        face_restoration_model: Optional[str] = None,
+        face_restoration_visibility: float = 1.0,
+        face_restoration_weight: float = 0.5,
 
         ip_adapter_image: Optional[Any] = [],  # str Image
         ip_adapter_mask: Optional[Any] = [],  # str Image
@@ -1586,7 +1468,9 @@ class Model_Diffusers(PreviewGenerator):
 
         loop_generation: int = 1,
         display_images: bool = False,
+        image_display_scale: int = 1.,
         save_generated_images: bool = True,
+        filename_pattern: str = "model,seed",
         image_storage_location: str = "./images",
         generator_in_cpu: bool = False,
         leave_progress_bar: bool = False,
@@ -1599,6 +1483,7 @@ class Model_Diffusers(PreviewGenerator):
         image_previews: bool = False,
         xformers_memory_efficient_attention: bool = False,
         gui_active: bool = False,
+        **kwargs,
     ):
 
         """
@@ -1606,9 +1491,9 @@ class Model_Diffusers(PreviewGenerator):
 
         Args:
             prompt (str , optional):
-                The prompt or prompts to guide image generation.
+                The prompt to guide image generation.
             negative_prompt (str , optional):
-                The prompt or prompts to guide what to not include in image generation. Ignored when not using guidance (`guidance_scale < 1`).
+                The prompt to guide what to not include in image generation. Ignored when not using guidance (`guidance_scale < 1`).
             img_height (int, optional, defaults to 512):
                 The height in pixels of the generated image.
             img_width (int, optional, defaults to 512):
@@ -1627,12 +1512,30 @@ class Model_Diffusers(PreviewGenerator):
             seed (int, optional, defaults to -1):
                 A seed for controlling the randomness of the image generation process. -1 design a random seed.
             sampler (str, optional, defaults to "DPM++ 2M"):
-                The sampler used for the generation process.
+                The sampler algorithm that defines how noise is gradually removed.
                 To see all the valid sampler names, use the following code:
 
                 ```python
                 from stablepy import scheduler_names
                 print(scheduler_names)
+                ```
+            schedule_type (str, optional, defaults to "Automatic"):
+                The pattern controlling the rate at which noise is removed across each generation step.
+                To see all the valid schedule_type names, use the following code:
+
+                ```python
+                from stablepy import SCHEDULE_TYPE_OPTIONS
+                print(SCHEDULE_TYPE_OPTIONS)
+                ```
+            schedule_prediction_type (str, optional, defaults to "Automatic"):
+                Prediction type of the scheduler function; can be `epsilon` (predicts the noise of the diffusion process),
+                `sample` (directly predicts the noisy sample`) or `v_prediction` (see section 2.4 of [Imagen
+                Video](https://imagen.research.google/video/paper.pdf) paper).
+                To see all the valid schedule_prediction_type names, use the following code:
+
+                ```python
+                from stablepy import SCHEDULE_PREDICTION_TYPE_OPTIONS
+                print(SCHEDULE_PREDICTION_TYPE_OPTIONS)
                 ```
             syntax_weights (str, optional, defaults to "Classic"):
                 Specifies the type of syntax weights and emphasis used during generation.
@@ -1662,6 +1565,14 @@ class Model_Diffusers(PreviewGenerator):
             lora_E (str, optional):
                 Placeholder for lora E parameter.
             lora_scale_E (float, optional, defaults to 1.0):
+                Placeholder for lora scale E parameter.
+            lora_F (str, optional):
+                Placeholder for lora E parameter.
+            lora_scale_F (float, optional, defaults to 1.0):
+                Placeholder for lora scale E parameter.
+            lora_G (str, optional):
+                Placeholder for lora E parameter.
+            lora_scale_G (float, optional, defaults to 1.0):
                 Placeholder for lora scale E parameter.
             textual_inversion (List[Tuple[str, str]], optional, defaults to []):
                 Placeholder for textual inversion list of tuples. Help the model to adapt to a particular
@@ -1697,20 +1608,20 @@ class Model_Diffusers(PreviewGenerator):
                 Perturbed Attention Guidance (PAG) enhances image generation quality without the need for training.
                 If it is used, it is recommended to use values close to 3.0 for good results.
             upscaler_model_path (str, optional):
-                This is the path of the ESRGAN model that will be used for the upscale; on the other hand,
-                you can also use simply 'Lanczos', 'Nearest,' or 'Latent,' the latter of which has variants
+                This is the path of the model that will be used for the upscale; on the other hand,
+                you can also simply use any of the built-in upscalers like 'Nearest', 'Latent', 'SwinIR 4x', etc.
                 that can be consulted in the following code:
 
                 ```python
-                from stablepy import LATENT_UPSCALERS
-                print(LATENT_UPSCALERS)
+                from stablepy import ALL_BUILTIN_UPSCALERS
+                print(ALL_BUILTIN_UPSCALERS)
                 ```
             upscaler_increases_size (float, optional, defaults to 1.5):
                 Placeholder for upscaler increases size parameter.
-            esrgan_tile (int, optional, defaults to 100):
-                Tile if use a ESRGAN model.
-            esrgan_tile_overlap (int, optional, defaults to 100):
-                Tile overlap if use a ESRGAN model.
+            upscaler_tile_size (int, optional, defaults to 192):
+                Tile if use a upscaler model.
+            upscaler_tile_overlap (int, optional, defaults to 8):
+                Tile overlap if use a upscaler model.
             hires_steps (int, optional, defaults to 25):
                 The number of denoising steps for hires. More denoising steps usually lead to a higher quality image at the
                 expense of slower inference.
@@ -1722,10 +1633,33 @@ class Model_Diffusers(PreviewGenerator):
                 The negative prompt for hires. If not specified, the main negative prompt will be used.
             hires_sampler (str, optional, defaults to "Use same sampler"):
                 The sampler used for the hires generation process. If not specified, the main sampler will be used.
+            hires_schedule_type (str, optional, defaults to "Use same schedule type"):
+                The schedule type used for the hires generation process. If not specified, the main schedule will be used.
+            hires_guidance_scale (float, optional, defaults to -1.):
+                The guidance scale used for the hires generation process.
+                If the value is set to -1. the main guidance_scale will be used.
+            face_restoration_model (str, optional default None):
+                This is the name of the face restoration model that will be used.
+
+                To see all the valid face restoration model names, use the following code:
+
+                ```python
+                from stablepy import FACE_RESTORATION_MODELS
+                print(FACE_RESTORATION_MODELS)
+                ```
+            face_restoration_visibility (float, optional, defaults to 1.):
+                The visibility of the restored face's changes.
+            face_restoration_weight (float, optional, defaults to 1.):
+                The weight value used for the CodeFormer model.
             image (Any, optional):
                 The image to be used for the Inpaint, ControlNet, or T2I adapter.
             preprocessor_name (str, optional, defaults to "None"):
-                Preprocessor name for ControlNet.
+                Preprocessor name for ControlNet tasks.
+                To see the mapping of tasks with their corresponding preprocessor names, use the following code:
+                ```python
+                from stablepy import TASK_AND_PREPROCESSORS
+                print(TASK_AND_PREPROCESSORS)
+                ```
             preprocess_resolution (int, optional, defaults to 512):
                 Preprocess resolution for the Inpaint, ControlNet, or T2I adapter.
             image_resolution (int, optional, defaults to 512):
@@ -1742,6 +1676,10 @@ class Model_Diffusers(PreviewGenerator):
                 Value threshold parameter for ControlNet MLSD.
             distance_threshold (float, optional, defaults to 0.1):
                 Distance threshold parameter for ControlNet MLSD.
+            recolor_gamma_correction (float, optional, defaults to 1.0):
+                Gamma correction parameter for ControlNet Recolor.
+            tile_blur_sigma (int, optional, defaults to 9.0):
+                Blur sigma paramater for ControlNet Tile.
             controlnet_conditioning_scale (float, optional, defaults to 1.0):
                 The outputs of the ControlNet are multiplied by `controlnet_conditioning_scale` before they are added
                 to the residual in the original `unet`. Used in ControlNet and Inpaint
@@ -1762,8 +1700,18 @@ class Model_Diffusers(PreviewGenerator):
                 The number of times the specified `num_images` will be generated.
             display_images (bool, optional, defaults to False):
                 If you use a notebook, you will be able to display the images generated with this parameter.
+            image_display_scale (float, optional, defaults to 1.):
+                The proportional scale of the displayed image in the notebook.
             save_generated_images (bool, optional, defaults to True):
                 By default, the generated images are saved in the current location within the 'images' folder. You can disable this with this parameter.
+            filename_pattern (str , optional, defaults to "model,seed"):
+                Sets the name that will be used to save the images.
+                This name can be any text or a specific key, and each value needs to be separated by a comma.
+                You can check the list of valid keys:
+                ```python
+                from stablepy import VALID_FILENAME_PATTERNS
+                print(VALID_FILENAME_PATTERNS)
+                ```
             image_storage_location (str , optional, defaults to "./images"):
                 The directory where the generated images are saved.
             generator_in_cpu (bool, optional, defaults to False):
@@ -1808,9 +1756,13 @@ class Model_Diffusers(PreviewGenerator):
             image_previews (bool, optional, defaults to False):
                 Displaying the image denoising process.
             xformers_memory_efficient_attention (bool, optional, defaults to False):
-                Improves generation time, currently disabled.
+                Improves generation time; currently disabled due to quality issues with LoRA.
             gui_active (bool, optional, defaults to False):
                 utility when used with a GUI, it changes the behavior especially by displaying confirmation messages or options.
+            **kwargs (dict, optional):
+                kwargs is used to pass additional parameters to the Diffusers pipeline. This allows for flexibility
+                when specifying optional settings like guidance_rescale, eta, cross_attention_kwargs, and more.
+
 
         Specific parameter usage details:
 
@@ -1856,9 +1808,14 @@ class Model_Diffusers(PreviewGenerator):
 
         if not seed:
             seed = -1
+        if self.task_name == "":
+            raise RuntimeError(
+                "Some components of the model did not "
+                "load correctly. Please reload the model"
+            )
         if self.task_name != "txt2img" and image is None:
             raise ValueError(
-                "You need to specify the <image> for this task."
+                f"The 'image' parameter is required for the {self.task_name} task."
             )
         if hires_steps < 2 and upscaler_model_path in LATENT_UPSCALERS:
             raise ValueError("Latent upscaler requires hires_steps. Use at least 2 steps.")
@@ -1885,16 +1842,70 @@ class Model_Diffusers(PreviewGenerator):
                 "Ip adapter require the ip adapter image and the ip adapter model for the task"
             )
 
+        sampler, schedule_type, msg_schedule = check_scheduler_compatibility(
+            self.class_name,
+            sampler,
+            schedule_type,
+        )
+        if msg_schedule:
+            logger.warning(msg_schedule)
+
+        face_restoration_device = self.device.type
         self.gui_active = gui_active
-        self.image_previews = image_previews
+
+        pp = CURRENT_TASK_PARAMS(
+            disable_progress_bar=disable_progress_bar,
+            display_images=display_images,
+            image_display_scale=image_display_scale,
+            image_storage_location=image_storage_location,
+            save_generated_images=save_generated_images,
+            retain_compel_previous_load=retain_compel_previous_load,
+            hires_steps=hires_steps,
+            hires_before_adetailer=hires_before_adetailer,
+            hires_after_adetailer=hires_after_adetailer,
+            upscaler_model_path=upscaler_model_path,
+            upscaler_increases_size=upscaler_increases_size,
+            upscaler_tile_size=upscaler_tile_size,
+            upscaler_tile_overlap=upscaler_tile_overlap,
+            face_restoration_model=face_restoration_model,
+            face_restoration_visibility=face_restoration_visibility,
+            face_restoration_weight=face_restoration_weight,
+            face_restoration_device=face_restoration_device,
+            loop_generation=loop_generation,
+            generator_in_cpu=generator_in_cpu,
+            num_images=num_images,
+            seed=seed,
+            adetailer_A=adetailer_A,
+            adetailer_B=adetailer_B,
+        )
 
         if self.pipe is None:
             self.load_pipe(
                 self.base_model_id,
                 task_name=self.task_name,
                 vae_model=self.vae_model,
+                type_model_precision=self.type_model_precision,
+                retain_task_model_in_cache=False,
                 reload=True,
+                controlnet_model=self.model_id_task,
             )
+        elif (
+            self.class_name == FLUX
+            and (self.pipe.text_encoder is None or self.pipe.transformer is None)
+        ):
+            logger.info("Reloading flux pipeline")
+            original_device = self.device
+            self.device = torch.device("cpu")
+            self.load_pipe(
+                self.base_model_id,
+                task_name=self.task_name,
+                vae_model=self.vae_model,
+                type_model_precision=self.type_model_precision,
+                retain_task_model_in_cache=False,
+                reload=True,
+                controlnet_model=self.model_id_task,
+            )
+            self.device = original_device
 
         pag_scale_is_true = bool(pag_scale)
         hasattr_pipe_pag = hasattr(self.pipe, "set_pag_applied_layers")
@@ -1907,12 +1918,27 @@ class Model_Diffusers(PreviewGenerator):
             )
 
         self.pipe.set_progress_bar_config(leave=leave_progress_bar)
-        self.pipe.set_progress_bar_config(disable=disable_progress_bar)
+        self.pipe.set_progress_bar_config(disable=pp.disable_progress_bar)
 
         xformers_memory_efficient_attention = False  # disabled
         if xformers_memory_efficient_attention and torch.cuda.is_available():
             self.pipe.disable_xformers_memory_efficient_attention()
-        self.pipe.to(self.device)
+
+        if self.class_name != FLUX:
+            self.pipe.to(self.device)
+        else:
+            self.pipe.text_encoder.to(self.device)
+            self.pipe.text_encoder_2.to(self.device)
+            logger.debug(str(self.pipe._execution_device))  # alternative patch to secuential_cpu_offload()
+
+            origin_device = self.device
+
+            def _execution_device(self):
+                logger.debug(f"patch device is {origin_device}")
+                return origin_device
+
+            self.pipe.__class__._execution_device = property(_execution_device)
+            logger.debug(str(self.pipe._execution_device))
 
         # Load style prompt file
         if style_json_file != "" and style_json_file != self.style_json_file:
@@ -1932,6 +1958,8 @@ class Model_Diffusers(PreviewGenerator):
             lora_C, lora_scale_C,
             lora_D, lora_scale_D,
             lora_E, lora_scale_E,
+            lora_F, lora_scale_F,
+            lora_G, lora_scale_G,
         )
 
         if sampler in FLASH_AUTO_LOAD_SAMPLER and self.flash_config is None:
@@ -1968,6 +1996,16 @@ class Model_Diffusers(PreviewGenerator):
         if not isinstance(ip_adapter_mode, list):
             ip_adapter_mode = [ip_adapter_mode]
 
+        if ip_adapter_image:
+            if self.class_name == FLUX:
+                raise ValueError("IP adapter is not currently supported with Flux")
+            for ipa_ml in ip_adapter_model:
+                if ipa_ml not in IP_ADAPTER_MODELS[self.class_name]:
+                    raise ValueError(
+                        f"Invalid IP adapter model '{ipa_ml}' for {self.class_name}. "
+                        f"Valid models are: {', '.join(IP_ADAPTER_MODELS[self.class_name].keys())}"
+                    )
+
         ip_weights = [IP_ADAPTER_MODELS[self.class_name][name] for name in ip_adapter_model]
         ip_scales = [float(s) for s in ip_adapter_scale]
         ip_masks = [
@@ -1987,7 +2025,6 @@ class Model_Diffusers(PreviewGenerator):
             # First load
             logger.info("Loading IP adapter")
             self.set_ip_adapter_model(ip_weights)
-
         elif self.ip_adapter_config is not None and not ip_adapter_image:
             # Unload
             logger.debug("IP adapter unload all")
@@ -2009,9 +2046,9 @@ class Model_Diffusers(PreviewGenerator):
             self.pipe.to(self.device)
 
         # FreeU
-        if FreeU:
+        if FreeU and self.class_name != FLUX:
             logger.info("FreeU active")
-            if self.class_name == "StableDiffusionPipeline":
+            if self.class_name == SD15:
                 # sd
                 self.pipe.enable_freeu(s1=0.9, s2=0.2, b1=1.2, b2=1.4)
             else:
@@ -2023,7 +2060,7 @@ class Model_Diffusers(PreviewGenerator):
             self.FreeU = False
 
         # Prompt Optimizations
-        if hasattr(self, "compel") and not retain_compel_previous_load:
+        if hasattr(self, "compel") and not pp.retain_compel_previous_load:
             del self.compel
 
         prompt_emb, negative_prompt_emb = self.create_prompt_embeds(
@@ -2034,24 +2071,22 @@ class Model_Diffusers(PreviewGenerator):
             syntax_weights=syntax_weights,
         )
 
-        if self.class_name != "StableDiffusionPipeline":
+        if self.class_name == SDXL:
             # Additional prompt for SDXL
             conditioning, pooled = prompt_emb.clone(), negative_prompt_emb.clone()
             prompt_emb = negative_prompt_emb = None
-
-        if torch.cuda.is_available() and xformers_memory_efficient_attention:
-            if xformers_memory_efficient_attention:
-                self.pipe.enable_xformers_memory_efficient_attention()
-            else:
-                self.pipe.disable_xformers_memory_efficient_attention()
+        elif self.class_name == FLUX:
+            conditioning, pooled = prompt_emb.clone(), negative_prompt_emb.clone()
+            prompt_emb = negative_prompt_emb = None
 
         try:
-            # self.pipe.scheduler = DPMSolverSinglestepScheduler() # fix default params by random scheduler, not recomn
             self.pipe.scheduler = self.get_scheduler(sampler)
+            configure_scheduler(
+                self.pipe, schedule_type, schedule_prediction_type
+            )
         except Exception as e:
             logger.debug(f"{e}")
-            torch.cuda.empty_cache()
-            gc.collect()
+            release_resources()
             raise RuntimeError("Error in sampler, please try again")
 
         self.pipe.safety_checker = None
@@ -2063,7 +2098,7 @@ class Model_Diffusers(PreviewGenerator):
         control_image = None
 
         # Run preprocess
-        if self.task_name == "inpaint":
+        if self.task_name in ["inpaint", "repaint"]:
             # Get mask for Inpaint
             control_image, control_mask, tensor_control_image = self.process_inpaint(
                 image=array_rgb,
@@ -2071,7 +2106,6 @@ class Model_Diffusers(PreviewGenerator):
                 image_mask=image_mask,
                 gui_active=gui_active,
             )
-
         elif self.task_name != "txt2img":
             control_image = self.get_image_preprocess(
                 image=array_rgb,
@@ -2084,20 +2118,25 @@ class Model_Diffusers(PreviewGenerator):
                 distance_threshold=distance_threshold,
                 t2i_adapter_preprocessor=t2i_adapter_preprocessor,
                 recolor_gamma_correction=recolor_gamma_correction,
+                tile_blur_sigma=tile_blur_sigma,
             )
 
         # Task Parameters
         pipe_params_config = {
-                "prompt": None,
-                "negative_prompt": None,
-                "num_inference_steps": num_steps,
-                "guidance_scale": guidance_scale,
-                "clip_skip": None,
-                "num_images_per_prompt": num_images,
+            "prompt": None,
+            "negative_prompt": None,
+            "num_inference_steps": num_steps,
+            "guidance_scale": guidance_scale,
+            "clip_skip": None,
+            "num_images_per_prompt": pp.num_images,
         }
 
         if hasattr(self.pipe, "set_pag_applied_layers"):
             pipe_params_config["pag_scale"] = float(pag_scale)
+
+        pipe_params_config.update(
+            ays_timesteps(self.class_name, schedule_type, num_steps)
+        )
 
         if self.task_name == "txt2img":
             pipe_params_config["height"] = img_height
@@ -2106,11 +2145,11 @@ class Model_Diffusers(PreviewGenerator):
             pipe_params_config["image"] = control_image
             logger.info(f"Image resolution: {str(control_image.size)}")
 
-        if self.class_name == "StableDiffusionPipeline":
+        if self.class_name == SD15:
             pipe_params_config["prompt_embeds"] = prompt_emb
             pipe_params_config["negative_prompt_embeds"] = negative_prompt_emb
 
-            if self.task_name == "inpaint":
+            if self.task_name in ["inpaint", "repaint"]:
                 pipe_params_config["strength"] = strength
                 pipe_params_config["mask_image"] = control_mask
                 pipe_params_config["control_image"] = tensor_control_image
@@ -2130,7 +2169,7 @@ class Model_Diffusers(PreviewGenerator):
                 pipe_params_config["strength"] = strength
                 pipe_params_config["eta"] = 1.0
 
-        elif self.class_name == "StableDiffusionXLPipeline":
+        elif self.class_name == SDXL:
             pipe_params_config["prompt_embeds"] = conditioning[0:1]
             pipe_params_config["pooled_prompt_embeds"] = pooled[0:1]
             pipe_params_config["negative_prompt_embeds"] = conditioning[1:2]
@@ -2142,22 +2181,80 @@ class Model_Diffusers(PreviewGenerator):
                 pipe_params_config["height"] = control_image.size[1]
                 pipe_params_config["width"] = control_image.size[0]
             elif self.task_name not in ["txt2img", "inpaint", "img2img"]:
-                if "t2i" not in self.task_name:
+
+                if "t2i" in self.task_name:
+                    pipe_params_config["adapter_conditioning_scale"] = float(t2i_adapter_conditioning_scale)
+                    pipe_params_config["adapter_conditioning_factor"] = float(t2i_adapter_conditioning_factor)
+                else:
                     pipe_params_config[
                         "controlnet_conditioning_scale"
                     ] = float(controlnet_conditioning_scale)
                     pipe_params_config["control_guidance_start"] = float(control_guidance_start)
                     pipe_params_config["control_guidance_end"] = float(control_guidance_end)
-                else:
-                    pipe_params_config["adapter_conditioning_scale"] = float(t2i_adapter_conditioning_scale)
-                    pipe_params_config["adapter_conditioning_factor"] = float(t2i_adapter_conditioning_factor)
+
+                    if self.task_name == "repaint":
+                        pipe_params_config["strength"] = strength
+                        pipe_params_config["mask_image"] = control_mask
+                        pipe_params_config["height"] = control_image.size[1]
+                        pipe_params_config["width"] = control_image.size[0]
+
+                    if "XLControlNetUnion" in self.pipe.__class__.__name__:
+                        pipe_params_config["control_mode"] = SDXL_CN_UNION_PROMAX_MODES[self.task_name]
+
+                    if self.pipe.__class__.__name__ == "StableDiffusionXLControlNetUnionPipeline":
+                        pipe_params_config["control_image"] = pipe_params_config.pop('image')
+                    elif self.pipe.__class__.__name__ == "StableDiffusionXLControlNetUnionInpaintPipeline":
+                        def get_union_cn_img(image_cn, mask_cn):
+                            controlnet_img = image_cn.copy()
+                            controlnet_img_np = np.array(controlnet_img)
+                            mask_np = np.array(mask_cn)
+                            controlnet_img_np[mask_np > 0] = 0
+                            return Image.fromarray(controlnet_img_np)
+                        pipe_params_config["control_image"] = get_union_cn_img(control_image, control_mask)
+                    elif self.pipe.__class__.__name__ == "StableDiffusionXLControlNetInpaintPipeline":
+                        # self.preprocessor.load("Canny", self.image_preprocessor_cuda_active)
+                        # pipe_params_config["control_image"] = self.preprocessor(control_image)
+                        pipe_params_config["control_image"] = control_image
+
+            elif self.task_name == "img2img":
+                pipe_params_config["strength"] = strength
+
+        elif self.class_name == FLUX:
+            pipe_params_config.pop("negative_prompt", None)
+            pipe_params_config.pop("clip_skip", None)
+            pipe_params_config["prompt_embeds"] = conditioning
+            pipe_params_config["pooled_prompt_embeds"] = pooled
+
+            if self.task_name != "txt2img":
+                pipe_params_config["height"] = img_height = control_image.size[1]
+                pipe_params_config["width"] = img_width = control_image.size[0]
+
+            if self.task_name == "inpaint":
+                pipe_params_config["strength"] = strength
+                pipe_params_config["mask_image"] = control_mask
+            elif self.task_name not in ["txt2img", "inpaint", "img2img"]:
+                pipe_params_config["control_image"] = pipe_params_config.pop("image")
+
+                cn_mode = FLUX_CN_UNION_MODES[self.task_name]
+                if isinstance(cn_mode, list):
+                    if preprocessor_name is None or "None" in preprocessor_name:
+                        cn_mode = random.choice(cn_mode)
+                    else:
+                        cn_mode = cn_mode[1]
+                pipe_params_config["control_mode"] = cn_mode
+
+                pipe_params_config[
+                    "controlnet_conditioning_scale"
+                ] = float(controlnet_conditioning_scale)
+                # pipe_params_config["control_guidance_start"] = float(control_guidance_start)
+                # pipe_params_config["control_guidance_end"] = float(control_guidance_end)
             elif self.task_name == "img2img":
                 pipe_params_config["strength"] = strength
 
         if self.ip_adapter_config:
             # maybe need cache embeds
             ip_adapter_embeds, ip_adapter_masks = self.get_ip_embeds(
-                guidance_scale, ip_images, num_images, ip_masks
+                guidance_scale, ip_images, pp.num_images, ip_masks
             )
 
             pipe_params_config["ip_adapter_image_embeds"] = ip_adapter_embeds
@@ -2166,12 +2263,8 @@ class Model_Diffusers(PreviewGenerator):
                     "ip_adapter_masks": ip_adapter_masks
                 }
 
-        post_processing_params = dict(
-            display_images=display_images
-        )
-
         # detailfix params and pipe global
-        if adetailer_A or adetailer_B:
+        if pp.adetailer_A or pp.adetailer_B:
 
             # global params detailfix
             default_params_detailfix = {
@@ -2190,7 +2283,7 @@ class Model_Diffusers(PreviewGenerator):
 
             # Pipe detailfix_pipe
             if not hasattr(self, "detailfix_pipe") or not retain_detailfix_model_previous_load:
-                if adetailer_A_params.get("inpaint_only", False) == True or adetailer_B_params.get("inpaint_only", False) == True:
+                if adetailer_A_params.get("inpaint_only", False) is True or adetailer_B_params.get("inpaint_only", False) is True:
                     detailfix_pipe = custom_task_model_loader(
                         pipe=self.pipe,
                         model_category="detailfix",
@@ -2219,21 +2312,29 @@ class Model_Diffusers(PreviewGenerator):
             if adetailer_A_params.get("sampler", "Use same sampler") != "Use same sampler":
                 logger.debug("detailfix_pipe will use the sampler from adetailer_A")
                 detailfix_pipe.scheduler = self.get_scheduler(adetailer_A_params["sampler"])
+                configure_scheduler(
+                    detailfix_pipe, "Automatic", schedule_prediction_type
+                )
             adetailer_A_params.pop("sampler", None)
             if adetailer_B_params.get("sampler", "Use same sampler") != "Use same sampler":
                 logger.debug("detailfix_pipe will use the sampler from adetailer_B")
                 detailfix_pipe.scheduler = self.get_scheduler(adetailer_A_params["sampler"])
+                configure_scheduler(
+                    detailfix_pipe, "Automatic", schedule_prediction_type
+                )
             adetailer_B_params.pop("sampler", None)
 
             detailfix_pipe.set_progress_bar_config(leave=leave_progress_bar)
-            detailfix_pipe.set_progress_bar_config(disable=disable_progress_bar)
-            detailfix_pipe.to(self.device)
-            torch.cuda.empty_cache()
-            gc.collect()
+            detailfix_pipe.set_progress_bar_config(disable=pp.disable_progress_bar)
+            if self.class_name != FLUX:
+                detailfix_pipe.to(self.device)
+            else:
+                detailfix_pipe.__class__._execution_device = property(_execution_device)
+            release_resources()
+        else:
+            detailfix_pipe = None
 
-            post_processing_params["detailfix_pipe"] = detailfix_pipe
-
-        if adetailer_A:
+        if pp.adetailer_A:
             for key_param, default_value in default_params_detailfix.items():
                 if key_param not in adetailer_A_params:
                     adetailer_A_params[key_param] = default_value
@@ -2267,7 +2368,7 @@ class Model_Diffusers(PreviewGenerator):
             )
 
             # Params detailfix
-            if self.class_name == "StableDiffusionPipeline":
+            if self.class_name == SD15:
                 # SD detailfix
                 # detailfix_params_A["controlnet_conditioning_scale"] = controlnet_conditioning_scale
                 # detailfix_params_A["control_guidance_start"] = control_guidance_start
@@ -2290,7 +2391,7 @@ class Model_Diffusers(PreviewGenerator):
                 detailfix_params_A["prompt"] = None
                 detailfix_params_A["negative_prompt"] = None
 
-            else:
+            elif self.class_name == SDXL:
                 # SDXL detailfix
                 if prompt_empty_detailfix_A and negative_prompt_empty_detailfix_A:
                     conditioning_detailfix_A, pooled_detailfix_A = conditioning, pooled
@@ -2310,15 +2411,33 @@ class Model_Diffusers(PreviewGenerator):
                 detailfix_params_A["negative_prompt_embeds"] = conditioning_detailfix_A[1:2]
                 detailfix_params_A["negative_pooled_prompt_embeds"] = pooled_detailfix_A[1:2]
 
+            elif self.class_name == FLUX:
+                # Flux detailfix
+                if prompt_empty_detailfix_A and negative_prompt_empty_detailfix_A:
+                    conditioning_detailfix_A, pooled_detailfix_A = conditioning, pooled
+                else:
+                    conditioning_detailfix_A, pooled_detailfix_A = self.create_prompt_embeds(
+                        prompt=prompt_df_A,
+                        negative_prompt=negative_prompt_df_A,
+                        textual_inversion=textual_inversion,
+                        clip_skip=clip_skip,
+                        syntax_weights=syntax_weights,
+                    )
+
+                detailfix_params_A.pop('prompt', None)
+                detailfix_params_A.pop('negative_prompt', None)
+                detailfix_params_A["prompt_embeds"] = conditioning_detailfix_A
+                detailfix_params_A["pooled_prompt_embeds"] = pooled_detailfix_A
+
             logger.debug(f"detailfix A prompt empty {prompt_empty_detailfix_A, negative_prompt_empty_detailfix_A}")
             if not prompt_empty_detailfix_A or not negative_prompt_empty_detailfix_A:
                 logger.debug(f"Prompts detailfix A {prompt_df_A, negative_prompt_df_A}")
             logger.debug(f"Pipe params detailfix A \n{detailfix_params_A}")
             logger.debug(f"Params detailfix A \n{adetailer_A_params}")
 
-            post_processing_params["detailfix_params_A"] = detailfix_params_A
+            pp.set_params(detailfix_params_A=detailfix_params_A)
 
-        if adetailer_B:
+        if pp.adetailer_B:
             for key_param, default_value in default_params_detailfix.items():
                 if key_param not in adetailer_B_params:
                     adetailer_B_params[key_param] = default_value
@@ -2352,7 +2471,7 @@ class Model_Diffusers(PreviewGenerator):
             )
 
             # Params detailfix
-            if self.class_name == "StableDiffusionPipeline":
+            if self.class_name == SD15:
                 # SD detailfix
                 # detailfix_params_B["controlnet_conditioning_scale"] = controlnet_conditioning_scale
                 # detailfix_params_B["control_guidance_start"] = control_guidance_start
@@ -2373,7 +2492,8 @@ class Model_Diffusers(PreviewGenerator):
                     detailfix_params_B["negative_prompt_embeds"] = negative_prompt_emb_ad_b
                 detailfix_params_B["prompt"] = None
                 detailfix_params_B["negative_prompt"] = None
-            else:
+
+            elif self.class_name == SDXL:
                 # SDXL detailfix
                 if prompt_empty_detailfix_B and negative_prompt_empty_detailfix_B:
                     conditioning_detailfix_B, pooled_detailfix_B = conditioning, pooled
@@ -2392,25 +2512,42 @@ class Model_Diffusers(PreviewGenerator):
                 detailfix_params_B["negative_prompt_embeds"] = conditioning_detailfix_B[1:2]
                 detailfix_params_B["negative_pooled_prompt_embeds"] = pooled_detailfix_B[1:2]
 
+            elif self.class_name == FLUX:
+                # Flux detailfix
+                if prompt_empty_detailfix_B and negative_prompt_empty_detailfix_B:
+                    conditioning_detailfix_B, pooled_detailfix_B = conditioning, pooled
+                else:
+                    conditioning_detailfix_B, pooled_detailfix_B = self.create_prompt_embeds(
+                        prompt=prompt_df_B,
+                        negative_prompt=negative_prompt_df_B,
+                        textual_inversion=textual_inversion,
+                        clip_skip=clip_skip,
+                        syntax_weights=syntax_weights,
+                    )
+                detailfix_params_B.pop("prompt", None)
+                detailfix_params_B.pop("negative_prompt", None)
+                detailfix_params_B["prompt_embeds"] = conditioning_detailfix_B
+                detailfix_params_B["pooled_prompt_embeds"] = pooled_detailfix_B
+
             logger.debug(f"detailfix B prompt empty {prompt_empty_detailfix_B, negative_prompt_empty_detailfix_B}")
             if not prompt_empty_detailfix_B or not negative_prompt_empty_detailfix_B:
                 logger.debug(f"Prompts detailfix B {prompt_df_B, negative_prompt_df_B}")
             logger.debug(f"Pipe params detailfix B \n{detailfix_params_B}")
             logger.debug(f"Params detailfix B \n{adetailer_B_params}")
 
-            post_processing_params["detailfix_params_B"] = detailfix_params_B
+            pp.set_params(detailfix_params_B=detailfix_params_B)
 
-        if hires_steps > 1 and upscaler_model_path is not None:
+        if pp.hires_steps > 1 and pp.upscaler_model_path is not None:
             # Hires params BASE
             hires_params_config = {
                 "prompt": None,
                 "negative_prompt": None,
-                "num_inference_steps": hires_steps,
-                "guidance_scale": guidance_scale,
+                "num_inference_steps": pp.hires_steps,
+                "guidance_scale": hires_guidance_scale if hires_guidance_scale >= 0 else guidance_scale,
                 "clip_skip": None,
                 "strength": hires_denoising_strength,
             }
-            if self.class_name == "StableDiffusionPipeline":
+            if self.class_name == SD15:
                 hires_params_config["eta"] = 1.0
 
             if self.ip_adapter_config:
@@ -2426,7 +2563,7 @@ class Model_Diffusers(PreviewGenerator):
             )
 
             # Hires embed params
-            if self.class_name == "StableDiffusionPipeline":
+            if self.class_name == SD15:
                 if hires_prompt_empty and hires_negative_prompt_empty:
                     hires_params_config["prompt_embeds"] = prompt_emb
                     hires_params_config["negative_prompt_embeds"] = negative_prompt_emb
@@ -2441,7 +2578,7 @@ class Model_Diffusers(PreviewGenerator):
 
                     hires_params_config["prompt_embeds"] = prompt_emb_hires
                     hires_params_config["negative_prompt_embeds"] = negative_prompt_emb_hires
-            else:
+            elif self.class_name == SDXL:
                 if hires_prompt_empty and hires_negative_prompt_empty:
                     hires_conditioning, hires_pooled = conditioning, pooled
                 else:
@@ -2460,6 +2597,24 @@ class Model_Diffusers(PreviewGenerator):
                 hires_params_config["negative_prompt_embeds"] = hires_conditioning[1:2]
                 hires_params_config["negative_pooled_prompt_embeds"] = hires_pooled[1:2]
 
+            elif self.class_name == FLUX:
+                if hires_prompt_empty and hires_negative_prompt_empty:
+                    hires_conditioning, hires_pooled = conditioning, pooled
+                else:
+                    hires_conditioning, hires_pooled = self.create_prompt_embeds(
+                        prompt=prompt_hires_valid,
+                        negative_prompt=negative_prompt_hires_valid,
+                        textual_inversion=textual_inversion,
+                        clip_skip=clip_skip,
+                        syntax_weights=syntax_weights,
+                    )
+
+                hires_params_config.pop("clip_skip", None)
+                hires_params_config.pop('prompt', None)
+                hires_params_config.pop('negative_prompt', None)
+                hires_params_config["prompt_embeds"] = hires_conditioning
+                hires_params_config["pooled_prompt_embeds"] = hires_pooled
+
             # Hires pipe
             if not hasattr(self, "hires_pipe") or not retain_hires_model_previous_load:
                 hires_pipe = custom_task_model_loader(
@@ -2477,19 +2632,35 @@ class Model_Diffusers(PreviewGenerator):
                     self.hires_pipe = hires_pipe
 
             # Hires scheduler
-            if hires_sampler != "Use same sampler":
+            hires_sampler_fix, hires_sch_type_fix, msg_hires_fix = check_scheduler_compatibility(
+                self.class_name,
+                hires_sampler if hires_sampler != "Use same sampler" else sampler,
+                hires_schedule_type if hires_schedule_type != "Use same schedule type" else schedule_type,
+            )
+            if msg_hires_fix:
+                logger.warning(f"Hires > {msg_hires_fix}")
+
+            if sampler != hires_sampler_fix or schedule_type != hires_sch_type_fix:
                 logger.debug("New hires sampler")
-                hires_pipe.scheduler = self.get_scheduler(hires_sampler)
+                hires_pipe.scheduler = self.get_scheduler(hires_sampler_fix)
+                configure_scheduler(
+                    hires_pipe, hires_sch_type_fix, schedule_prediction_type
+                )
+            hires_params_config.update(
+                ays_timesteps(self.class_name, hires_sch_type_fix, pp.hires_steps)
+            )
 
             hires_pipe.set_progress_bar_config(leave=leave_progress_bar)
-            hires_pipe.set_progress_bar_config(disable=disable_progress_bar)
-            hires_pipe.to(self.device)
-            torch.cuda.empty_cache()
-            gc.collect()
+            hires_pipe.set_progress_bar_config(disable=pp.disable_progress_bar)
+            if self.class_name != FLUX:
+                hires_pipe.to(self.device)
+            else:
+                hires_pipe.__class__._execution_device = property(_execution_device)
+            release_resources()
 
             if (
-                upscaler_model_path in LATENT_UPSCALERS
-                and ((not adetailer_A and not adetailer_B) or hires_before_adetailer)
+                pp.upscaler_model_path in LATENT_UPSCALERS
+                and ((not pp.adetailer_A and not pp.adetailer_B and not pp.face_restoration_model) or pp.hires_before_adetailer)
             ):
                 pipe_params_config["output_type"] = "latent"
 
@@ -2501,16 +2672,34 @@ class Model_Diffusers(PreviewGenerator):
         try:
             logger.debug(f"INFO PIPE: {self.pipe.__class__.__name__}")
             logger.debug(f"text_encoder_type: {self.pipe.text_encoder.dtype}")
-            logger.debug(f"unet_type: {self.pipe.unet.dtype}")
+            if hasattr(self.pipe, "unet"):
+                logger.debug(f"unet_type: {self.pipe.unet.dtype}")
+            else:
+                logger.debug(f"transformer_type: {self.pipe.transformer.dtype}")
+                logger.debug(f"transformer_config: {self.pipe.transformer.config}")
             logger.debug(f"vae_type: {self.pipe.vae.dtype}")
             logger.debug(f"pipe_type: {self.pipe.dtype}")
             logger.debug(f"scheduler_main_pipe: {self.pipe.scheduler}")
-            if adetailer_A or adetailer_B:
+            if pp.adetailer_A or pp.adetailer_B:
                 logger.debug(f"scheduler_detailfix: {detailfix_pipe.scheduler}")
-            if hires_steps > 1 and upscaler_model_path is not None:
+            if pp.hires_steps > 1 and pp.upscaler_model_path is not None:
                 logger.debug(f"scheduler_hires: {hires_pipe.scheduler}")
         except Exception as e:
             logger.debug(f"{str(e)}")
+
+        extra_metadata = extra_string_metadata(
+            [
+                self.vae_model,
+                pag_scale if hasattr(self.pipe, "set_pag_applied_layers") else 0,
+                self.FreeU,
+                pp.upscaler_model_path,
+                pp.upscaler_increases_size,
+                pp.hires_steps,
+                hires_denoising_strength,
+                self.lora_memory,
+                self.lora_scale_memory,
+            ]
+        )
 
         metadata = [
             prompt,
@@ -2524,165 +2713,187 @@ class Model_Diffusers(PreviewGenerator):
             img_width,
             img_height,
             clip_skip,
+            schedule_type,
+            extra_metadata,
         ]
+
+        filename_pattern = assemble_filename_pattern(
+            filename_pattern, metadata
+        )
+
+        pp.set_params(
+            metadata=metadata, filename_pattern=filename_pattern,
+            adetailer_A_params=adetailer_A_params, adetailer_B_params=adetailer_B_params,
+            hires_params_config=hires_params_config,
+        )
 
         # === RUN PIPE === #
         handle_task = self.start_work if not image_previews else self.start_stream
 
         return handle_task(
-            num_images,
-            seed,
-            adetailer_A,
-            adetailer_A_params,
-            adetailer_B,
-            adetailer_B_params,
-            upscaler_model_path,
-            upscaler_increases_size,
-            esrgan_tile,
-            esrgan_tile_overlap,
-            hires_steps,
-            loop_generation,
-            display_images,
-            save_generated_images,
-            image_storage_location,
-            generator_in_cpu,
-            hires_before_adetailer,
-            hires_after_adetailer,
-            retain_compel_previous_load,
             control_image,
             pipe_params_config,
-            post_processing_params,
-            hires_params_config,
+            detailfix_pipe,
             hires_pipe,
-            metadata,
+            pp,
+            kwargs,
         )
 
     def post_processing(
         self,
-        adetailer_A,
-        adetailer_A_params,
-        adetailer_B,
-        adetailer_B_params,
-        upscaler_model_path,
-        upscaler_increases_size,
-        esrgan_tile,
-        esrgan_tile_overlap,
-        hires_steps,
-        loop_generation,
-        display_images,
-        save_generated_images,
-        image_storage_location,
-        hires_before_adetailer,
-        hires_after_adetailer,
         control_image,
-        post_processing_params,
-        hires_params_config,
+        detailfix_pipe,
         hires_pipe,
         seeds,
         generators,
         images,
-        metadata,
+        pp,
     ):
+
+        if self.class_name == FLUX:
+            if pp.upscaler_model_path is None and not pp.adetailer_A and not pp.adetailer_B and pp.loop_generation == 1:
+                if os.getenv("SPACES_ZERO_GPU"):
+                    self.pipe.transformer = None
+                else:
+                    self.pipe.transformer.to("cpu")
+            if hasattr(self.pipe, "controlnet") and pp.loop_generation == 1:
+                if os.getenv("SPACES_ZERO_GPU"):
+                    self.pipe.controlnet = None
+                else:
+                    self.pipe.controlnet.to("cpu")
+
+            if pp.upscaler_model_path not in LATENT_UPSCALERS:
+                self.pipe.vae.to(self.device)
+                release_resources()
+                images.to(self.device)
+
+                with torch.no_grad():
+                    latents = self.pipe._unpack_latents(images, pp.metadata[9], pp.metadata[8], self.pipe.vae_scale_factor)
+                    latents = (latents / self.pipe.vae.config.scaling_factor) + self.pipe.vae.config.shift_factor
+                    image = self.pipe.vae.decode(latents, return_dict=False)[0]
+                    images = self.pipe.image_processor.postprocess(image, output_type="pil")
+                    if not os.getenv("SPACES_ZERO_GPU"):
+                        self.pipe.vae.to("cpu")
+
         if isinstance(images, torch.Tensor):
             images = [tl.unsqueeze(0) for tl in torch.unbind(images, dim=0)]
 
-        if self.task_name not in ["txt2img", "inpaint", "img2img"]:
-            images = [control_image] + images
+        release_resources()
 
-        torch.cuda.empty_cache()
-        gc.collect()
-
-        if hires_before_adetailer and upscaler_model_path is not None:
+        if pp.hires_before_adetailer and pp.upscaler_model_path is not None:
             logger.debug(
-                    "Hires before; same seed for each image (no batch)"
-                )
+                "Hires before; same seed for each image (no batch)"
+            )
             images = process_images_high_resolution(
-                    images,
-                    upscaler_model_path,
-                    upscaler_increases_size,
-                    esrgan_tile, esrgan_tile_overlap,
-                    hires_steps, hires_params_config,
-                    self.task_name,
-                    generators[0],  # pipe_params_config["generator"][0], # no generator
-                    hires_pipe,
-                )
+                images,
+                pp.upscaler_model_path,
+                pp.upscaler_increases_size,
+                pp.upscaler_tile_size, pp.upscaler_tile_overlap,
+                pp.hires_steps, pp.hires_params_config,
+                self.task_name,
+                generators[0],  # pipe_params_config["generator"][0], # no generator
+                hires_pipe,
+                pp.disable_progress_bar,
+            )
+
+        if pp.face_restoration_model:
+            images = batch_process_face_restoration(
+                images,
+                pp.face_restoration_model,
+                pp.face_restoration_visibility,
+                pp.face_restoration_weight,
+                pp.face_restoration_device,
+            )
 
             # Adetailer stuff
-        if adetailer_A or adetailer_B:
+        if pp.adetailer_A or pp.adetailer_B:
             # image_pil_list = []
             # for img_single in images:
             # image_ad = img_single.convert("RGB")
             # image_pil_list.append(image_ad)
-            if self.task_name not in ["txt2img", "inpaint", "img2img"]:
-                images = images[1:]
 
-            if adetailer_A:
+            if pp.adetailer_A:
                 images = ad_model_process(
-                        pipe_params_df=post_processing_params["detailfix_params_A"],
-                        detailfix_pipe=post_processing_params["detailfix_pipe"],
-                        image_list_task=images,
-                        **adetailer_A_params,
-                    )
-            if adetailer_B:
+                    pipe_params_df=pp.detailfix_params_A,
+                    detailfix_pipe=detailfix_pipe,
+                    image_list_task=images,
+                    **pp.adetailer_A_params,
+                )
+            if pp.adetailer_B:
                 images = ad_model_process(
-                        pipe_params_df=post_processing_params["detailfix_params_B"],
-                        detailfix_pipe=post_processing_params["detailfix_pipe"],
-                        image_list_task=images,
-                        **adetailer_B_params,
-                    )
+                    pipe_params_df=pp.detailfix_params_B,
+                    detailfix_pipe=detailfix_pipe,
+                    image_list_task=images,
+                    **pp.adetailer_B_params,
+                )
 
-            if self.task_name not in ["txt2img", "inpaint", "img2img"]:
-                images = [control_image] + images
                 # del detailfix_pipe
-            torch.cuda.empty_cache()
-            gc.collect()
+            release_resources()
 
-        if hires_after_adetailer and upscaler_model_path is not None:
+        if pp.hires_after_adetailer and pp.upscaler_model_path is not None:
             logger.debug(
-                    "Hires after; same seed for each image (no batch)"
-                )
+                "Hires after; same seed for each image (no batch)"
+            )
             images = process_images_high_resolution(
-                    images,
-                    upscaler_model_path,
-                    upscaler_increases_size,
-                    esrgan_tile, esrgan_tile_overlap,
-                    hires_steps, hires_params_config,
-                    self.task_name,
-                    generators[0],  # pipe_params_config["generator"][0], # no generator
-                    hires_pipe,
-                )
+                images,
+                pp.upscaler_model_path,
+                pp.upscaler_increases_size,
+                pp.upscaler_tile_size, pp.upscaler_tile_overlap,
+                pp.hires_steps, pp.hires_params_config,
+                self.task_name,
+                generators[0],  # pipe_params_config["generator"][0], # no generator
+                hires_pipe,
+                pp.disable_progress_bar,
+            )
 
-        logger.info(f"Seeds: {seeds}")
+        if self.task_name not in ["txt2img", "inpaint", "img2img", "repaint"]:
+            images = [control_image] + images
+            valid_seeds = [0] + seeds
+        else:
+            valid_seeds = seeds
 
-        # Show images if loop
-        if display_images:
-            mediapy.show_images(images)
-            # logger.info(image_list)
-            # del images
-            if loop_generation > 1:
+        logger.info(f"Seeds: {valid_seeds}")
+
+        # Show images
+        if pp.display_images:
+            if pp.image_display_scale != 1.0:
+                resized_images = []
+                for img in images:
+                    img_copy = img.copy()
+                    img_copy.thumbnail(
+                        (int(img_copy.width * pp.image_display_scale), int(img_copy.height * pp.image_display_scale)),
+                        Image.LANCZOS
+                    )
+                    resized_images.append(img_copy)
+                mediapy.show_images(resized_images)
+            else:
+                mediapy.show_images(images)
+
+            if pp.loop_generation > 1:
                 time.sleep(0.5)
 
-            # List images and save
+        # List images and save
         image_list = []
         image_metadata = []
 
-        valid_seeds = [0] + seeds if self.task_name not in ["txt2img", "inpaint", "img2img"] else seeds
         for image_, seed_ in zip(images, valid_seeds):
 
-            metadata[7] = seed_
-            image_generation_data = get_string_metadata(metadata)
+            pp.metadata[7] = seed_
+            image_generation_data = get_string_metadata(pp.metadata)
 
             image_path = "not saved in storage"
-            if save_generated_images:
+            if pp.save_generated_images:
+                sfx = pp.filename_pattern
+                if "_STABLEPYSEEDKEY_" in sfx:
+                    sfx = sfx.replace("_STABLEPYSEEDKEY_", str(seed_))
                 image_path = save_pil_image_with_metadata(
-                    image_, image_storage_location, image_generation_data
+                    image_, pp.image_storage_location, image_generation_data, sfx
                 )
 
             image_list.append(image_path)
             image_metadata.append(image_generation_data)
 
-        torch.cuda.empty_cache()
-        gc.collect()
+        release_resources()
 
         if image_list[0] != "not saved in storage":
             logger.info(image_list)
@@ -2691,60 +2902,33 @@ class Model_Diffusers(PreviewGenerator):
 
     def start_work(
         self,
-        num_images,
-        seed,
-        adetailer_A,
-        adetailer_A_params,
-        adetailer_B,
-        adetailer_B_params,
-        upscaler_model_path,
-        upscaler_increases_size,
-        esrgan_tile,
-        esrgan_tile_overlap,
-        hires_steps,
-        loop_generation,
-        display_images,
-        save_generated_images,
-        image_storage_location,
-        generator_in_cpu,
-        hires_before_adetailer,
-        hires_after_adetailer,
-        retain_compel_previous_load,
         control_image,
         pipe_params_config,
-        post_processing_params,
-        hires_params_config,
+        detailfix_pipe,
         hires_pipe,
-        metadata,
+        pp,
+        kwargs,
     ):
-        for i in range(loop_generation):
+        for i in range(pp.loop_generation):
             # number seed
-            if seed == -1:
-                seeds = [random.randint(0, 2147483647) for _ in range(num_images)]
-            else:
-                if num_images == 1:
-                    seeds = [seed]
+            seeds, generators = get_seeds(pp, self.task_name, self.device)
+            pipe_params_config["generator"] = generators
+
+            if self.class_name == FLUX:
+                if os.getenv("SPACES_ZERO_GPU"):
+                    self.pipe.text_encoder = None
+                    self.pipe.text_encoder_2 = None
                 else:
-                    seeds = [seed] + [random.randint(0, 2147483647) for _ in range(num_images-1)]
+                    self.pipe.text_encoder.to("cpu")
+                    self.pipe.text_encoder_2.to("cpu")
+                release_resources()
+                if self.task_name == "txt2img":
+                    self.pipe.transformer.to(self.device)
+                release_resources()
+                pipe_params_config["output_type"] = "latent"
+                # self.pipe.__class__._execution_device = property(_execution_device)
 
-            # generators
-            generators = []  # List to store all the generators
-            for calculate_seed in seeds:
-                if generator_in_cpu or self.device.type == "cpu":
-                    generator = torch.Generator().manual_seed(calculate_seed)
-                else:
-                    try:
-                        generator = torch.Generator("cuda").manual_seed(calculate_seed)
-                    except Exception as e:
-                        logger.debug(str(e))
-                        logger.warning("Generator in CPU")
-                        generator = torch.Generator().manual_seed(calculate_seed)
-
-                generators.append(generator)
-
-            # fix img2img bug need concat tensor prompts with generator same number (only in batch inference)
-            pipe_params_config["generator"] = generators if self.task_name != "img2img" else generators[0]  # no list
-            seeds = seeds if self.task_name != "img2img" else [seeds[0]] * num_images
+            validate_and_update_params(self.pipe.__class__, kwargs, pipe_params_config)
 
             try:
                 images = self.pipe(
@@ -2771,93 +2955,50 @@ class Model_Diffusers(PreviewGenerator):
                     raise ValueError(e)
 
             images, image_list, image_metadata = self.post_processing(
-                adetailer_A,
-                adetailer_A_params,
-                adetailer_B,
-                adetailer_B_params,
-                upscaler_model_path,
-                upscaler_increases_size,
-                esrgan_tile,
-                esrgan_tile_overlap,
-                hires_steps,
-                loop_generation,
-                display_images,
-                save_generated_images,
-                image_storage_location,
-                hires_before_adetailer,
-                hires_after_adetailer,
                 control_image,
-                post_processing_params,
-                hires_params_config,
+                detailfix_pipe,
                 hires_pipe,
                 seeds,
                 generators,
                 images,
-                metadata,
+                pp,
             )
 
-        if hasattr(self, "compel") and not retain_compel_previous_load:
+        if hasattr(self, "compel") and not pp.retain_compel_previous_load:
             del self.compel
-        torch.cuda.empty_cache()
-        gc.collect()
+        release_resources()
         return images, [seeds, image_list, image_metadata]
 
     def start_stream(
         self,
-        num_images,
-        seed,
-        adetailer_A,
-        adetailer_A_params,
-        adetailer_B,
-        adetailer_B_params,
-        upscaler_model_path,
-        upscaler_increases_size,
-        esrgan_tile,
-        esrgan_tile_overlap,
-        hires_steps,
-        loop_generation,
-        display_images,
-        save_generated_images,
-        image_storage_location,
-        generator_in_cpu,
-        hires_before_adetailer,
-        hires_after_adetailer,
-        retain_compel_previous_load,
         control_image,
         pipe_params_config,
-        post_processing_params,
-        hires_params_config,
+        detailfix_pipe,
         hires_pipe,
-        metadata,
+        pp,
+        kwargs,
     ):
-        for i in range(loop_generation):
+        for i in range(pp.loop_generation):
             # number seed
-            if seed == -1:
-                seeds = [random.randint(0, 2147483647) for _ in range(num_images)]
-            else:
-                if num_images == 1:
-                    seeds = [seed]
+            seeds, generators = get_seeds(pp, self.task_name, self.device)
+            pipe_params_config["generator"] = generators
+
+            if self.class_name == FLUX:
+                if os.getenv("SPACES_ZERO_GPU"):
+                    self.pipe.text_encoder = None
+                    self.pipe.text_encoder_2 = None
                 else:
-                    seeds = [seed] + [random.randint(0, 2147483647) for _ in range(num_images-1)]
+                    self.pipe.text_encoder.to("cpu")
+                    self.pipe.text_encoder_2.to("cpu")
+                release_resources()
+                if self.task_name == "txt2img":
+                    self.pipe.transformer.to(self.device)
+                release_resources()
+                pipe_params_config["output_type"] = "latent"
+                # self.pipe.__class__._execution_device = property(_execution_device)
+                self.metadata = pp.metadata
 
-            # generators
-            generators = []  # List to store all the generators
-            for calculate_seed in seeds:
-                if generator_in_cpu or self.device.type == "cpu":
-                    generator = torch.Generator().manual_seed(calculate_seed)
-                else:
-                    try:
-                        generator = torch.Generator("cuda").manual_seed(calculate_seed)
-                    except Exception as e:
-                        logger.debug(str(e))
-                        logger.warning("Generator in CPU")
-                        generator = torch.Generator().manual_seed(calculate_seed)
-
-                generators.append(generator)
-
-            # fix img2img bug need concat tensor prompts with generator same number (only in batch inference)
-            pipe_params_config["generator"] = generators if self.task_name != "img2img" else generators[0]  # no list
-            seeds = seeds if self.task_name != "img2img" else [seeds[0]] * num_images
+            validate_and_update_params(self.pipe.__class__, kwargs, pipe_params_config)
 
             try:
                 logger.debug("Start stream")
@@ -2894,34 +3035,17 @@ class Model_Diffusers(PreviewGenerator):
                     raise ValueError(e)
 
             images, image_list, image_metadata = self.post_processing(
-                adetailer_A,
-                adetailer_A_params,
-                adetailer_B,
-                adetailer_B_params,
-                upscaler_model_path,
-                upscaler_increases_size,
-                esrgan_tile,
-                esrgan_tile_overlap,
-                hires_steps,
-                loop_generation,
-                display_images,
-                save_generated_images,
-                image_storage_location,
-                hires_before_adetailer,
-                hires_after_adetailer,
                 control_image,
-                post_processing_params,
-                hires_params_config,
+                detailfix_pipe,
                 hires_pipe,
                 seeds,
                 generators,
                 images,
-                metadata,
+                pp,
             )
 
-        if hasattr(self, "compel") and not retain_compel_previous_load:
+        if hasattr(self, "compel") and not pp.retain_compel_previous_load:
             del self.compel
-        torch.cuda.empty_cache()
-        gc.collect()
+        release_resources()
 
         yield images, [seeds, image_list, image_metadata]
