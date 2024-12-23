@@ -30,6 +30,7 @@ from .diffusers_vanilla.sampler_scheduler_config import (
 from .diffusers_vanilla.preprocessor.constans_preprocessor import (
     TASK_AND_PREPROCESSORS,
     T2I_PREPROCESSOR_NAME,
+    ALL_PREPROCESSOR_TASKS,
 )
 from .diffusers_vanilla.preprocessor.main_preprocessor import Preprocessor
 from .upscalers.main_upscaler import BUILTIN_UPSCALERS, load_upscaler_model

@@ -126,6 +126,12 @@ def check_scheduler_compatibility(cls, sampler, schedule_type):
     msg = ""
     auto_schedule = SCHEDULE_TYPE_OPTIONS[0]
 
+    for old_sampler_config, def_schedule in [("Karras", "Karras"), ("trailing", "SGM Uniform"), (" Lu", "Lambdas")]:
+        if old_sampler_config in sampler:
+            sampler = sampler.replace(old_sampler_config, "").strip()
+            if schedule_type == auto_schedule:
+                schedule_type = def_schedule
+
     if cls == FLUX:
         if "Flow" not in sampler:
             sampler = "FlowMatch DPM++ 2M"

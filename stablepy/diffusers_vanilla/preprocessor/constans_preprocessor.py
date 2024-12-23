@@ -17,6 +17,8 @@ AUX_BETA_TASKS = ["TEED", "Anyline", "Lineart standard"]
 
 EXTRA_AUX_TASKS = ["Recolor", "Blur"]
 
+ALL_PREPROCESSOR_TASKS = AUX_TASKS + TRANSFORMERS_LIB_TASKS + AUX_BETA_TASKS + EXTRA_AUX_TASKS
+
 T2I_PREPROCESSOR_NAME = {
     "sdxl_canny_t2i": "Canny",
     "sdxl_openpose_t2i": "Openpose core",
@@ -104,6 +106,9 @@ TASK_AND_PREPROCESSORS = {
     ],
     "tile": [
         "Blur",
+        "None",
+    ],
+    "repaint": [
         "None",
     ],
 }

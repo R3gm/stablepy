@@ -111,7 +111,18 @@ class PreviewGenerator:
         self.fail_work = None
         self.stream_config(5, 8, False)
 
-    def stream_config(self, concurrency, latent_resize_by, vae_decoding):
+    def stream_config(self, concurrency=5, latent_resize_by=8, vae_decoding=False):
+        """
+        Configures the streaming settings for the model.
+
+        Args:
+            concurrency (int): Controls how often the preview images are generated and displayed in relation to the steps.
+                               For example, a value of 2 displays an image every 2 steps. Default is 5.
+            latent_resize_by (int): Controls the scaling size of the latent images. A value of 1 is useful for achieving
+                                    high performance. Default is 8.
+            vae_decoding (bool): Use the VAE to decode the preview images. If set to True, it may negatively impact
+                                 performance. Default is False.
+        """
         self.concurrency = concurrency
         self.latent_resize_by = latent_resize_by
         self.vae_decoding = vae_decoding
@@ -227,6 +238,7 @@ class Model_Diffusers(PreviewGenerator):
 
         self.image_encoder_name = None
         self.image_encoder_module = None
+        self.ip_adapter_config = None
 
         self.last_lora_error = ""
         self.num_loras = 7
@@ -527,6 +539,13 @@ class Model_Diffusers(PreviewGenerator):
             class_name = self.class_name
         else:
             # Unload previous model and stuffs
+            self.image_encoder_module = None
+            self.image_encoder_name = None
+            if self.ip_adapter_config:
+                self.pipe.unload_ip_adapter()
+                self.ip_adapter_config = None
+            release_resources()
+
             if hasattr(self, "pipe") and self.pipe is not None:
                 for k_com, v_com in self.pipe.components.items():
                     if hasattr(v_com, "to_empty"):
@@ -1128,7 +1147,7 @@ class Model_Diffusers(PreviewGenerator):
                 subfolder=vit_repo[1],
                 use_safetensors=True,
                 torch_dtype=self.type_model_precision,
-            ).to(self.device)
+            ).to(self.device, dtype=self.type_model_precision)
             self.image_encoder_name = vit_model[0]
             self.pipe.register_modules(image_encoder=self.image_encoder_module)  # automatic change
 
@@ -1450,6 +1469,7 @@ class Model_Diffusers(PreviewGenerator):
 
         loop_generation: int = 1,
         display_images: bool = False,
+        image_display_scale: int = 1.,
         save_generated_images: bool = True,
         filename_pattern: str = "model,seed",
         image_storage_location: str = "./images",
@@ -1472,9 +1492,9 @@ class Model_Diffusers(PreviewGenerator):
 
         Args:
             prompt (str , optional):
-                The prompt or prompts to guide image generation.
+                The prompt to guide image generation.
             negative_prompt (str , optional):
-                The prompt or prompts to guide what to not include in image generation. Ignored when not using guidance (`guidance_scale < 1`).
+                The prompt to guide what to not include in image generation. Ignored when not using guidance (`guidance_scale < 1`).
             img_height (int, optional, defaults to 512):
                 The height in pixels of the generated image.
             img_width (int, optional, defaults to 512):
@@ -1635,7 +1655,12 @@ class Model_Diffusers(PreviewGenerator):
             image (Any, optional):
                 The image to be used for the Inpaint, ControlNet, or T2I adapter.
             preprocessor_name (str, optional, defaults to "None"):
-                Preprocessor name for ControlNet.
+                Preprocessor name for ControlNet tasks.
+                To see the mapping of tasks with their corresponding preprocessor names, use the following code:
+                ```python
+                from stablepy import TASK_AND_PREPROCESSORS
+                print(TASK_AND_PREPROCESSORS)
+                ```
             preprocess_resolution (int, optional, defaults to 512):
                 Preprocess resolution for the Inpaint, ControlNet, or T2I adapter.
             image_resolution (int, optional, defaults to 512):
@@ -1676,6 +1701,8 @@ class Model_Diffusers(PreviewGenerator):
                 The number of times the specified `num_images` will be generated.
             display_images (bool, optional, defaults to False):
                 If you use a notebook, you will be able to display the images generated with this parameter.
+            image_display_scale (float, optional, defaults to 1.):
+                The proportional scale of the displayed image in the notebook.
             save_generated_images (bool, optional, defaults to True):
                 By default, the generated images are saved in the current location within the 'images' folder. You can disable this with this parameter.
             filename_pattern (str , optional, defaults to "model,seed"):
@@ -1830,6 +1857,7 @@ class Model_Diffusers(PreviewGenerator):
         pp = CURRENT_TASK_PARAMS(
             disable_progress_bar=disable_progress_bar,
             display_images=display_images,
+            image_display_scale=image_display_scale,
             image_storage_location=image_storage_location,
             save_generated_images=save_generated_images,
             retain_compel_previous_load=retain_compel_previous_load,
@@ -1968,6 +1996,16 @@ class Model_Diffusers(PreviewGenerator):
             ip_adapter_scale = [ip_adapter_scale]
         if not isinstance(ip_adapter_mode, list):
             ip_adapter_mode = [ip_adapter_mode]
+
+        if ip_adapter_image:
+            if self.class_name == FLUX:
+                raise ValueError("IP adapter is not currently supported with Flux")
+            for ipa_ml in ip_adapter_model:
+                if ipa_ml not in IP_ADAPTER_MODELS[self.class_name]:
+                    raise ValueError(
+                        f"Invalid IP adapter model '{ipa_ml}' for {self.class_name}. "
+                        f"Valid models are: {', '.join(IP_ADAPTER_MODELS[self.class_name].keys())}"
+                    )
 
         ip_weights = [IP_ADAPTER_MODELS[self.class_name][name] for name in ip_adapter_model]
         ip_scales = [float(s) for s in ip_adapter_scale]
@@ -2817,9 +2855,21 @@ class Model_Diffusers(PreviewGenerator):
 
         logger.info(f"Seeds: {valid_seeds}")
 
-        # Show images if loop
+        # Show images
         if pp.display_images:
-            mediapy.show_images(images)
+            if pp.image_display_scale != 1.0:
+                resized_images = []
+                for img in images:
+                    img_copy = img.copy()
+                    img_copy.thumbnail(
+                        (int(img_copy.width * pp.image_display_scale), int(img_copy.height * pp.image_display_scale)),
+                        Image.LANCZOS
+                    )
+                    resized_images.append(img_copy)
+                mediapy.show_images(resized_images)
+            else:
+                mediapy.show_images(images)
+
             if pp.loop_generation > 1:
                 time.sleep(0.5)
 
