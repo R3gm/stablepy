@@ -1663,12 +1663,19 @@ class Model_Diffusers(PreviewGenerator):
                 ```
             preprocess_resolution (int, optional, defaults to 512):
                 Preprocess resolution for the Inpaint, ControlNet, or T2I adapter.
+                This is the resolution used by the preprocessor to preprocess the image.
+                Lower resolution can work faster but provides fewer details,
+                while higher resolution gives more detail but can be slower and requires more resources.
             image_resolution (int, optional, defaults to 512):
                 Image resolution for the Img2Img, Inpaint, ControlNet, or T2I adapter.
+                This is the maximum resolution the image will be scaled to while maintaining its proportions,
+                based on the original dimensions.
+                For example, if you have a 512x512 image and set image_resolution=1024,
+                it will be resized to 1024x1024 during image generation.
             image_mask (Any, optional):
-                Path image mask for the Inpaint.
+                Path image mask for the Inpaint and Repaint tasks.
             strength (float, optional, defaults to 0.35):
-                Strength parameter for the Inpaint and Img2Img.
+                Strength parameter for the Inpaint, Repaint and Img2Img.
             low_threshold (int, optional, defaults to 100):
                 Low threshold parameter for ControlNet and T2I Adapter Canny.
             high_threshold (int, optional, defaults to 200):
