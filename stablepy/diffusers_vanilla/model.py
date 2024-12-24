@@ -171,6 +171,7 @@ class PreviewGenerator:
 
             logger.debug("finish")
             self.new_image_event.set()  # Result image
+
         except Exception as e:
             traceback.print_exc()
             self.fail_work = str(e)
@@ -2791,7 +2792,7 @@ class Model_Diffusers(PreviewGenerator):
                 pp.upscaler_tile_size, pp.upscaler_tile_overlap,
                 pp.hires_steps, pp.hires_params_config,
                 self.task_name,
-                generators[0],  # pipe_params_config["generator"][0], # no generator
+                generators[0] if isinstance(generators, list) else generators,  # pipe_params_config["generator"][0], # no generator
                 hires_pipe,
                 pp.disable_progress_bar,
             )
@@ -2841,7 +2842,7 @@ class Model_Diffusers(PreviewGenerator):
                 pp.upscaler_tile_size, pp.upscaler_tile_overlap,
                 pp.hires_steps, pp.hires_params_config,
                 self.task_name,
-                generators[0],  # pipe_params_config["generator"][0], # no generator
+                generators[0] if isinstance(generators, list) else generators,  # pipe_params_config["generator"][0], # no generator
                 hires_pipe,
                 pp.disable_progress_bar,
             )
