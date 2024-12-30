@@ -8,7 +8,7 @@ import cv2
 
 class ZoeDepth:
     def __init__(self):
-        self.model = pipeline(task="depth-estimation", model="Intel/zoedepth-nyu-kitti")
+        self.model = pipeline(task="depth-estimation", model="Intel/zoedepth-nyu-kitti", device=-1)
 
     @torch.inference_mode()
     def __call__(self, image: np.ndarray, **kwargs) -> PIL.Image.Image:
@@ -38,7 +38,7 @@ class ZoeDepth:
 
 class DPTDepthEstimator:
     def __init__(self):
-        self.model = pipeline("depth-estimation")
+        self.model = pipeline("depth-estimation", device=-1)
 
     def __call__(self, image: np.ndarray, **kwargs) -> PIL.Image.Image:
         detect_resolution = kwargs.pop("detect_resolution", 512)
