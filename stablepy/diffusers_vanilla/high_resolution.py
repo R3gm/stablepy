@@ -79,7 +79,7 @@ def process_images_high_resolution(
                 result_scaler.append(image_pos_up)
 
             images = result_scaler
-            logger.info(f"Upscale resolution: {images[0].size}")
+            logger.info(f"Upscale resolution: {images[0].size[0]}x{images[0].size[1]}")
 
         return images
 
@@ -156,7 +156,7 @@ def process_images_high_resolution(
         logger.debug(str(images[0].shape))
         logger.info(
             "Latent resolution: "
-            f"{images[0].shape[2] * 8}x{images[0].shape[3] * 8}"
+            f"{images[0].shape[3] * 8}x{images[0].shape[2] * 8}"
         )
 
         torch.cuda.empty_cache()

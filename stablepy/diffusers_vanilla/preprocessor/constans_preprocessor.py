@@ -111,4 +111,10 @@ TASK_AND_PREPROCESSORS = {
     "repaint": [
         "None",
     ],
+    "inpaint": [
+        "None",
+    ],
+    "img2img": [
+        "None",
+    ],
 }

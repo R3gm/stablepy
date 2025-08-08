@@ -18,23 +18,54 @@ from .constans_preprocessor import (
     TASK_AND_PREPROCESSORS,
 )
 from ..utils import convert_image_to_numpy_array
+import cv2
+
+
+def calculate_new_resolution(input_image_shape, resolution):
+    H, W = input_image_shape[:2]
+    H = float(H)
+    W = float(W)
+    k = float(resolution) / max(H, W)
+    H *= k
+    W *= k
+    H = int(np.round(H / 64.0)) * 64
+    W = int(np.round(W / 64.0)) * 64
+    return (H, W)
+
+
+def standardize_image(np_image, res=1024, spected_res=None) -> np.ndarray:
+    """
+    Ensure the image is in HWC3 format and resize it so that the
+    largest dimension matches the given resolution, rounding dimensions
+    to the nearest multiple of 64.
+    """
+    if np_image is None:
+        raise ValueError("image must be defined.")
+
+    if not isinstance(np_image, np.ndarray):
+        np_image = convert_image_to_numpy_array(np_image)
+
+    np_image = HWC3(np_image)
+    np_image = resize_image(np_image, resolution=res)
+
+    if spected_res is not None:
+        if (np_image.shape[0], np_image.shape[1]) != spected_res:
+            np_image = cv2.resize(
+                np_image,
+                (spected_res[1], spected_res[0]),
+                interpolation=cv2.INTER_LANCZOS4
+            )
+
+    return np_image
 
 
 def process_basic_task(image: np.ndarray, resolution: int) -> PIL.Image.Image:
     """Process basic tasks that require only resizing."""
-    image = HWC3(image)
-    image = resize_image(image, resolution=resolution)
+    image = standardize_image(image, resolution)
     return PIL.Image.fromarray(image)
 
 
 class RecolorDetector:
-    def resize(self, image, res):
-        if image is None:
-            raise ValueError("image must be defined.")
-
-        image = HWC3(image)
-        return resize_image(image, res)
-
     def __call__(self, image=None, gamma_correction=1.0, image_resolution=512, mode="luminance", **kwargs):
         """Process the 'recolor' task."""
         if mode == "luminance":
@@ -44,19 +75,17 @@ class RecolorDetector:
         else:
             raise ValueError("Invalid recolor mode")
 
-        result = func_c(
-            self.resize(image, image_resolution), thr_a=gamma_correction
+        return func_c(
+            standardize_image(image, image_resolution), thr_a=gamma_correction
         )
-        return PIL.Image.fromarray(HWC3(result))
 
 
 class BlurDetector(RecolorDetector):
     def __call__(self, image=None, image_resolution=512, blur_sigma=5, **kwargs):
         """Process the 'tile' task with Gaussian blur."""
-        result = apply_gaussian_blur(
-            self.resize(image, image_resolution), ksize=blur_sigma
+        return apply_gaussian_blur(
+            standardize_image(image, image_resolution), ksize=blur_sigma
         )
-        return PIL.Image.fromarray(HWC3(result))
 
 
 class Preprocessor:
@@ -201,12 +230,19 @@ class Preprocessor:
         if not isinstance(image, np.ndarray):
             image = convert_image_to_numpy_array(image)
 
+        image_resolution = kwargs.get("image_resolution", 1024)
+        spected_resolution = calculate_new_resolution(image.shape, image_resolution)
+
         if self.name == "Canny":
-            return self._process_canny(image, **kwargs)
+            image = self._process_canny(image, **kwargs)
         elif self.name == "Midas":
-            return self._process_midas(image, **kwargs)
+            image = self._process_midas(image, **kwargs)
         else:
-            return self.model(image, **kwargs)
+            image = self.model(image, **kwargs)
+
+        image = standardize_image(image, image_resolution, spected_resolution)
+
+        return PIL.Image.fromarray(image)
 
     def _process_canny(self, image: PIL.Image.Image, **kwargs) -> PIL.Image.Image:
         """Process an image using the Canny preprocessor."""
@@ -215,20 +251,15 @@ class Preprocessor:
         image = HWC3(image)
         if detect_resolution:
             image = resize_image(image, resolution=detect_resolution)
-        image = self.model(image, **kwargs)
-        return PIL.Image.fromarray(image)
+        return self.model(image, **kwargs)
 
     def _process_midas(self, image: PIL.Image.Image, **kwargs) -> PIL.Image.Image:
         """Process an image using the Midas preprocessor."""
         detect_resolution = kwargs.pop("detect_resolution", 512)
-        image_resolution = kwargs.pop("image_resolution", 512)
         image = np.array(image)
         image = HWC3(image)
         image = resize_image(image, resolution=detect_resolution)
-        image = self.model(image)  # , **kwargs)
-        image = HWC3(image)
-        image = resize_image(image, resolution=image_resolution)
-        return PIL.Image.fromarray(image)
+        return self.model(image)  # , **kwargs)
 
 
 def get_preprocessor_params(

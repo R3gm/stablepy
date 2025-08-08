@@ -860,19 +860,20 @@ class Model_Diffusers(PreviewGenerator):
         t2i_adapter_preprocessor: bool,
         recolor_gamma_correction: float,
         tile_blur_sigma: int,
+        tsk_name: str,
     ) -> list[PIL.Image.Image]:
         if image is None:
             raise ValueError("No reference image found.")
 
-        if "t2i" in self.task_name:
-            preprocessor_name = T2I_PREPROCESSOR_NAME[self.task_name] if t2i_adapter_preprocessor else "None"
+        if "t2i" in tsk_name:
+            preprocessor_name = T2I_PREPROCESSOR_NAME[tsk_name] if t2i_adapter_preprocessor else "None"
 
-        if preprocessor_name in ["None", "None (anime)"] or self.task_name in ["ip2p", "img2img", "pattern", "sdxl_tile_realistic"]:
+        if preprocessor_name in ["None", "None (anime)"] or tsk_name in ["ip2p", "img2img", "pattern", "sdxl_tile_realistic"]:
             return process_basic_task(image, image_resolution)
 
         params_preprocessor, model_name = get_preprocessor_params(
             image,
-            self.task_name,
+            tsk_name,
             preprocessor_name,
             image_resolution,
             preprocess_resolution,
@@ -887,7 +888,7 @@ class Model_Diffusers(PreviewGenerator):
         if not model_name:
             raise ValueError(
                 "Unsupported task name or configuration: "
-                f"{self.task_name} - {preprocessor_name}"
+                f"{tsk_name} - {preprocessor_name}"
             )
 
         logger.debug(f"Preprocessor: {model_name}")
@@ -2127,6 +2128,7 @@ class Model_Diffusers(PreviewGenerator):
                 t2i_adapter_preprocessor=t2i_adapter_preprocessor,
                 recolor_gamma_correction=recolor_gamma_correction,
                 tile_blur_sigma=tile_blur_sigma,
+                tsk_name=self.task_name,
             )
 
         # Task Parameters
@@ -2151,7 +2153,7 @@ class Model_Diffusers(PreviewGenerator):
             pipe_params_config["width"] = img_width
         else:
             pipe_params_config["image"] = control_image
-            logger.info(f"Image resolution: {str(control_image.size)}")
+            logger.info(f"Image resolution: {control_image.size[0]}x{control_image.size[1]}")
 
         if self.class_name == SD15:
             pipe_params_config["prompt_embeds"] = prompt_emb
