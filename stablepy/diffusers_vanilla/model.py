@@ -2708,6 +2708,15 @@ class Model_Diffusers(PreviewGenerator):
                 hires_denoising_strength,
                 self.lora_memory,
                 self.lora_scale_memory,
+                hires_guidance_scale,
+                hires_sampler,
+                hires_schedule_type,
+                hires_prompt,
+                hires_negative_prompt,
+                pipe_params_config.get("controlnet_conditioning_scale", None), 
+                pipe_params_config.get("control_guidance_start", None),
+                pipe_params_config.get("control_guidance_end", None),
+                (image_resolution if self.task_name != "txt2img" else None),
             ]
         )
 
@@ -2720,8 +2729,8 @@ class Model_Diffusers(PreviewGenerator):
             guidance_scale,
             sampler,
             0000000000,  # calculate_seed,
-            img_width,
-            img_height,
+            (img_width if self.task_name == "txt2img" else control_image.size[0]),
+            (img_height if self.task_name == "txt2img" else control_image.size[1]),
             clip_skip,
             schedule_type,
             extra_metadata,

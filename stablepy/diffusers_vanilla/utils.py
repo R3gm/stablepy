@@ -97,6 +97,19 @@ def extra_string_metadata(metadata_list):
             parameters_beta += f", PAG: {metadata_list[1]}"
         if metadata_list[2]:
             parameters_beta += f", FreeU: {metadata_list[2]}"
+
+        if metadata_list[17]:
+            parameters_beta += f", Image resolution: {str(metadata_list[17])}"
+
+        # ControlNet
+        if metadata_list[14]:
+            parameters_beta += f", ControlNet conditioning scale: {metadata_list[14]}"
+            if metadata_list[15] is not None:
+                parameters_beta += f", ControlNet guidance start: {metadata_list[15]}"
+            if metadata_list[16] is not None:
+                parameters_beta += f", ControlNet guidance end: {metadata_list[16]}"
+
+        # Upscaler and Hires
         if metadata_list[3]:
             upscaler_param = (
                 os.path.splitext(os.path.basename(str(metadata_list[3])))[0]
@@ -105,9 +118,19 @@ def extra_string_metadata(metadata_list):
             )
             parameters_beta += f", Hires upscaler: {upscaler_param}"
             parameters_beta += f", Hires upscale: {metadata_list[4]}"
+            # if str(metadata_list[12]).strip():
+            #     parameters_beta += f", Hires prompt: {metadata_list[12]}"
+            # if str(metadata_list[13]).strip():
+            #     parameters_beta += f", Hires negative prompt: {metadata_list[13]}"
             if metadata_list[5]:
                 parameters_beta += f", Hires steps: {metadata_list[5]}"
                 parameters_beta += f", Hires denoising strength: {metadata_list[6]}"
+            if metadata_list[9] >= 0:
+                parameters_beta += f", Hires CFG: {metadata_list[9]}"
+            if metadata_list[10] != "Use same sampler":
+                parameters_beta += f", Hires sampler: {metadata_list[10]}"
+            if metadata_list[11] != "Use same schedule type":
+                parameters_beta += f", Hires schedule type: {metadata_list[11]}"
         if any(metadata_list[7]):
             lora_params = generate_lora_tags(metadata_list[7], metadata_list[8])
             if lora_params.strip():
