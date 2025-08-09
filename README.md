@@ -6,7 +6,7 @@ The goal of this project is to make Stable Diffusion more accessible, simple and
 
 **Installation:**
 ```
-pip install stablepy==0.6.1
+pip install stablepy==0.6.2
 ```
 
 **Usage:**
@@ -242,10 +242,15 @@ images[1]
 
 **📖 New Update Details:**
 
+🔥 **Version 0.6.2:**
+
+- Added more parameters to the metadata.
+- Ensured consistent image resolution from the preprocessor.
+- Refresh the preprocessor cache when tasks are updated.
+
 🔥 **Version 0.6.1:**
 
 - Default device CPU for DPT and ZoeDepth.
-
 
 🔥 **Version 0.6.0:**
 
