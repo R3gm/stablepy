@@ -5,6 +5,7 @@ import warnings
 import traceback
 import threading
 import json
+from datetime import datetime
 
 import numpy as np
 import PIL.Image
@@ -2714,10 +2715,11 @@ class Model_Diffusers(PreviewGenerator):
                 hires_schedule_type,
                 hires_prompt,
                 hires_negative_prompt,
-                pipe_params_config.get("controlnet_conditioning_scale", None), 
+                pipe_params_config.get("controlnet_conditioning_scale", None),
                 pipe_params_config.get("control_guidance_start", None),
                 pipe_params_config.get("control_guidance_end", None),
                 (image_resolution if self.task_name != "txt2img" else None),
+                pipe_params_config.get("strength", None),
             ]
         )
 
@@ -2735,6 +2737,7 @@ class Model_Diffusers(PreviewGenerator):
             clip_skip,
             schedule_type,
             extra_metadata,
+            syntax_weights,
         ]
 
         filename_pattern = assemble_filename_pattern(
@@ -2906,6 +2909,8 @@ class Model_Diffusers(PreviewGenerator):
                 sfx = pp.filename_pattern
                 if "_STABLEPYSEEDKEY_" in sfx:
                     sfx = sfx.replace("_STABLEPYSEEDKEY_", str(seed_))
+                if "_STABLEPYTIMEKEY_" in sfx:
+                    sfx = sfx.replace("_STABLEPYTIMEKEY_", str(datetime.now().strftime("%Y%m%d_%H%M%S")))
                 image_path = save_pil_image_with_metadata(
                     image_, pp.image_storage_location, image_generation_data, sfx
                 )

@@ -97,6 +97,8 @@ def extra_string_metadata(metadata_list):
             parameters_beta += f", PAG: {metadata_list[1]}"
         if metadata_list[2]:
             parameters_beta += f", FreeU: {metadata_list[2]}"
+        if metadata_list[18]:
+            parameters_beta += f", Strength: {metadata_list[18]}"
 
         if metadata_list[17]:
             parameters_beta += f", Image resolution: {str(metadata_list[17])}"
@@ -160,6 +162,7 @@ def assemble_filename_pattern(suffix_images, metadata):
         "img_width": metadata[8],
         "img_height": metadata[9],
         "seed": "_STABLEPYSEEDKEY_",
+        "timestamp": "_STABLEPYTIMEKEY_",
     }
 
     filename_image = ""
@@ -194,6 +197,7 @@ def get_string_metadata(metadata_list):
             f"Seed: {str(metadata_list[7])}, "
             f"Size: {str(metadata_list[8])}x{str(metadata_list[9])}, "
             f"Model: {os.path.splitext(os.path.basename(str(metadata_list[2])))[0] if os.path.exists(metadata_list[2]) else os.path.basename(str(metadata_list[2]))}, "
+            f"Prompt emphasis: {metadata_list[13]}, "
             f"Clip skip: {2 if metadata_list[10] else 1}"
         )
 
