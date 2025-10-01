@@ -2289,6 +2289,7 @@ class Model_Diffusers(PreviewGenerator):
                 "mask_padding": 32,
                 # "sampler": "Use same sampler",
                 # "inpaint_only": True,
+                "custom_model_path": "",
             }
 
             # Pipe detailfix_pipe

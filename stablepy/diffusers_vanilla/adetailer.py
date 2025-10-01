@@ -2,6 +2,7 @@
 # Adetailer
 # =====================================
 from functools import partial
+import os
 from diffusers import DPMSolverMultistepScheduler, DPMSolverSinglestepScheduler, DDIMScheduler
 from huggingface_hub import hf_hub_download
 from typing import Any, Callable, Iterable, List, Mapping, Optional
@@ -28,6 +29,7 @@ def ad_model_process(
     mask_dilation=4,
     mask_blur=4,
     mask_padding=32,
+    custom_model_path="",
 ):
     # input: params pipe, detailfix_pipe, paras yolo
     # output: list of PIL images
@@ -63,6 +65,12 @@ def ad_model_process(
         hand_model_path = hf_hub_download("Bingsu/adetailer", "hand_yolov8n.pt")
         hand_detector = partial(yolo_detector, model_path=hand_model_path)
         detectors.append(hand_detector)
+    if custom_model_path and os.path.exists(custom_model_path):
+        try:
+            custom_detector = partial(yolo_detector, model_path=custom_model_path)
+            detectors.append(custom_detector)
+        except Exception as e:
+            logger.error(f"Error loading custom model from {custom_model_path}: {str(e)}")
 
     image_list_ad = []
 
