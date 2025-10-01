@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "stablepy"
-version = "0.6.2"
+version = "0.6.3"
 description = "A tool for easy use of stable diffusion"
 authors = ["Roger Condori(R3gm) <rocondoriflores@gmail.com>"]
 readme = "README.md"

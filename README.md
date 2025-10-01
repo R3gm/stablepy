@@ -6,7 +6,7 @@ The goal of this project is to make Stable Diffusion more accessible, simple and
 
 **Installation:**
 ```
-pip install stablepy==0.6.2
+pip install stablepy==0.6.3
 ```
 
 **Usage:**
@@ -122,8 +122,8 @@ images[1]
   ```
 - `syntax_weights` (str, optional, defaults to "Classic"): Specifies the type of syntax weights and emphasis used during generation. "Classic" is (word:weight), "Compel" is (word)weight. To see all the valid syntax weight options, use the following code:
   ```python
-  from stablepy import ALL_PROMPT_WEIGHT_OPTIONS
-  print(ALL_PROMPT_WEIGHT_OPTIONS)
+  from stablepy import PROMPT_WEIGHT_OPTIONS_PRIORITY
+  print(PROMPT_WEIGHT_OPTIONS_PRIORITY)
   ```
 - `lora_A` (str, optional): Placeholder for lora A parameter.
 - `lora_scale_A` (float, optional, defaults to 1.0): Placeholder for lora scale A parameter.
@@ -154,6 +154,7 @@ images[1]
   - `mask_padding` (int): The mask padding value. Defaults to 32.
   - `inpaint_only` (bool): Indicates if only inpainting is to be performed. Defaults to True. False is img2img mode
   - `sampler` (str): The sampler type to be used. Defaults to "Use same sampler".
+  - `custom_model_path` (str): Custom detector model path for adetailer.
 - `adetailer_B` (bool, optional, defaults to False): Guided Inpainting to Correct Image, it is preferable to use low values for strength.
 - `adetailer_B_params` (Dict[str, Any], optional, defaults to {}): Placeholder for adetailer_B parameters in a dict example {"prompt": "my prompt", "inpaint_only": True ...}. If not specified, default values will be used.
 - `style_prompt` (str, optional): If a style that is in STYLE_NAMES is specified, it will be added to the original prompt and negative prompt.
@@ -241,6 +242,13 @@ images[1]
 - `**kwargs` (dict, optional): kwargs is used to pass additional parameters to the Diffusers pipeline. This allows for flexibility when specifying optional settings like guidance_rescale, eta, cross_attention_kwargs, and more.
 
 **📖 New Update Details:**
+
+🔥 **Version 0.6.3:**
+
+- Added support for using a custom detector model with adetailer.
+- Strength and Prompt emphasis are now included in the image metadata.
+- Added "timestamp" option to filename_pattern for saving images with the current time.
+- Added experimental prompt emphasis.
 
 🔥 **Version 0.6.2:**
 

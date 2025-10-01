@@ -432,6 +432,7 @@ VALID_FILENAME_PATTERNS = [
     "img_width",
     "img_height",
     "seed",
+    "timestamp",
 ]
 
 BETA_STYLE_LIST = [
