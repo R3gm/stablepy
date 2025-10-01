@@ -1546,8 +1546,8 @@ class Model_Diffusers(PreviewGenerator):
                 To see all the valid syntax weight options, use the following code:
 
                 ```python
-                from stablepy import ALL_PROMPT_WEIGHT_OPTIONS
-                print(ALL_PROMPT_WEIGHT_OPTIONS)
+                from stablepy import PROMPT_WEIGHT_OPTIONS_PRIORITY
+                print(PROMPT_WEIGHT_OPTIONS_PRIORITY)
                 ```
             lora_A (str, optional):
                 Placeholder for lora A parameter.
@@ -1598,6 +1598,7 @@ class Model_Diffusers(PreviewGenerator):
                 - mask_padding (int): The mask padding value. Defaults to 32.
                 - inpaint_only (bool): Indicates if only inpainting is to be performed. Defaults to True. False is img2img mode
                 - sampler (str): The sampler type to be used. Defaults to "Use same sampler".
+                - custom_model_path (str): Custom detector model path for adetailer.
             adetailer_B (bool, optional, defaults to False):
                 Guided Inpainting to Correct Image, it is preferable to use low values for strength.
             adetailer_B_params (Dict[str, Any], optional, defaults to {}):
