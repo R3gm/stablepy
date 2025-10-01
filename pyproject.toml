@@ -32,8 +32,8 @@ opencv-contrib-python = ">=4.8.0.76"
 sentencepiece = "*"
 numpy = "<=1.26.4"
 lark = "*"
-spandrel = "0.3.4"
-spandrel-extra-arches = "0.1.1"
+spandrel = "0.4.1"
+spandrel-extra-arches = "0.2.0"
 facexlib = "0.3.0"
 
 [[tool.poetry.source]]

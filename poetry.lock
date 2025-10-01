@@ -4578,12 +4578,13 @@ files = [
 
 [[package]]
 name = "spandrel"
-version = "0.3.4"
+version = "0.4.1"
 description = "Give your project support for a variety of PyTorch model architectures, including auto-detecting model architecture from just .pth files. spandrel gives you arch support."
 optional = false
 python-versions = ">=3.8"
 files = [
-    {file = "spandrel-0.3.4-py3-none-any.whl", hash = "sha256:1b5585bcb0298fc817e5b556880431353f48770f98328c3ce54f4ed9768f2c13"},
+    {file = "spandrel-0.4.1-py3-none-any.whl", hash = "sha256:49a39aa979769749a42203428355bc4840452854d6334ce0d465af46098dd448"},
+    {file = "spandrel-0.4.1.tar.gz", hash = "sha256:646d9816a942e59d56aab2dc904353952e57dee4b2cb3f59f7ea4dc0fb11a1f2"},
 ]
 
 [package.dependencies]
@@ -4592,22 +4593,23 @@ numpy = "*"
 safetensors = "*"
 torch = "*"
 torchvision = "*"
-typing-extensions = "*"
+typing_extensions = "*"
 
 [[package]]
 name = "spandrel-extra-arches"
-version = "0.1.1"
+version = "0.2.0"
 description = "Implements extra model architectures for spandrel"
 optional = false
 python-versions = ">=3.8"
 files = [
-    {file = "spandrel_extra_arches-0.1.1-py3-none-any.whl", hash = "sha256:1c0ca255692341e77b5a1aed9b83203593b91a9a4e00722a77437251fed8f32e"},
+    {file = "spandrel_extra_arches-0.2.0-py3-none-any.whl", hash = "sha256:152e4abbd108470a77b716030029c3e7fc6f61600ec769269c94a46d4a130b4f"},
+    {file = "spandrel_extra_arches-0.2.0.tar.gz", hash = "sha256:9216877ecabc9c97e001ad5d49c4f8d2b1f6c6f82d1e77c8e2b350c586b6e64a"},
 ]
 
 [package.dependencies]
 einops = "*"
 numpy = "*"
-spandrel = ">=0.3.0"
+spandrel = ">=0.3.2"
 torch = "*"
 torchvision = "*"
 typing-extensions = "*"
@@ -5348,4 +5350,4 @@ testing = ["big-O", "jaraco.functools", "jaraco.itertools", "more-itertools", "p
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.10"
-content-hash = "1141a22eacca874086c0ac40a103fba68f07e8757a568d11dea8c0e6077eb9b3"
+content-hash = "62c3ae0f7b247e2d6212362144dbb9c9d75862f8d3ae894f787d64b39fb86c06"
