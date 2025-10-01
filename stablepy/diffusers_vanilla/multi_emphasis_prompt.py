@@ -5,6 +5,7 @@ from collections import namedtuple
 import torch
 import gc
 import re
+import random
 
 re_attention = re.compile(r"""
 \\\(|
@@ -23,6 +24,8 @@ re_attention = re.compile(r"""
 """, re.X)
 
 re_break = re.compile(r"\s*\bBREAK\b\s*", re.S)
+
+_EPS = 1e-12
 
 
 def parse_prompt_attention(text):
@@ -81,6 +84,16 @@ def parse_prompt_attention(text):
     return res
 
 
+def _prepare_multipliers(self):
+    # Ensure multipliers are a float tensor on same device/dtype as z and shaped (...,1)
+    m = self.multipliers
+    if not isinstance(m, torch.Tensor):
+        m = torch.as_tensor(m, dtype=self.z.dtype, device=self.z.device)
+    else:
+        m = m.to(dtype=self.z.dtype, device=self.z.device)
+    return m.reshape(m.shape + (1,))
+
+
 class Emphasis:
     """Emphasis class decides how to death with (emphasized:1.1) text in prompts"""
 
@@ -133,6 +146,262 @@ class EmphasisOriginalNoNorm(EmphasisOriginal):
         self.z = self.z * self.multipliers.reshape(self.multipliers.shape + (1,)).expand(self.z.shape)
 
 
+class EmphasisMeanNorm(Emphasis):
+    name = "MeanNorm"
+    description = "Multiply token embeddings by multipliers and renormalize to preserve original mean."
+
+    def after_transformers(self):
+        m = _prepare_multipliers(self)
+        original_mean = float(self.z.mean().detach().cpu().item())
+        self.z = self.z * m.expand_as(self.z)
+        new_mean = float(self.z.mean().detach().cpu().item())
+        if abs(new_mean) > _EPS:
+            self.z = self.z * (original_mean / new_mean)
+
+
+class EmphasisL2Norm(Emphasis):
+    name = "L2Norm"
+    description = "Favor positive (>1) multipliers strongly, downmagnitude <1 tokens; preserve overall norm."
+
+    def after_transformers(self):
+        m = _prepare_multipliers(self)
+        base = self.z
+
+        # Heuristic post-transformer approximation of 'compel':
+        # - square >1 multipliers to emphasize positives,
+        # - keep <1 multipliers as-is so negatives are still down-magnitude,
+        # - then re-scale to preserve overall L2 norm.
+        f = torch.where(m > 1.0, m ** 2, m)  # shape (B, T, 1)
+        weighted = base * f.expand_as(base)
+
+        base_norm = float(torch.linalg.norm(base).detach().cpu().item())
+        weighted_norm = float(torch.linalg.norm(weighted).detach().cpu().item())
+        if weighted_norm > _EPS:
+            weighted = weighted * (base_norm / weighted_norm)
+
+        self.z = weighted
+
+
+class EmphasisDownMagnitudeL2Norm(Emphasis):
+    name = "DownMagnitude"
+    description = "Down-magnitude: scale tokens with multipliers < 1 while preserving total embedding magnitude."
+
+    def after_transformers(self):
+        m = _prepare_multipliers(self)
+        base = self.z
+
+        # tokens <1 keep m, tokens >=1 become 1 (no up-weight)
+        down_m = torch.where(m < 1.0, m, torch.ones_like(m))
+        weighted = base * down_m.expand_as(base)
+
+        base_norm = float(torch.linalg.norm(base).detach().cpu().item())
+        weighted_norm = float(torch.linalg.norm(weighted).detach().cpu().item())
+        if weighted_norm > _EPS:
+            weighted = weighted * (base_norm / weighted_norm)
+
+        self.z = weighted
+
+
+class EmphasisMeanNormDownMagnitude(Emphasis):
+    name = "MeanNormDownMagnitude"
+    description = "Hybrid — multiply + an additional downmagnitude-like correction for tokens <1."
+
+    def after_transformers(self):
+        m = _prepare_multipliers(self)
+        base = self.z
+
+        # multiply and renormalize to preserve mean
+        interpolate = base * m.expand_as(base)
+        interpolate_mean = float(interpolate.mean().detach().cpu().item())
+        base_mean = float(base.mean().detach().cpu().item())
+        if abs(interpolate_mean) > _EPS:
+            interpolate = interpolate * (base_mean / interpolate_mean)
+
+        # downmagnitude correction: tokens with m < 1 get the direct multiplicative effect
+        down_mask = (m < 1.0).to(dtype=self.z.dtype)
+        down_effect = base * (1 - (1 - m) * down_mask).expand_as(base)
+
+        out = interpolate * 0.8 + down_effect * 0.2
+
+        base_norm = float(torch.linalg.norm(base).detach().cpu().item())
+        out_norm = float(torch.linalg.norm(out).detach().cpu().item())
+        if out_norm > _EPS:
+            out = out * (base_norm / out_norm)
+
+        self.z = out
+
+
+class EmphasisExponentialScale(Emphasis):
+    name = "ExponentialScale"
+    description = "Apply multipliers with exponential scaling"
+
+    def after_transformers(self):
+        m = _prepare_multipliers(self)
+        base = self.z
+        f = torch.exp(m - 1.0)  # m=1 → 1.0, m=1.5 → ~1.65
+        self.z = base * f.expand_as(base)
+
+
+class EmphasisSigmoidScale(Emphasis):
+    name = "SigmoidScale"
+    description = "Squash multipliers with sigmoid-like curve to prevent extremes"
+
+    def after_transformers(self):
+        m = _prepare_multipliers(self)
+        f = 1 + torch.tanh(m - 1.0)  # maps (-inf,+inf) → (0,2)
+        self.z = self.z * f.expand_as(self.z)
+
+
+class EmphasisContrastiveShift(Emphasis):
+    name = "ContrastiveShift"
+    description = "Boost emphasized tokens, reduce non-emphasized ones"
+
+    def after_transformers(self):
+        m = _prepare_multipliers(self)
+        base = self.z
+        mean_m = m.mean(dim=1, keepdim=True)  # per-sequence average
+        f = m - mean_m + 1.0  # shift relative to avg
+        self.z = base * f.expand_as(base)
+
+
+class EmphasisStochasticNoise(Emphasis):
+    name = "StochasticNoise"
+    description = "Adds small random noise to multipliers for variety"
+
+    def after_transformers(self):
+        m = _prepare_multipliers(self)
+        noise = (torch.randn_like(m) * 0.05)  # ±5% noise
+        f = m + noise
+        self.z = self.z * f.expand_as(self.z)
+
+
+class EmphasisMeanNormExpoBlend(Emphasis):
+    name = "MeanNormExpoBlend"
+    description = "Blend of interpolate and exponential emphasis"
+
+    def after_transformers(self):
+        m = _prepare_multipliers(self)
+        interpolate = self.z * m.expand_as(self.z)
+        expo = self.z * torch.exp(m - 1.0).expand_as(self.z)
+        self.z = 0.5 * interpolate + 0.5 * expo
+
+
+class EmphasisExponentialGammaNorm(Emphasis):
+    name = "ExponentialGammaNorm"
+    description = "Exponentially scale multipliers (m^γ). Strongly amplifies both >1 and <1."
+
+    gamma = 1.30  # tunable strength
+
+    def after_transformers(self):
+        m = _prepare_multipliers(self)
+        weighted = self.z * (m ** self.gamma).expand_as(self.z)
+        # norm-preserve
+        base_norm = float(torch.linalg.norm(self.z).detach().cpu().item())
+        new_norm = float(torch.linalg.norm(weighted).detach().cpu().item())
+        if new_norm > _EPS:
+            weighted = weighted * (base_norm / new_norm)
+        self.z = weighted
+
+
+class EmphasisWaveModulation(Emphasis):
+    name = "WaveModulation"
+    description = "Apply a sinusoidal modulation to the embeddings based on multipliers."
+
+    def after_transformers(self):
+        m = _prepare_multipliers(self)
+        # Sine oscillation with multiplier as frequency
+        phase = torch.arange(self.z.shape[1], device=self.z.device).float()
+        phase = phase.unsqueeze(0).unsqueeze(-1)  # (1, T, 1)
+        wave = torch.sin(phase * m)
+        weighted = self.z * (1 + 0.5 * wave).expand_as(self.z)
+        self.z = weighted
+
+
+class EmphasisContrastAlpha(Emphasis):
+    name = "ContrastAlpha"
+    description = "Boost separation between emphasized and neutral tokens."
+
+    alpha = 1.1  # contrast factor
+
+    def after_transformers(self):
+        m = _prepare_multipliers(self)
+        centered = self.z - self.z.mean(dim=1, keepdim=True)
+        weighted = centered * m.expand_as(self.z) * self.alpha
+        self.z = weighted + self.z.mean(dim=1, keepdim=True)
+
+
+class EmphasisGaussianNoise(Emphasis):
+    name = "Noisy"
+    description = "Adds controlled Gaussian noise based on multiplier intensity."
+
+    noise_scale = 0.1
+
+    def after_transformers(self):
+        m = _prepare_multipliers(self)
+        noise = torch.randn_like(self.z) * self.noise_scale * (m - 1.0).abs()
+        self.z = self.z * m.expand_as(self.z) + noise
+
+
+class EmphasisGravityAttract(Emphasis):
+    name = "GravityAttract"
+    description = "Tokens with higher multipliers attract nearby tokens."
+
+    def after_transformers(self):
+        m = _prepare_multipliers(self)
+        weights = m / (m.sum(dim=1, keepdim=True) + _EPS)
+        gravity_center = (self.z * weights.expand_as(self.z)).sum(dim=1, keepdim=True)
+        self.z = self.z + (gravity_center - self.z) * m.expand_as(self.z) * 0.2
+
+
+class EmphasisRandomMix(Emphasis):
+    name = "RandomMix"
+    description = "Randomly mix multiple emphasis strategies for creative variety."
+    gamma = 1.25
+    alpha = 1.1
+    noise_scale = 0.1
+
+    def after_transformers(self):
+        choice = random.choice([0, 1, 2])
+        if choice == 0:
+            EmphasisExponentialGammaNorm.after_transformers(self)
+        elif choice == 1:
+            EmphasisContrastAlpha.after_transformers(self)
+        else:
+            EmphasisGaussianNoise.after_transformers(self)
+
+
+def recover_dist(base_emb, weighted_emb):
+    fixed_std = (base_emb.std() / weighted_emb.std()) * (weighted_emb - weighted_emb.mean())
+    embeddings_final = fixed_std + (base_emb.mean() - fixed_std.mean())
+    return embeddings_final
+
+
+class EmphasisInterpolate(Emphasis):
+    name = "Interpolate"  # MeanNorm2
+    description = "Interpolate-style: interpolate embeddings between empty prompt and original."
+
+    def after_transformers(self):
+        m = _prepare_multipliers(self)                # multipliers per token
+        base = self.z
+        weighted = base * m.expand_as(base)           # scale relative to empty
+        # recover mean/std distribution like interpolate does
+        self.z = recover_dist(base, weighted)
+
+
+class EmphasisScaledNormalize(Emphasis):
+    name = "ScaledNormalize"
+    description = "Scale embeddings by normalized multipliers and restore mean/std distribution."
+
+    def after_transformers(self):
+        m = _prepare_multipliers(self)
+        base = self.z
+        top = m.max()
+        w_max = 1.0
+        scale = (m / top) * w_max
+        weighted = base * scale.expand_as(base)
+        self.z = recover_dist(base, weighted)
+
+
 def get_current_option(emphasis_option_name):
     return next(iter([x for x in options if x.name == emphasis_option_name]), EmphasisOriginal)
 
@@ -146,6 +415,23 @@ options = [
     EmphasisIgnore,
     EmphasisOriginal,
     EmphasisOriginalNoNorm,
+    EmphasisMeanNorm,
+    EmphasisL2Norm,
+    EmphasisMeanNormDownMagnitude,
+    EmphasisExponentialScale,
+    EmphasisSigmoidScale,
+    EmphasisContrastiveShift,
+    EmphasisStochasticNoise,
+    EmphasisMeanNormExpoBlend,
+    EmphasisExponentialGammaNorm,
+    EmphasisWaveModulation,
+    EmphasisContrastAlpha,
+    EmphasisGaussianNoise,
+    EmphasisGravityAttract,
+    EmphasisRandomMix,
+    EmphasisDownMagnitudeL2Norm,
+    EmphasisInterpolate,
+    EmphasisScaledNormalize,
 ]
 
 

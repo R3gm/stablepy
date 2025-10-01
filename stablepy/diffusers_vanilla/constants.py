@@ -187,6 +187,23 @@ SD_EMBED = {
 CLASSIC_VARIANT = {
     "Classic-original": "Original",
     "Classic-no_norm": "No norm",
+    "Classic-mean_norm": "MeanNorm",
+    "Classic-interpolate": "Interpolate",
+    "Classic-scale_norm": "ScaledNormalize",
+    "Classic-downscaling": "DownMagnitude",
+    "Classic-mean_down": "MeanNormDownMagnitude",
+    "Classic-sigmoid": "SigmoidScale",
+    "Classic-contrastive_shift": "ContrastiveShift",
+    "Classic-exponential": "ExponentialScale",
+    "Classic-mean_exp": "MeanNormExpoBlend",
+    "Classic-exp_gamma": "ExponentialGammaNorm",
+    "Classic-gap-widener": "ContrastAlpha",
+    "Classic-gravity": "GravityAttract",
+    "Classic-sinusoidal": "WaveModulation",
+    "Classic-l2_norm": "L2Norm",
+    "Classic-stochastic": "StochasticNoise",
+    "Classic-gaussian_noise": "Noisy",
+    "Classic-random_mix": "RandomMix",
     "Classic-ignore": "Ignore",
     "None": "None",
 }
@@ -198,6 +215,13 @@ PROMPT_WEIGHT_OPTIONS = {
 }
 
 ALL_PROMPT_WEIGHT_OPTIONS = list(PROMPT_WEIGHT_OPTIONS.keys())
+
+PROMPT_WEIGHT_OPTIONS_PRIORITY = list({
+    **dict(reversed(OLD_PROMPT_WEIGHT_OPTIONS.items())),
+    **dict(list(CLASSIC_VARIANT.items())[:2]),
+    **SD_EMBED,
+    **dict(list(CLASSIC_VARIANT.items())[2:]),
+}.keys())
 
 # Sampler: DPM++ 2M, Schedule type: Exponential
 SCHEDULER_CONFIG_MAP = {
