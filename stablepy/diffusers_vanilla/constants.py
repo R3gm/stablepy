@@ -399,8 +399,10 @@ IP_ADAPTER_MODELS = {
         "faceid_portrait": ["h94/IP-Adapter-FaceID", "", "ip-adapter-faceid-portrait_sdxl.bin", None],
         "faceid_portrait_v2": ["h94/IP-Adapter-FaceID", "", "ip-adapter-faceid-portrait_sdxl_unnorm.bin", None],
         "composition_plus": ["ostris/ip-composition-adapter", "", "ip_plus_composition_sdxl.safetensors", "H"],
-        "noob-ipa": ["r3gm/noob-ipa", "model_H", "pytorch_model.bin", "H"],
+        "noob-ipa": ["r3gm/noob-ipa", "model_H", "ip_adapter_Noobtest_800000.bin", "H"],
         "noob-ipa_vit_G": ["r3gm/noob-ipa", "model_G", "noobIPAMARK1_mark1.safetensors", "G"],
+        "ipa_anime": ["r3gm/noob-ipa", "model_H", "ip_adapter_test_400000.bin", "H"],
+        "noob-stylize_vit_G": ["r3gm/noob-ipa", "model_G", "styleIpadapterFor_v10.safetensors", "G"],
     }
 }  # no suffix lora
 

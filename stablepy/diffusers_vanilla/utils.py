@@ -519,6 +519,18 @@ def cachebox(max_cache_size=None, hash_func=hashlib.md5):
     return decorator
 
 
+def find_first_valid(lst):
+    for item in lst:
+        if isinstance(item, list):
+            # Recursively search in the sublist
+            result = find_first_valid(item)
+            if result is not None:
+                return result
+        elif item is not None:
+            return item
+    return None
+
+
 def release_resources():
     torch.cuda.empty_cache()
     gc.collect()

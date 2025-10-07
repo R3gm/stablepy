@@ -61,6 +61,7 @@ from .utils import (
     validate_and_update_params,
     get_seeds,
     get_flux_components_info,
+    find_first_valid,
     CURRENT_TASK_PARAMS,
 )
 from .lora_loader import lora_mix_load, load_no_fused_lora
@@ -1092,9 +1093,9 @@ class Model_Diffusers(PreviewGenerator):
             f"Beta styles loaded with {len(self.STYLE_NAMES)} styles"
         )
 
-    def set_ip_adapter_multimode_scale(self, ip_scales, ip_adapter_mode):
+    def set_ip_adapter_multimode_scale(self, ip_scales, ip_adapter_mode, ip_masks):
         mode_scales = []
-        for scale, mode in zip(ip_scales, ip_adapter_mode):
+        for scale, mode, mask_group in zip(ip_scales, ip_adapter_mode, ip_masks):
             if mode == "style":
                 map_scale = {
                     "up": {"block_0": [0.0, scale, 0.0]},
@@ -1110,6 +1111,13 @@ class Model_Diffusers(PreviewGenerator):
                 }
             else:
                 map_scale = scale
+
+            if isinstance(mask_group, list) and len(mask_group) > 1:
+                if isinstance(map_scale, dict):
+                    raise ValueError(
+                        "Style or layout modes only support one mask per IP Adapter model — multiple masks aren’t allowed."
+                    )
+                map_scale = [map_scale] * len(mask_group)
 
             mode_scales.append(map_scale)
 
@@ -1243,25 +1251,36 @@ class Model_Diffusers(PreviewGenerator):
 
             # average_embedding = torch.mean(torch.stack(faceid_all_embeds, dim=0), dim=0)
 
+        primary_mask = find_first_valid(ip_masks)
         processed_masks = []
-        if ip_masks and ip_masks[0] is not None:  # fix this auto generate mask if any have it...
+        if primary_mask is not None:
             from diffusers.image_processor import IPAdapterMaskProcessor
-
             processor = IPAdapterMaskProcessor()
-            first_mask = ip_masks[0]
-            if isinstance(first_mask, list):
-                first_mask = first_mask[0]
-            width, height = first_mask.size  # aspect ratio based on first mask
+            width, height = primary_mask.size  # aspect ratio based on first mask
 
-            for mask in ip_masks:
-                if not isinstance(mask, list):
-                    mask = [mask]
-                masks_ = processor.preprocess(mask, height=height, width=width)
+            for mask_group, im_group in zip(ip_masks, ip_images):
+                req_masks = len(im_group) if isinstance(im_group, list) else 1
+                if not isinstance(mask_group, list):
+                    mask_group = [mask_group]
+                num_masks = len(mask_group)
+                mask_group = [
+                    sl_mask if sl_mask is not None else Image.new("RGB", (width, height), (255, 255, 255))
+                    for sl_mask in mask_group
+                ]
 
-                if len(mask) > 1:
-                    masks_ = [masks_.reshape(1, masks_.shape[0], masks_.shape[2], masks_.shape[3])]
+                masks_tensor = processor.preprocess(mask_group, height=height, width=width)
 
-                processed_masks.append(masks_)
+                if num_masks > 1:
+                    if num_masks != req_masks:
+                        raise ValueError(
+                            f"Mask count ({num_masks}) does not match image count ({req_masks}). "
+                            "Ensure each image has a corresponding mask or provide a single mask."
+                        )
+                    masks_tensor = masks_tensor.reshape(1, masks_tensor.shape[0], masks_tensor.shape[2], masks_tensor.shape[3])
+                elif req_masks > 1:
+                    masks_tensor = masks_tensor.repeat(1, req_masks, 1, 1)
+
+                processed_masks.append(masks_tensor)
 
         return image_embeds, processed_masks
 
@@ -2021,11 +2040,15 @@ class Model_Diffusers(PreviewGenerator):
         ip_scales = [float(s) for s in ip_adapter_scale]
         ip_masks = [
             [load_image(mask__) if mask__ else None for mask__ in sublist]
-            if isinstance(sublist, list)
+            if isinstance(sublist, list) and sublist
             else load_image(sublist) if sublist
             else None
             for sublist in ip_adapter_mask
         ]
+        if not ip_masks:
+            ip_masks = [None] * len(ip_adapter_model)
+        if len(ip_masks) < len(ip_adapter_model):
+            ip_masks = ip_masks + [None] * (len(ip_adapter_model) - len(ip_masks))
         ip_images = [
             load_image(ip_img) if not isinstance(ip_img, list)
             else [load_image(img__) for img__ in ip_img]
@@ -2053,7 +2076,7 @@ class Model_Diffusers(PreviewGenerator):
                 self.set_ip_adapter_model(ip_weights)
 
         if self.ip_adapter_config:
-            self.set_ip_adapter_multimode_scale(ip_scales, ip_adapter_mode)
+            self.set_ip_adapter_multimode_scale(ip_scales, ip_adapter_mode, ip_masks)
             self.pipe.to(self.device)
 
         # FreeU
