@@ -16,7 +16,8 @@ def custom_task_model_loader(
     pipe,
     model_category="detailfix",
     task_name="txt2img",
-    torch_dtype=torch.float16
+    torch_dtype=torch.float16,
+    load_text_encoder=False,
 ):
     # Pipe detailfix_pipe
     if model_category == "detailfix":
@@ -25,10 +26,10 @@ def custom_task_model_loader(
             from .extra_pipe.flux.pipeline_flux_inpaint import FluxInpaintPipeline
             return FluxInpaintPipeline(
                 vae=pipe.vae,
-                text_encoder=pipe.text_encoder,
+                text_encoder=(pipe.text_encoder if load_text_encoder else None),
                 tokenizer=pipe.tokenizer,
                 scheduler=pipe.scheduler,
-                text_encoder_2=pipe.text_encoder_2,
+                text_encoder_2=(pipe.text_encoder_2 if load_text_encoder else None),
                 tokenizer_2=pipe.tokenizer_2,
                 transformer=pipe.transformer,
             )
@@ -45,7 +46,7 @@ def custom_task_model_loader(
             )
             detailfix_pipe = StableDiffusionControlNetInpaintPipeline(
                 vae=pipe.vae,
-                text_encoder=pipe.text_encoder,
+                text_encoder=(pipe.text_encoder if load_text_encoder else None),
                 tokenizer=pipe.tokenizer,
                 unet=pipe.unet,
                 controlnet=controlnet_detailfix,
@@ -59,8 +60,8 @@ def custom_task_model_loader(
             # sdxl df
             detailfix_pipe = StableDiffusionXLInpaintPipeline(
                 vae=pipe.vae,
-                text_encoder=pipe.text_encoder,
-                text_encoder_2=pipe.text_encoder_2,
+                text_encoder=(pipe.text_encoder if load_text_encoder else None),
+                text_encoder_2=(pipe.text_encoder_2 if load_text_encoder else None),
                 tokenizer=pipe.tokenizer,
                 tokenizer_2=pipe.tokenizer_2,
                 unet=pipe.unet,
@@ -81,10 +82,10 @@ def custom_task_model_loader(
             from .extra_pipe.flux.pipeline_flux_img2img import FluxImg2ImgPipeline
             return FluxImg2ImgPipeline(
                 vae=pipe.vae,
-                text_encoder=pipe.text_encoder,
+                text_encoder=(pipe.text_encoder if load_text_encoder else None),
                 tokenizer=pipe.tokenizer,
                 scheduler=pipe.scheduler,
-                text_encoder_2=pipe.text_encoder_2,
+                text_encoder_2=(pipe.text_encoder_2 if load_text_encoder else None),
                 tokenizer_2=pipe.tokenizer_2,
                 transformer=pipe.transformer,
             )
@@ -94,7 +95,7 @@ def custom_task_model_loader(
             if not hasattr(pipe, "text_encoder_2"):
                 hires_pipe = StableDiffusionPipeline(
                     vae=pipe.vae,
-                    text_encoder=pipe.text_encoder,
+                    text_encoder=(pipe.text_encoder if load_text_encoder else None),
                     tokenizer=pipe.tokenizer,
                     unet=pipe.unet,
                     scheduler=pipe.scheduler,
@@ -107,8 +108,8 @@ def custom_task_model_loader(
             else:
                 hires_pipe = StableDiffusionXLPipeline(
                     vae=pipe.vae,
-                    text_encoder=pipe.text_encoder,
-                    text_encoder_2=pipe.text_encoder_2,
+                    text_encoder=(pipe.text_encoder if load_text_encoder else None),
+                    text_encoder_2=(pipe.text_encoder_2 if load_text_encoder else None),
                     tokenizer=pipe.tokenizer,
                     tokenizer_2=pipe.tokenizer_2,
                     unet=pipe.unet,

@@ -262,11 +262,31 @@ class Model_Diffusers(PreviewGenerator):
         self.STYLE_NAMES = STYLE_NAMES
         self.style_json_file = ""
 
+    def apply_advanced_params(self):
+        if self.disable_prompt_embeds_cache:
+            self.create_prompt_embeds.memory.clear()
+        if self.disable_image_preprocessor_cache:
+            self.get_image_preprocess.memory.clear()
+
     def advanced_params(
         self,
         image_preprocessor_cuda_active: bool = False,
+        partial_cpu_offload: bool = False,
+        disable_prompt_embeds_cache: bool = False,
+        disable_image_preprocessor_cache: bool = False,
     ):
+        """
+        Configure advanced parameters for the model.
+        Args:
+            image_preprocessor_cuda_active (bool): Whether to use CUDA for the image preprocessor. Default is False.
+            partial_cpu_offload (bool): Whether to partially offload components to CPU. Default is False.
+            disable_prompt_embeds_cache (bool): Whether to disable caching of prompt embeddings. Default is False.
+            disable_image_preprocessor_cache (bool): Whether to disable caching of image preprocessing. Default is False.
+        """
         self.image_preprocessor_cuda_active = image_preprocessor_cuda_active
+        self.partial_cpu_offload = partial_cpu_offload
+        self.disable_prompt_embeds_cache = disable_prompt_embeds_cache
+        self.disable_image_preprocessor_cache = disable_image_preprocessor_cache
 
     def switch_pipe_class(
         self,
@@ -822,6 +842,9 @@ class Model_Diffusers(PreviewGenerator):
             or (self.class_name != class_name)
             or (self.model_id_task != model_id)
         ):
+            if self.ip_adapter_config:
+                self.pipe.unload_ip_adapter()
+                self.ip_adapter_config = None
             self.switch_pipe_class(
                 class_name,
                 task_name,
@@ -975,6 +998,26 @@ class Model_Diffusers(PreviewGenerator):
         else:
             raise ValueError(f"Scheduler with name {name} not found. Valid schedulers: {', '.join(scheduler_names)}")
 
+    def apply_partial_cpu_offload(self, device_obj, vae_device=True):
+        if self.class_name == FLUX:
+            return None
+
+        self.pipe.text_encoder.to(device_obj)
+        if hasattr(self.pipe, "text_encoder_2") and self.pipe.text_encoder_2 is not None:
+            self.pipe.text_encoder_2.to(device_obj)
+        if vae_device:
+            self.pipe.vae.to(device_obj)
+
+        if self.device.type != self.pipe.device.type:
+            origin_device = self.device
+
+            def _execution_device(self):
+                logger.debug(f"patch device is {origin_device}")
+                return origin_device
+
+            self.pipe.__class__._execution_device = property(_execution_device)
+            logger.debug(str(self.pipe._execution_device))
+
     @cachebox(max_cache_size=2)
     def create_prompt_embeds(
         self,
@@ -984,6 +1027,10 @@ class Model_Diffusers(PreviewGenerator):
         clip_skip,
         syntax_weights,
     ):
+
+        if self.partial_cpu_offload:
+            self.apply_partial_cpu_offload(self.device)
+
         if self.embed_loaded != textual_inversion and textual_inversion != []:
             self.prompt_embedder.apply_ti(
                 self.class_name,
@@ -1017,6 +1064,9 @@ class Model_Diffusers(PreviewGenerator):
             clip_skip,
             self.compel if hasattr(self, "compel") else None,
         )
+
+        if self.partial_cpu_offload:
+            self.apply_partial_cpu_offload("cpu", vae_device=True)
 
         return prompt_emb, negative_prompt_emb
 
@@ -1176,6 +1226,9 @@ class Model_Diffusers(PreviewGenerator):
     ):
         do_classifier_free_guidance = guidance_scale > 1
 
+        if self.image_encoder_module is not None and self.partial_cpu_offload:
+            self.image_encoder_module.to(self.device)
+
         if "faceid" not in self.ip_adapter_config[0]:
             with torch.no_grad():
                 image_embeds = self.pipe.prepare_ip_adapter_image_embeds(
@@ -1248,6 +1301,9 @@ class Model_Diffusers(PreviewGenerator):
                         self.pipe.unet.encoder_hid_proj.image_projection_layers[i].shortcut = False
 
                 release_resources()
+
+        if self.image_encoder_module is not None and self.partial_cpu_offload:
+            self.image_encoder_module.to("cpu")
 
             # average_embedding = torch.mean(torch.stack(faceid_all_embeds, dim=0), dim=0)
 
@@ -1393,6 +1449,8 @@ class Model_Diffusers(PreviewGenerator):
             pass
         else:
             self.create_prompt_embeds.memory.clear()
+            if self.partial_cpu_offload:
+                self.apply_partial_cpu_offload(self.device)
 
             logger.debug("_un, re and load_ lora")
 
@@ -1401,6 +1459,9 @@ class Model_Diffusers(PreviewGenerator):
 
             for i, (l_new, scale_new) in enumerate(zip(current_lora_list, current_lora_scale_list)):
                 lora_status[i] = self.process_lora(l_new, scale_new)
+
+            if self.partial_cpu_offload:
+                self.apply_partial_cpu_offload("cpu")
 
         self.lora_memory = current_lora_list
         self.lora_scale_memory = current_lora_scale_list
@@ -1836,6 +1897,8 @@ class Model_Diffusers(PreviewGenerator):
 
         """
 
+        self.apply_advanced_params()
+
         if not seed:
             seed = -1
         if self.task_name == "":
@@ -1955,7 +2018,10 @@ class Model_Diffusers(PreviewGenerator):
             self.pipe.disable_xformers_memory_efficient_attention()
 
         if self.class_name != FLUX:
-            self.pipe.to(self.device)
+            if self.partial_cpu_offload:
+                self.apply_partial_cpu_offload("cpu", vae_device=True)
+            else:
+                self.pipe.to(self.device)
         else:
             self.pipe.text_encoder.to(self.device)
             self.pipe.text_encoder_2.to(self.device)
@@ -2077,7 +2143,8 @@ class Model_Diffusers(PreviewGenerator):
 
         if self.ip_adapter_config:
             self.set_ip_adapter_multimode_scale(ip_scales, ip_adapter_mode, ip_masks)
-            self.pipe.to(self.device)
+            if not self.partial_cpu_offload:
+                self.pipe.to(self.device)
 
         # FreeU
         if FreeU and self.class_name != FLUX:
@@ -2155,6 +2222,8 @@ class Model_Diffusers(PreviewGenerator):
                 tile_blur_sigma=tile_blur_sigma,
                 tsk_name=self.task_name,
             )
+            if self.partial_cpu_offload and self.image_preprocessor_cuda_active:
+                self.preprocessor.to("cpu")
 
         # Task Parameters
         pipe_params_config = {
@@ -2776,6 +2845,10 @@ class Model_Diffusers(PreviewGenerator):
 
         # === RUN PIPE === #
         handle_task = self.start_work if not image_previews else self.start_stream
+
+        if self.partial_cpu_offload:
+            self.apply_partial_cpu_offload("cpu")
+            self.pipe.vae.to(self.device)
 
         return handle_task(
             control_image,
