@@ -6,7 +6,7 @@ The goal of this project is to make Stable Diffusion more accessible, simple and
 
 **Installation:**
 ```
-pip install stablepy==0.6.3
+pip install stablepy==0.6.4
 ```
 
 **Usage:**
@@ -93,6 +93,9 @@ images[1]
 **Parameters Model_Diffusers.advanced_params:**
 
 - `image_preprocessor_cuda_active` (bool, defaults to False): Enables CUDA for the image preprocessor when needed. This can help speed up the process for ControlNet tasks.
+- `partial_cpu_offload` (bool, defaults to False): Partially offload components to CPU.
+- `disable_prompt_embeds_cache` (bool, defaults to False): Disable caching of prompt embeddings.
+- `disable_image_preprocessor_cache` (bool, defaults to False): Disable caching of image preprocessing.
 
 **Parameters generation:**
 
@@ -242,6 +245,13 @@ images[1]
 - `**kwargs` (dict, optional): kwargs is used to pass additional parameters to the Diffusers pipeline. This allows for flexibility when specifying optional settings like guidance_rescale, eta, cross_attention_kwargs, and more.
 
 **📖 New Update Details:**
+
+🔥 **Version 0.6.4:**
+
+- Text encoders, VAE, and image encoder are offloaded to the CPU if `partial_cpu_offload` is activated.
+- Multiple masks per IP Adapter model are now supported.
+- New IP Adapter models added.
+- Fixed a bug in CLIPTextModel.
 
 🔥 **Version 0.6.3:**
 
