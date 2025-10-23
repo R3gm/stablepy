@@ -241,6 +241,7 @@ class Model_Diffusers(PreviewGenerator):
         self.image_encoder_name = None
         self.image_encoder_module = None
         self.ip_adapter_config = None
+        self.clip_post_process = None
 
         self.last_lora_error = ""
         self.num_loras = 7
@@ -296,6 +297,11 @@ class Model_Diffusers(PreviewGenerator):
         enable_pag,
         verbose_info=False,
     ):
+        if self.ip_adapter_config:
+            self.pipe.unload_ip_adapter()
+            self.ip_adapter_config = None
+            self.clip_post_process = None
+            release_resources()
 
         if hasattr(self.pipe, "set_pag_applied_layers"):
             if not hasattr(self.pipe, "text_encoder_2"):
@@ -566,6 +572,7 @@ class Model_Diffusers(PreviewGenerator):
             if self.ip_adapter_config:
                 self.pipe.unload_ip_adapter()
                 self.ip_adapter_config = None
+                self.clip_post_process = None
             release_resources()
 
             if hasattr(self, "pipe") and self.pipe is not None:
@@ -842,9 +849,6 @@ class Model_Diffusers(PreviewGenerator):
             or (self.class_name != class_name)
             or (self.model_id_task != model_id)
         ):
-            if self.ip_adapter_config:
-                self.pipe.unload_ip_adapter()
-                self.ip_adapter_config = None
             self.switch_pipe_class(
                 class_name,
                 task_name,
@@ -1225,6 +1229,7 @@ class Model_Diffusers(PreviewGenerator):
             self, guidance_scale, ip_images, num_images, ip_masks=None
     ):
         do_classifier_free_guidance = guidance_scale > 1
+        clip_post_process = []
 
         if self.image_encoder_module is not None and self.partial_cpu_offload:
             self.image_encoder_module.to(self.device)
@@ -1294,11 +1299,35 @@ class Model_Diffusers(PreviewGenerator):
 
                     release_resources()
 
+                    post_process_embed = clip_embeds
+                    if num_images > 1:
+                        if do_classifier_free_guidance:
+                            negative_embeds_batch, positive_embeds_batch = post_process_embed.chunk(2)
+                            single_negative_embed = negative_embeds_batch[0]
+                            single_positive_embed = positive_embeds_batch[0]
+                            post_process_embed = torch.stack([single_negative_embed, single_positive_embed])
+                        else:
+                            single_positive_embed = post_process_embed[0]
+                            post_process_embed = single_positive_embed.unsqueeze(0)
+
+                    if hasattr(self.pipe, "set_pag_applied_layers"):
+                        if do_classifier_free_guidance:
+                            negative_clip_embeds, clip_embeds = clip_embeds.chunk(2)
+                            clip_embeds = torch.cat([negative_clip_embeds, clip_embeds, clip_embeds], dim=0)
+                        else:
+                            clip_embeds = torch.cat([clip_embeds] * 2, dim=0)
+
+                    if not do_classifier_free_guidance:
+                        post_process_embed = torch.cat([post_process_embed] * 2, dim=0)
+                        clip_embeds = torch.cat([clip_embeds] * 2, dim=0)
+
                     self.pipe.unet.encoder_hid_proj.image_projection_layers[i].clip_embeds = clip_embeds.to(dtype=self.type_model_precision)
                     if "plusv2" in ip_weight:
                         self.pipe.unet.encoder_hid_proj.image_projection_layers[i].shortcut = True
                     else:
                         self.pipe.unet.encoder_hid_proj.image_projection_layers[i].shortcut = False
+
+                    clip_post_process.append((i, post_process_embed, clip_embeds))
 
                 release_resources()
 
@@ -1338,6 +1367,7 @@ class Model_Diffusers(PreviewGenerator):
 
                 processed_masks.append(masks_tensor)
 
+        self.clip_post_process = clip_post_process
         return image_embeds, processed_masks
 
     def load_lora_on_the_fly(
@@ -2130,6 +2160,7 @@ class Model_Diffusers(PreviewGenerator):
             logger.debug("IP adapter unload all")
             self.pipe.unload_ip_adapter()
             self.ip_adapter_config = None
+            self.clip_post_process = None
         elif self.ip_adapter_config is not None:
             if self.ip_adapter_config == [data[2] for data in ip_weights]:
                 logger.info("IP adapter")
@@ -2138,6 +2169,7 @@ class Model_Diffusers(PreviewGenerator):
                 logger.debug("IP adapter reload all")
                 self.pipe.unload_ip_adapter()
                 self.ip_adapter_config = None
+                self.clip_post_process = None
                 logger.info("Loading IP adapter")
                 self.set_ip_adapter_model(ip_weights)
 
@@ -2847,7 +2879,7 @@ class Model_Diffusers(PreviewGenerator):
         handle_task = self.start_work if not image_previews else self.start_stream
 
         if self.partial_cpu_offload:
-            self.apply_partial_cpu_offload("cpu")
+            # self.apply_partial_cpu_offload("cpu")
             self.pipe.vae.to(self.device)
 
         return handle_task(
@@ -2894,6 +2926,10 @@ class Model_Diffusers(PreviewGenerator):
                     images = self.pipe.image_processor.postprocess(image, output_type="pil")
                     if not os.getenv("SPACES_ZERO_GPU"):
                         self.pipe.vae.to("cpu")
+
+        if self.ip_adapter_config and self.clip_post_process:
+            for layer_ip, post_layer_clip, _ in self.clip_post_process:
+                self.pipe.unet.encoder_hid_proj.image_projection_layers[layer_ip].clip_embeds = post_layer_clip.to(dtype=self.type_model_precision)
 
         if isinstance(images, torch.Tensor):
             images = [tl.unsqueeze(0) for tl in torch.unbind(images, dim=0)]
@@ -3050,6 +3086,10 @@ class Model_Diffusers(PreviewGenerator):
                 pipe_params_config["output_type"] = "latent"
                 # self.pipe.__class__._execution_device = property(_execution_device)
 
+            if i > 0 and self.ip_adapter_config and self.clip_post_process:
+                for layer_ip, _, layer_clip in self.clip_post_process:
+                    self.pipe.unet.encoder_hid_proj.image_projection_layers[layer_ip].clip_embeds = layer_clip.to(dtype=self.type_model_precision)
+
             validate_and_update_params(self.pipe.__class__, kwargs, pipe_params_config)
 
             try:
@@ -3119,6 +3159,10 @@ class Model_Diffusers(PreviewGenerator):
                 pipe_params_config["output_type"] = "latent"
                 # self.pipe.__class__._execution_device = property(_execution_device)
                 self.metadata = pp.metadata
+
+            if i > 0 and self.ip_adapter_config and self.clip_post_process:
+                for layer_ip, _, layer_clip in self.clip_post_process:
+                    self.pipe.unet.encoder_hid_proj.image_projection_layers[layer_ip].clip_embeds = layer_clip.to(dtype=self.type_model_precision)
 
             validate_and_update_params(self.pipe.__class__, kwargs, pipe_params_config)
 
