@@ -6,7 +6,7 @@ The goal of this project is to make Stable Diffusion more accessible, simple and
 
 **Installation:**
 ```
-pip install stablepy==0.6.4
+pip install stablepy==0.6.5
 ```
 
 **Usage:**
@@ -245,6 +245,10 @@ images[1]
 - `**kwargs` (dict, optional): kwargs is used to pass additional parameters to the Diffusers pipeline. This allows for flexibility when specifying optional settings like guidance_rescale, eta, cross_attention_kwargs, and more.
 
 **📖 New Update Details:**
+
+🔥 **Version 0.6.5:**
+
+- Fix FaceID Plus issue with PAG > 0.
 
 🔥 **Version 0.6.4:**
 
